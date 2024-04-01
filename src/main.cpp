@@ -13,7 +13,7 @@
 // how many to display
 #define DISPLAY_ROWS 10
 #define DISPLAY_COLS 4
-#define CELL_WIDTH 6
+#define CELL_WIDTH 7
 #define CELL_HEIGHT 3
 
 #define SEL_COLOR_PAIR 1
@@ -77,8 +77,11 @@ void initGrid(std::vector<std::vector<int>>& grid, int rows, int cols) {
 }
 
 void drawControlPanel(WINDOW* win){
-    wmove(win, 1, 1);
+    // wmove(win, 1, 1);
+    werase(win);
     wprintw(win, "[Button 1]  [Button 2]  [Button 3]");
+    wrefresh(win);
+    
 }
 
 void drawTable(WINDOW* win, const std::vector<std::vector<int>>& grid, 
@@ -87,7 +90,7 @@ void drawTable(WINDOW* win, const std::vector<std::vector<int>>& grid,
                 int displayRows, int displayCols,  
                 int totalRows, int totalCols){
     std::lock_guard<std::mutex> lock(drawTableMutex);
-    //erase(); // Clear the screen
+    werase(win); // Clear the screen
     // wmove(win, 1, 1);
     // box(win, 0, 0); // Draw a box around the edges of the window
 
@@ -106,9 +109,8 @@ void drawTable(WINDOW* win, const std::vector<std::vector<int>>& grid,
             drawCell(win, v , x, y, CELL_WIDTH-1, state);
         }
     }
-    //refresh();
-    update_panels();
-    doupdate();
+    wrefresh(win);
+
 }
 
 void drawCell(WINDOW* win, std::string value, int x, int y, int cellWidth, CellState state) {
@@ -116,20 +118,6 @@ void drawCell(WINDOW* win, std::string value, int x, int y, int cellWidth, CellS
     if (state == CellState::Editing) wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
     else if (state == CellState::Playing) wattron(win, COLOR_PAIR(PLAY_COLOR_PAIR));
     else if (state == CellState::NotSelected) wattron(win, COLOR_PAIR(SEL_COLOR_PAIR));
-
-    // // Draw box for the cell
-    // mvaddch(y, x, ACS_ULCORNER);
-    // mvhline(y, x + 1, ACS_HLINE, cellWidth);
-    // mvaddch(y, x + cellWidth, ACS_URCORNER);
-    // mvvline(y + 1, x, ACS_VLINE, 1);
-    // mvvline(y + 1, x + cellWidth, ACS_VLINE, 1);
-    // mvaddch(y +> 2, x, ACS_LLCORNER);
-    // mvhline(y + 2, x + 1, ACS_HLINE, cellWidth);
-    // mvaddch(y + 2, x + cellWidth, ACS_LRCORNER);
-
-    // // Print value in the center of the box
-    // // mvprintw(y + 1, x + 1, "%d", value);
-    // mvprintw(y + 1, x + 1, "%s", value.c_str());
 
     // Draw box for the cell
     mvwaddch(win, y, x, ACS_ULCORNER);
@@ -162,6 +150,7 @@ int main() {
     cbreak();
     noecho();
     keypad(stdscr, TRUE); // Enable keyboard mapping
+    curs_set(0); // Hide the cursor
 
     // Initialize colors
     init_pair(SEL_COLOR_PAIR, COLOR_WHITE, COLOR_BLACK); // Foreground color pair
@@ -171,8 +160,12 @@ int main() {
     // set up the panels
     WINDOW* seqWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, DISPLAY_COLS*CELL_WIDTH, 1, 1);
     PANEL* seqPanel = new_panel(seqWin);
-    WINDOW* buttonWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, CELL_WIDTH * 2, 1, DISPLAY_COLS*CELL_WIDTH + 1);
+    WINDOW* buttonWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, CELL_WIDTH * 4, 1, DISPLAY_COLS*CELL_WIDTH + 1 );
     PANEL* buttonPanel = new_panel(buttonWin);
+
+ 
+    update_panels();
+    doupdate();
 
     // wprintw(scrollWin, "Scrollable content here.\\ \\ \\ Use arrow keys to scroll.");
     // wmove(buttonWin, 1, 1);
@@ -210,18 +203,26 @@ int main() {
                 }
                 break;
             case KEY_UP:
+                if (!seqFocus) break;
+
                 if (cursorRow > 0) cursorRow--;
                 else if (startRow > 0) startRow--;
                 break;
             case KEY_DOWN:
+                if (!seqFocus) break;
+                
                 if (cursorRow < min(DISPLAY_ROWS, totalGridRows - startRow) - 1) cursorRow++;
                 else if (startRow < totalGridRows - DISPLAY_ROWS) startRow++;
                 break;
             case KEY_LEFT:
+                if (!seqFocus) break;
+                
                 if (cursorCol > 0) cursorCol--;
                 else if (startCol > 0) startCol--;
                 break;
             case KEY_RIGHT:
+                if (!seqFocus) break;
+                
                 if (cursorCol < min(DISPLAY_COLS, totalGridCols - startCol) - 1) cursorCol++;
                 else if (startCol < totalGridCols - DISPLAY_COLS) startCol++;
                 break;
@@ -231,11 +232,14 @@ int main() {
                 }
                 break;
         }
-        
+
         drawTable(seqWin, grid, startRow, startCol, 
               cursorRow, cursorCol, 
               DISPLAY_ROWS, DISPLAY_COLS, 
               totalGridRows, totalGridCols);
+        update_panels();
+        doupdate();
+    
 
     }
 
