@@ -13,7 +13,7 @@ find_package(Curses REQUIRED)
 # Include the ncurses headers
 include_directories(${CURSES_INCLUDE_DIR})
 
-add_executable(MykTracker src/main.cpp)
+add_executable(MykTracker src/gui.cpp src/main.cpp)
 
 # Link the ncurses library with your executable
 target_link_libraries(${PROJECT_NAME} ${CURSES_LIBRARIES} panel)
