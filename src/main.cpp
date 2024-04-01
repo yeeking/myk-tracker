@@ -7,6 +7,8 @@
 
 std::atomic<int> playbackPosition(0);
 std::vector<std::vector<int>> grid;
+// Main loop
+GUI gui;
 
 void initGrid(std::vector<std::vector<int>>& grid, int rows, int cols);
 
@@ -21,33 +23,20 @@ void initGrid(std::vector<std::vector<int>>& grid, int rows, int cols) {
     }
 }
 
-
-void playbackThreadFunction(WINDOW* win, int maxPosition) {
+void playbackThreadFunction(int maxPosition) {
     while (true) { // Add a condition for a graceful shutdown if needed
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         int newPosition = (playbackPosition + 1) % maxPosition;
         playbackPosition.store(newPosition);
-        // Assuming drawTable() can be safely called from this thread;
-        // if not, you'll need to implement a thread-safe way to trigger drawing from the main thread.
-        // drawTable(); 
-        // printf("tick %i", playbackPosition.load());
-
-        // drawTable(win, grid, startRow, startCol, 
-        //       cursorRow, cursorCol, 
-        //       DISPLAY_ROWS, DISPLAY_COLS, 
-        //       totalGridRows, totalGridCols);
+        gui.draw(grid, playbackPosition);
     }
 }
 
-
-
 int main() {
 
-
-    // Main loop
-    GUI gui;
     initGrid(grid, 20, 10);
-
+    std::thread playbackThread(playbackThreadFunction, grid.size());
+    
     int ch;
 
     while ((ch = getch()) != 'q') {
@@ -55,6 +44,6 @@ int main() {
         gui.draw(grid, playbackPosition);
     }
 
-    // playbackThread.join(); // Ensure the playback thread has fini
+    playbackThread.join(); // Ensure the playback thread has fini
     return 0;
 }
