@@ -17,7 +17,7 @@ void GridWidget::addGridListener(GridListener* listener)
     this->listener = listener; 
 }
 
-void GridWidget::draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vector<std::pair<int, int>> highlightCells)
+void GridWidget::draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
 {
     // std::lock_guard<std::mutex> lock(drawMutex);
     werase(win); // Clear the screen
@@ -39,8 +39,8 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vec
         // if (cursorCol >= data[row].size()) cursorRow = data[row].size()-1;
         for (int col = displayStartCol;col < maxCol; ++col){
             // Calculate position
-            int x = (col - displayStartCol) * CELL_WIDTH;
-            int y = (row - displayStartRow) * CELL_HEIGHT;
+            int x = (col - displayStartCol) * cellWidth;
+            int y = (row - displayStartRow) * cellHeight;
             // Determine if the current cell is selected
             CellState state{CellState::NotSelected};
             //  =  i == cursorRow && j == cursorCol ? CellState::Editing : CellState::NotSelected;
@@ -50,7 +50,7 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vec
             
             // Draw the cell
             std::string v = std::to_string(data[row][col]);
-            drawCell(win, v , x, y, CELL_WIDTH-1, state);
+            drawCell(win, v , x, y, cellWidth-1, state);
         }
     }
     wrefresh(win);
@@ -224,13 +224,7 @@ void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
 
 void GUI::draw(std::vector<std::vector<int>>& grid, int playbackPos)
 {
-    // drawTable(seqWin, grid, startRow, startCol, 
-    //     cursorRow, cursorCol, playbackPos, 
-    //     DISPLAY_ROWS, DISPLAY_COLS, 
-    //     totalGridRows, totalGridCols);
-    // drawControlPanel(buttonWin);
-
-    seqGrid.draw(seqWin, grid, std::vector<std::pair<int, int>>());   
+    seqGrid.draw(seqWin, grid, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
     update_panels();
     doupdate();
 }

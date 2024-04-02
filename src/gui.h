@@ -50,7 +50,7 @@ class GridWidget{
         /** draw the sent data as a grid. Does not show the whole grid, only from startCol/row to endCol/row
          * also highlight all cells in the highlight vector
         */
-        void draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vector<std::pair<int, int>> highlightCells);
+        void draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vector<std::pair<int, int>> highlightCells, int colWidth, int colHeight);
         void cursorLeft();
         void cursorRight();
         void cursorUp();
