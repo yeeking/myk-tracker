@@ -8,7 +8,7 @@
 std::atomic<int> playbackPosition(0);
 std::vector<std::vector<int>> grid;
 // Main loop
-GUI gui;
+GUI gui{3, 3};
 
 void initGrid(std::vector<std::vector<int>>& grid, int rows, int cols);
 
@@ -17,8 +17,7 @@ void initGrid(std::vector<std::vector<int>>& grid, int rows, int cols) {
     for (int row = 0; row < rows; row++) {
         if (grid[row].size() != cols) grid[row].resize(cols);
         for (int col = 0; col < cols; col++) {
-            grid[row][col] = (row + col) % 10; // Example initialization
-            // grid[i][j] += 100;
+            grid[row][col] = col; 
         }
     }
 }
