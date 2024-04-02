@@ -1,4 +1,86 @@
 #include "gui.h"
+#include <cassert> 
+
+
+GridWidget::GridWidget()
+{
+
+}
+
+GridWidget::~GridWidget()
+{
+
+}
+void GridWidget::addGridListener(GridListener* listener)
+{
+    this->listener = listener; 
+}
+
+void GridWidget::draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vector<std::pair<int, int>> highlightCells, int startRow, int startCol, int endRow, int endCol)
+{
+    // std::lock_guard<std::mutex> lock(drawMutex);
+
+    // work out ranges etc. 
+    int displayRows = endRow - startRow;
+    int displayCols = endCol - startCol;
+    int totalRows = data.size();
+    int totalCols = data[0].size();// assume all cols the same length 
+    
+    // check validity of values
+    assert(endRow > startRow);
+    assert(endCol > startCol);
+    assert(endRow < data.size());
+    assert(startRow < data.size());
+    assert(endCol < data[0].size());
+    assert(startCol < data[0].size());
+        
+    werase(win); // Clear the screen
+    // wmove(win, 1, 1);
+    // box(win, 0, 0); // Draw a box around the edges of the window
+    
+    for (int i = 0; i < GUIUtils::min(displayRows, totalRows - startRow); i++) {
+        for (int j = 0; j < GUIUtils::min(displayCols, totalCols - startCol); j++) {
+            // Calculate position
+            int x = j * CELL_WIDTH, y = i * CELL_HEIGHT;
+            // Determine if the current cell is selected
+            CellState state{CellState::NotSelected};
+            //  =  i == cursorRow && j == cursorCol ? CellState::Editing : CellState::NotSelected;
+            // if (i == playbackPosition){state = CellState::Playing;}
+            if (i == cursorRow && j == cursorCol){state = CellState::Editing;}
+            
+            // Draw the cell
+            std::string v = std::to_string(data[startRow + i][startCol + j]);
+            drawCell(win, v , x, y, CELL_WIDTH-1, state);
+        }
+    }
+    wrefresh(win);
+
+}
+
+
+void GridWidget::drawCell(WINDOW* win, std::string value, int x, int y, int cellWidth, CellState state) {
+    // Set color based on selection
+    if (state == CellState::Editing) wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
+    else if (state == CellState::Playing) wattron(win, COLOR_PAIR(PLAY_COLOR_PAIR));
+    else if (state == CellState::NotSelected) wattron(win, COLOR_PAIR(SEL_COLOR_PAIR));
+
+    // Draw box for the cell
+    mvwaddch(win, y, x, ACS_ULCORNER);
+    mvwhline(win, y, x + 1, ACS_HLINE, cellWidth);
+    mvwaddch(win, y, x + cellWidth, ACS_URCORNER);
+    mvwvline(win, y + 1, x, ACS_VLINE, 1);
+    mvwvline(win, y + 1, x + cellWidth, ACS_VLINE, 1);
+    mvwaddch(win, y + 2, x, ACS_LLCORNER);
+    mvwhline(win, y + 2, x + 1, ACS_HLINE, cellWidth);
+    mvwaddch(win, y + 2, x + cellWidth, ACS_LRCORNER);
+
+    // Print value in the center of the box
+    mvwprintw(win, y + 1, x + 2, "%s", value.c_str()); 
+
+    // Reset color
+    attroff(COLOR_PAIR(SEL_COLOR_PAIR));
+    attroff(COLOR_PAIR(NOSEL_COLOR_PAIR));
+}
 
 GUI::GUI() 
 {
@@ -44,6 +126,7 @@ void GUI::initGUI()
     buttonWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, CELL_WIDTH * 4, 1, DISPLAY_COLS*CELL_WIDTH + 1 );
     buttonPanel = new_panel(buttonWin);
 
+    // seqGrid = GridWidget();
 
     update_panels();
     doupdate();
@@ -67,8 +150,8 @@ void GUI::drawTable(WINDOW* win, const std::vector<std::vector<int>>& grid,
     // wmove(win, 1, 1);
     // box(win, 0, 0); // Draw a box around the edges of the window
 
-    for (int i = 0; i < min(displayRows, totalRows - startRow); i++) {
-        for (int j = 0; j < min(displayCols, totalCols - startCol); j++) {
+    for (int i = 0; i < GUIUtils::min(displayRows, totalRows - startRow); i++) {
+        for (int j = 0; j < GUIUtils::min(displayCols, totalCols - startCol); j++) {
             // Calculate position
             int x = j * CELL_WIDTH, y = i * CELL_HEIGHT;
             // Determine if the current cell is selected
@@ -135,7 +218,7 @@ void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
         case KEY_DOWN:
             if (!seqFocus) break;
             
-            if (cursorRow < min(DISPLAY_ROWS, totalGridRows - startRow) - 1) cursorRow++;
+            if (cursorRow < GUIUtils::min(DISPLAY_ROWS, totalGridRows - startRow) - 1) cursorRow++;
             else if (startRow < totalGridRows - DISPLAY_ROWS) startRow++;
             break;
         case KEY_LEFT:
@@ -147,7 +230,7 @@ void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
         case KEY_RIGHT:
             if (!seqFocus) break;
             
-            if (cursorCol < min(DISPLAY_COLS, totalGridCols - startCol) - 1) cursorCol++;
+            if (cursorCol < GUIUtils::min(DISPLAY_COLS, totalGridCols - startCol) - 1) cursorCol++;
             else if (startCol < totalGridCols - DISPLAY_COLS) startCol++;
             break;
         default:
@@ -160,12 +243,13 @@ void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
 
 void GUI::draw(std::vector<std::vector<int>>& grid, int playbackPos)
 {
-    drawTable(seqWin, grid, startRow, startCol, 
-        cursorRow, cursorCol, playbackPos, 
-        DISPLAY_ROWS, DISPLAY_COLS, 
-        totalGridRows, totalGridCols);
-    drawControlPanel(buttonWin);
+    // drawTable(seqWin, grid, startRow, startCol, 
+    //     cursorRow, cursorCol, playbackPos, 
+    //     DISPLAY_ROWS, DISPLAY_COLS, 
+    //     totalGridRows, totalGridCols);
+    // drawControlPanel(buttonWin);
 
+    seqGrid.draw(seqWin, grid, std::vector<std::pair<int, int>>(), 0, 0, 5, 5);   
     update_panels();
     doupdate();
 }

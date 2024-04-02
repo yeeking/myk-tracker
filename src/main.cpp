@@ -35,15 +35,16 @@ void playbackThreadFunction(int maxPosition) {
 int main() {
 
     initGrid(grid, 20, 10);
-    std::thread playbackThread(playbackThreadFunction, grid.size());
+    // std::thread playbackThread(playbackThreadFunction, grid.size());
     
     int ch;
 
     while ((ch = getch()) != 'q') {
         gui.keyPressed(ch, grid);
+        
         gui.draw(grid, playbackPosition);
     }
 
-    playbackThread.join(); // Ensure the playback thread has fini
+    // playbackThread.join(); // Ensure the playback thread has fini
     return 0;
 }

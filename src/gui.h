@@ -11,8 +11,8 @@
 #define START_ROWS 20
 #define START_COLS 10
 // how many to display
-#define DISPLAY_ROWS 10
-#define DISPLAY_COLS 4
+#define DISPLAY_ROWS 5
+#define DISPLAY_COLS 3
 #define CELL_WIDTH 7
 #define CELL_HEIGHT 3
 
@@ -24,6 +24,45 @@ enum class CellState {
     NotSelected,
     Editing,
     Playing
+};
+
+class GridListener{
+    public:
+        GridListener();
+        /** override this to receive events when a grid cell is entered*/
+        virtual void cellEntered(int row, int col) = 0;
+
+};
+
+struct GUIUtils{
+    static int min(int a, int b) {return a < b ? a : b;}
+};
+
+/**
+ * represents a grid that you can move the cursor around. Does not store 
+ * data
+*/
+class GridWidget{
+    public:
+        GridWidget();
+        ~GridWidget();
+        /** draw the sent data as a grid. Does not show the whole grid, only from startCol/row to endCol/row
+         * also highlight all cells in the highlight vector
+        */
+        void draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vector<std::pair<int, int>> highlightCells, int startRow, int startCol, int endRow, int endCol);
+        void cursorLeft();
+        void cursorRight();
+        void cursorUp();
+        void cursorDown();
+        /** register for grid moving events*/
+        void addGridListener(GridListener* listener);
+
+    private:
+        void drawCell(WINDOW* win, std::string value, int x, int y, int cellWidth, CellState state);
+        GridListener* listener; 
+        int cursorRow;
+        int cursorCol;
+
 };
 
 class GUI {
@@ -52,7 +91,10 @@ class GUI {
         PANEL* buttonPanel;//  
 
 
+        GridWidget seqGrid;
+
         std::mutex drawTableMutex;
+
         int totalGridRows;// = START_ROWS; // Total rows in grid
         int totalGridCols;// = START_COLS; // Total cols in grid
         // std::vector<std::vector<int>> grid;//(totalGridRows, std::vector<int>(totalGridCols));
