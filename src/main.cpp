@@ -33,6 +33,7 @@ void playbackThreadFunction(int maxPosition) {
 
 int main() {
 
+    
     initGrid(grid, 20, 10);
     // std::thread playbackThread(playbackThreadFunction, grid.size());
     

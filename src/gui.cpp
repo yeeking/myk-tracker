@@ -2,6 +2,10 @@
 #include <cassert> 
 #include <iostream>
 
+GridWidget::GridWidget()
+{
+
+}
 
 GridWidget::GridWidget(int displayHeightInRows, int displayWidthInCols) : displayHeightInRows{displayHeightInRows}, displayWidthInCols{displayWidthInCols}, cursorRow{0}, cursorCol{0}
 {
@@ -116,7 +120,6 @@ void GridWidget::cursorDown()
 }
 
 
-
 GUI::GUI(int heightInRows, int widthInCols)  : seqGrid{heightInRows, widthInCols}
 {
 
@@ -149,7 +152,6 @@ void GUI::initGUI()
     init_pair(SEL_COLOR_PAIR, COLOR_WHITE, COLOR_BLACK); // Foreground color pair
     init_pair(NOSEL_COLOR_PAIR, COLOR_BLACK, COLOR_WHITE); // Background color pair
     init_pair(PLAY_COLOR_PAIR, COLOR_BLUE, COLOR_RED); // Background color pair
-
 
     seqWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, DISPLAY_COLS*CELL_WIDTH, 1, 1);
     seqPanel = new_panel(seqWin);
@@ -188,31 +190,18 @@ void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
         case KEY_UP:
             if (!seqFocus) break;
             activeGrid->cursorUp();
-
-
-            // if (cursorRow > 0) cursorRow--;
-            // else if (startRow > 0) startRow--;
             break;
         case KEY_DOWN:
             if (!seqFocus) break;
             activeGrid->cursorDown();
-
-            // if (cursorRow < GUIUtils::min(DISPLAY_ROWS, totalGridRows - startRow) - 1) cursorRow++;
-            // else if (startRow < totalGridRows - DISPLAY_ROWS) startRow++;
             break;
         case KEY_LEFT:
             if (!seqFocus) break;
             activeGrid->cursorLeft();
-
-            // if (cursorCol > 0) cursorCol--;
-            // else if (startCol > 0) startCol--;
             break;
         case KEY_RIGHT:
             if (!seqFocus) break;
             activeGrid->cursorRight();
-
-            // if (cursorCol < GUIUtils::min(DISPLAY_COLS, totalGridCols - startCol) - 1) cursorCol++;
-            // else if (startCol < totalGridCols - DISPLAY_COLS) startCol++;
             break;
         default:
             // if (ch >= '0' && ch <= '9') { // Edit the current cell
@@ -222,9 +211,9 @@ void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
     }
 }
 
-void GUI::draw(std::vector<std::vector<int>>& grid, int playbackPos)
+void GUI::draw(std::vector<std::vector<int>>& seqData, int playbackPos)
 {
-    seqGrid.draw(seqWin, grid, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
+    seqGrid.draw(seqWin, seqData, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
     update_panels();
     doupdate();
 }

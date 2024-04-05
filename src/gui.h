@@ -20,6 +20,12 @@
 #define NOSEL_COLOR_PAIR 2
 #define PLAY_COLOR_PAIR 3
 
+enum class GUIState{
+    SeqView, 
+    StepView,
+    TrackConfig
+};
+
 enum class CellState {
     NotSelected,
     Editing,
@@ -44,6 +50,7 @@ struct GUIUtils{
 */
 class GridWidget{
     public:
+        GridWidget();
     /** create a grid which displays the sent amount of columns and rows. It can draw a bigger data structure than this but this limits what it actually displays*/
         GridWidget(int displayRows, int displayCols);
         ~GridWidget();
@@ -85,14 +92,23 @@ class GUI {
 
         int min(int a, int b);
 
-        WINDOW* seqWin;// 
-        PANEL* seqPanel;// 
-        WINDOW* buttonWin;//
-        PANEL* buttonPanel;//  
+        // ncurses bits 
+        WINDOW* seqWin;
+        PANEL* seqPanel;
+        WINDOW* buttonWin;
+        PANEL* buttonPanel; 
         
+        /** pointer to currently active grid*/
         GridWidget* activeGrid;
 
+        /** grid widget for the sequencer */
         GridWidget seqGrid;
+        /** grid widget for sequencer track controls*/
+        GridWidget trackControlGrid;
+        
+        /** grid widget for editing steps */
+        GridWidget stepGrid; 
+
 
         std::mutex drawTableMutex;
         bool seqFocus; 
