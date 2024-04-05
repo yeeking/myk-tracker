@@ -4,20 +4,21 @@
 #include <vector>
 #include <ncurses.h>
 #include "gui.h"
+#include "Sequencer.h"
 
 std::atomic<int> playbackPosition(0);
-std::vector<std::vector<int>> grid;
+std::vector<std::vector<std::string>> grid;
 // Main loop
 GUI gui{3, 3};
 
-void initGrid(std::vector<std::vector<int>>& grid, int rows, int cols);
+void initGrid(std::vector<std::vector<std::string>>& grid, int rows, int cols);
 
-void initGrid(std::vector<std::vector<int>>& grid, int rows, int cols) {
+void initGrid(std::vector<std::vector<std::string>>& grid, int rows, int cols) {
     grid.resize(rows);
     for (int row = 0; row < rows; row++) {
         if (grid[row].size() != cols) grid[row].resize(cols);
         for (int col = 0; col < cols; col++) {
-            grid[row][col] = col; 
+            grid[row][col] = std::to_string(col); 
         }
     }
 }
@@ -32,16 +33,16 @@ void playbackThreadFunction(int maxPosition) {
 }
 
 int main() {
-
+    Sequencer sequencer{10, 10};
     
-    initGrid(grid, 20, 10);
+    initGrid(grid, 10, 10);
     // std::thread playbackThread(playbackThreadFunction, grid.size());
     
     int ch;
 
     while ((ch = getch()) != 'q') {
-        gui.keyPressed(ch, grid);
-        
+        gui.keyPressed(ch);
+        sequencer.prepareGridView(grid);
         gui.draw(grid, playbackPosition);
     }
 

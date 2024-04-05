@@ -19,7 +19,7 @@ include_directories(${CURSES_INCLUDE_DIR})
 # build the chord utils
 # add_library(chordutil-lib src/ChordUtils.cpp)
 # build the sequencer library
-# add_library(seq-lib src/Sequencer.cpp)
+add_library(seq-lib src/Sequencer.cpp src/SequencerUtils.cpp)
 # build the midi utils
 # add_library(midi-lib src/MidiUtils.cpp)
 
@@ -27,5 +27,5 @@ add_executable(MykTracker src/gui.cpp src/main.cpp)
 add_executable(CurTest src/gui.cpp src/curtest.cpp)
 
 # Link the ncurses library with your executable
-target_link_libraries(${PROJECT_NAME} ${CURSES_LIBRARIES} panel)
+target_link_libraries(${PROJECT_NAME} seq-lib ${CURSES_LIBRARIES} panel)
 target_link_libraries(CurTest ${CURSES_LIBRARIES} panel)

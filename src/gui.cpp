@@ -21,7 +21,7 @@ void GridWidget::addGridListener(GridListener* listener)
     this->listener = listener; 
 }
 
-void GridWidget::draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
+void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
 {
     // std::lock_guard<std::mutex> lock(drawMutex);
     werase(win); // Clear the screen
@@ -53,14 +53,14 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<int>>& data, std::vec
             if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
             
             // Draw the cell
-            std::string v = std::to_string(data[row][col]);
-            drawCell(win, v , x, y, cellWidth-1, state);
+            // std::string v = std::to_string(data[row][col]);
+            drawCell(win,  data[row][col], x, y, cellWidth-1, state);
         }
     }
     wrefresh(win);
 }
 
-void GridWidget::drawCell(WINDOW* win, std::string value, int x, int y, int cellWidth, CellState state) {
+void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cellWidth, CellState state) {
     // Set color based on selection
     if (state == CellState::Editing) wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
     else if (state == CellState::Playing) wattron(win, COLOR_PAIR(PLAY_COLOR_PAIR));
@@ -176,7 +176,7 @@ int GUI::min(int a, int b) {
 }
 
 
-void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
+void GUI::keyPressed(int ch)
 {
     switch (ch) {
         case '\t':
@@ -211,7 +211,7 @@ void GUI::keyPressed(int ch, std::vector<std::vector<int>>& grid)
     }
 }
 
-void GUI::draw(std::vector<std::vector<int>>& seqData, int playbackPos)
+void GUI::draw(std::vector<std::vector<std::string>>& seqData, int playbackPos)
 {
     seqGrid.draw(seqWin, seqData, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
     update_panels();
