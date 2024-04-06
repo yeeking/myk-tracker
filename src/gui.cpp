@@ -148,8 +148,9 @@ int GUI::min(int a, int b) {
 
 void GUI::draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells)
 {
-    // seqGrid.draw(seqWin, data, cursorX, cursorY, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
-    seqGrid.draw(seqWin, data, 10, 10, cursorX, cursorY, highlightCells);
+    // seqGrid.draw(seqWin, data, cursorX, cursorY, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT); 
+      
+    seqGrid.draw(seqWin, data, 8, 6, cursorX, cursorY, highlightCells);
        
     update_panels();
     doupdate();
