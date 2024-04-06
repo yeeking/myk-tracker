@@ -57,7 +57,7 @@ class GridWidget{
         /** draw the sent data as a grid. Does not show the whole grid, only from startCol/row to endCol/row
          * also highlight all cells in the highlight vector
         */
-        void draw(WINDOW* win, std::vector<std::vector<std::string>>& data, std::vector<std::pair<int, int>> highlightCells, int colWidth, int colHeight);
+        void draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight);
         void cursorLeft();
         void cursorRight();
         void cursorUp();
@@ -84,7 +84,7 @@ class GUI {
         GUI(int heightInRows, int widthInCols);
         ~GUI();
         void keyPressed(int ch);
-        void draw(std::vector<std::vector<std::string>>& grid, int playbackPos);
+        void draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells);
         
     private:
         void initGUI();

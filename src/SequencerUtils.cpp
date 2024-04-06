@@ -176,12 +176,10 @@ if (note < 0 || note > 127) return;
     }
 }
 
-/** moves the editor cursor up. 
- * If in selectingSeqAndStep mode, steps through the sequenbces, wrapping at the top
- * if in editingStep mode, edits the 
+/** moves the editor cursor right - so move to next sequence/ next data field if editing step
  */
 
-void SequencerEditor::moveCursorUp()
+void SequencerEditor::moveCursorLeft()
 {
     switch(editMode)
     {
@@ -216,7 +214,7 @@ void SequencerEditor::moveCursorUp()
     }
 }
 
-void SequencerEditor::moveCursorDown()
+void SequencerEditor::moveCursorRight()
 {
     switch(editMode)
     {
@@ -249,7 +247,7 @@ void SequencerEditor::moveCursorDown()
     }
 }
 
-void SequencerEditor::moveCursorLeft()
+void SequencerEditor::moveCursorUp()
 {
     switch(editMode)
     {
@@ -281,7 +279,7 @@ void SequencerEditor::moveCursorLeft()
     }
 }
 
-void SequencerEditor::moveCursorRight()
+void SequencerEditor::moveCursorDown()
 {
     switch(editMode)
     {

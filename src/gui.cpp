@@ -21,7 +21,8 @@ void GridWidget::addGridListener(GridListener* listener)
     this->listener = listener; 
 }
 
-void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
+void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
+// void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
 {
     // std::lock_guard<std::mutex> lock(drawMutex);
     werase(win); // Clear the screen
@@ -50,7 +51,7 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, 
             //  =  i == cursorRow && j == cursorCol ? CellState::Editing : CellState::NotSelected;
             // if (i == playbackPosition){state = CellState::Playing;}
             
-            if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
+            if (row == cursorY && col == cursorX){state = CellState::Editing;}
             
             // Draw the cell
             // std::string v = std::to_string(data[row][col]);
@@ -211,9 +212,9 @@ void GUI::keyPressed(int ch)
     }
 }
 
-void GUI::draw(std::vector<std::vector<std::string>>& seqData, int playbackPos)
+void GUI::draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells)
 {
-    seqGrid.draw(seqWin, seqData, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
+    seqGrid.draw(seqWin, data, cursorX, cursorY, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
     update_panels();
     doupdate();
 }

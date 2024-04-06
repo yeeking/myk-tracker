@@ -599,7 +599,7 @@ void Sequencer::prepareGridView(std::vector<std::vector<std::string>>& gridView)
     assert(gridView[seq].size() >= howManySteps(seq));
     for (int step=0; step<howManySteps(seq); ++ step){
       // step then seq, i.e. col then row
-      gridView[seq][step] = std::to_string((int)getStepDataDirect(seq, step)->at(Step::note1Ind));
+      gridView[step][seq] = std::to_string(seq) + ":" + std::to_string(step) + ":" + std::to_string((int)getStepDataDirect(seq, step)->at(Step::note1Ind));
     }
   }
 }

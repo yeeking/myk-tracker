@@ -4,7 +4,12 @@
 /**
  * Top level modes that dictate the main UI output 
  */
-enum class SequencerEditorMode {settingSeqLength, configuringSequence, selectingSeqAndStep, editingStep};
+enum class SequencerEditorMode {
+  settingSeqLength, 
+  configuringSequence, 
+  selectingSeqAndStep, 
+  editingStep
+  };
 
 /**
  * Dictates which item in a sub page we are editing
