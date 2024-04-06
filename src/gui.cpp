@@ -2,7 +2,7 @@
 #include <cassert> 
 #include <iostream>
 
-GridWidget::GridWidget()
+GridWidget::GridWidget() : lastStartCol{0}, lastStartRow{0}
 {
 
 }
@@ -19,17 +19,28 @@ void GridWidget::addGridListener(GridListener* listener)
 
 void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, 
                       int rowsToDisplay, int colsToDisplay, 
-                      int cursorX, int cursorY, 
+                      int cursorCol, int cursorRow, 
                       std::vector<std::pair<int, int>> highlightCells)
 {
     werase(win); // Clear the screen
-    int startRow = cursorY;
-    int startCol = cursorX; 
+    // assume we do not need to move the viewing window
+    int startRow = lastStartRow;
+    int startCol = lastStartCol;
     int endRow = startRow + rowsToDisplay;
-    if (endRow >= data[0].size()) endRow = data[0].size();
-
     int endCol = startCol + colsToDisplay;
-    if (endCol >= data.size()) endCol = data.size();    
+    // but if the cursor is out of bounds, need to redo-it 
+    // if (cursorRow < startRow) startRow = cursorRow; // move view up
+    // if (cursorRow >= endRow) startRow = cursorRow - rowsToDisplay + 1;
+    if (cursorCol < startCol) startCol = cursorCol; // move view up
+    if (cursorCol >= endCol) startCol = cursorCol - colsToDisplay + 1;
+    if (cursorRow < startRow) startRow = cursorRow;
+    if (cursorRow >= endRow) startRow = cursorRow - rowsToDisplay + 1;
+    endRow = startRow + rowsToDisplay;
+    endCol = startCol + colsToDisplay;
+    
+    if (endRow >= data[0].size()) endRow = data[0].size();
+    if (endCol >= data.size()) endCol = data.size();
+    
     
     // work out how big the cells can be based on the view 
     int winWidth, winHeight;
@@ -47,11 +58,13 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
             // Determine if the current cell is selected
             CellState state{CellState::NotSelected};
             
-            if (row == cursorY && col == cursorX){state = CellState::Editing;}
+            if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
             // Draw the cell
             drawCell(win, data[col][row], x, y, cellWidth-1, state);
         }
     }
+    lastStartCol = startCol;
+    lastStartRow = startRow;
     wrefresh(win);
 }
 
@@ -136,7 +149,7 @@ int GUI::min(int a, int b) {
 void GUI::draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells)
 {
     // seqGrid.draw(seqWin, data, cursorX, cursorY, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
-    seqGrid.draw(seqWin, data, 5, 10, cursorX, cursorY, highlightCells);
+    seqGrid.draw(seqWin, data, 3, 3, cursorX, cursorY, highlightCells);
        
     update_panels();
     doupdate();

@@ -35,13 +35,15 @@ void playbackThreadFunction(int maxPosition) {
 
 int main() {
     // maintains the data and sate of the sequencer
-    Sequencer sequencer{5, 5};
+    Sequencer sequencer{10, 10};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
     // create a grid suitable for storing the data from the sequencer 
     // the sequencerr will write to this grid when we ask it to
     initGrid(grid, 10, 10);
-    
+    sequencer.prepareGridView(grid);
+    gui.draw(grid, editor.getCurrentSequence(), editor.getCurrentStep(), std::vector<std::pair<int, int>>());
+
     int ch;
 
     while ((ch = getch()) != 'q') {

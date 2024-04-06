@@ -67,8 +67,8 @@ class GridWidget{
         void drawCell(WINDOW* win, std::string& value, int x, int y, int cellWidth, CellState state);
         GridListener* listener; 
         
-        int cursorRow;
-        int cursorCol;
+        int lastStartCol;
+        int lastStartRow; 
 
 };
 
