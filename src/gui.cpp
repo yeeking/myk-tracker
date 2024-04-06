@@ -7,55 +7,49 @@ GridWidget::GridWidget()
 
 }
 
-GridWidget::GridWidget(int displayHeightInRows, int displayWidthInCols) : displayHeightInRows{displayHeightInRows}, displayWidthInCols{displayWidthInCols}, cursorRow{0}, cursorCol{0}
-{
-
-}
-
 GridWidget::~GridWidget()
 {
 
 }
+
 void GridWidget::addGridListener(GridListener* listener)
 {
     this->listener = listener; 
 }
 
-void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
-// void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight)
+void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, 
+                      int rowsToDisplay, int colsToDisplay, 
+                      int cursorX, int cursorY, 
+                      std::vector<std::pair<int, int>> highlightCells)
 {
-    // std::lock_guard<std::mutex> lock(drawMutex);
     werase(win); // Clear the screen
-    // wmove(win, 1, 1);
-    // box(win, 0, 0); // Draw a box around the edges of the window
-    // if (cursorRow >= data.size()) cursorRow = data.size()-1;
-    int maxRow = displayStartRow + displayHeightInRows;
-    int maxCol = displayStartCol + displayWidthInCols;
-    if (maxCol >= data.size()) maxCol = data.size();
-    if (maxRow >= data[0].size()) maxRow = data[0].size(); 
-    if (cursorRow >= maxRow) cursorRow = maxRow -1;
-    if (cursorCol >= maxCol) cursorCol = maxCol -1;
-    
-    assert(maxCol <= data.size());
-    assert(maxRow <= data[0].size());
-    
-    for (int row = displayStartRow; row < maxRow; ++row) {
+    int startRow = cursorY;
+    int startCol = cursorX; 
+    int endRow = startRow + rowsToDisplay;
+    if (endRow >= data[0].size()) endRow = data[0].size();
 
-        // if (cursorCol >= data[row].size()) cursorRow = data[row].size()-1;
-        for (int col = displayStartCol;col < maxCol; ++col){
-            // Calculate position
-            int x = (col - displayStartCol) * cellWidth;
-            int y = (row - displayStartRow) * cellHeight;
+    int endCol = startCol + colsToDisplay;
+    if (endCol >= data.size()) endCol = data.size();    
+    
+    // work out how big the cells can be based on the view 
+    int winWidth, winHeight;
+    getmaxyx(win, winHeight, winWidth); // query size of window
+    
+    int cellWidth = winWidth / colsToDisplay;
+    int cellHeight = winHeight / rowsToDisplay;
+    cellHeight = 3; 
+    // cellHeight = 3;
+    for (int row = startRow; row < endRow; ++row) {
+        for (int col = startCol;col < endCol; ++col){
+            // Calculate absolute x position in UI
+            int x = (col - startCol) * cellWidth;
+            int y = (row - startRow) * cellHeight;
             // Determine if the current cell is selected
             CellState state{CellState::NotSelected};
-            //  =  i == cursorRow && j == cursorCol ? CellState::Editing : CellState::NotSelected;
-            // if (i == playbackPosition){state = CellState::Playing;}
             
             if (row == cursorY && col == cursorX){state = CellState::Editing;}
-            
             // Draw the cell
-            // std::string v = std::to_string(data[row][col]);
-            drawCell(win,  data[col][row], x, y, cellWidth-1, state);
+            drawCell(win, data[col][row], x, y, cellWidth-1, state);
         }
     }
     wrefresh(win);
@@ -85,45 +79,8 @@ void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cel
     attroff(COLOR_PAIR(NOSEL_COLOR_PAIR));
 }
 
-void GridWidget::cursorLeft()
-{   
-    cursorCol --; 
-    if (cursorCol< 0) cursorCol = 0;
-    // work out if startCol changes
-    if (cursorCol < displayStartCol) displayStartCol = cursorCol;
-    //std::cout << "left " << cursorCol << ":" << displayStartCol<< std::endl;
-}
-void GridWidget::cursorRight()
+GUI::GUI() 
 {
-    cursorCol++;// note I will limit it to the data width when draw receives its data
-    // work out if startCol changes 
-    if (cursorCol >= displayStartCol + displayWidthInCols){
-        displayStartCol ++;
-    } 
-    //std::cout << "right " << cursorCol << ":" << displayStartCol<< std::endl;    
-}
-void GridWidget::cursorUp()
-{
-    cursorRow --; 
-    if (cursorRow < 0) cursorRow = 0;
-    if (cursorRow < displayStartRow) displayStartRow = cursorRow;
-    //std::cout << "up " << cursorRow << ":" << displayStartRow << std::endl;
-
-}
-void GridWidget::cursorDown()
-{
-    cursorRow++; // will limit to data height when we get data in draw
-    if (cursorRow >= displayStartRow + displayHeightInRows) {
-        // cursor out of bounds. Move bounds along one
-        displayStartRow ++; 
-    }
-    //std::cout << "down " << cursorRow << ":" << displayStartRow << std::endl;
-}
-
-
-GUI::GUI(int heightInRows, int widthInCols)  : seqGrid{heightInRows, widthInCols}
-{
-
     seqFocus = true; 
     activeGrid = &seqGrid;
     initGUI();
@@ -154,10 +111,12 @@ void GUI::initGUI()
     init_pair(NOSEL_COLOR_PAIR, COLOR_BLACK, COLOR_WHITE); // Background color pair
     init_pair(PLAY_COLOR_PAIR, COLOR_BLUE, COLOR_RED); // Background color pair
 
-    seqWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, DISPLAY_COLS*CELL_WIDTH, 1, 1);
+//    seqWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, DISPLAY_COLS*CELL_WIDTH, 1, 1);
+    seqWin = newwin(100, 100, 1, 1);
+
     seqPanel = new_panel(seqWin);
-    buttonWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, CELL_WIDTH * 4, 1, DISPLAY_COLS*CELL_WIDTH + 1 );
-    buttonPanel = new_panel(buttonWin);
+    // buttonWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, CELL_WIDTH * 4, 1, DISPLAY_COLS*CELL_WIDTH + 1 );
+    // buttonPanel = new_panel(buttonWin);
 
     update_panels();
     doupdate();
@@ -167,54 +126,18 @@ void GUI::drawControlPanel(WINDOW* win){
     // wmove(win, 1, 1);
     werase(win);
     wprintw(win, "[Button 1]  [Button 2]  [Button 3]");
-    wrefresh(win);
-    
+    wrefresh(win);   
 }
-
 
 int GUI::min(int a, int b) {
     return a < b ? a : b;
 }
 
-
-void GUI::keyPressed(int ch)
-{
-    switch (ch) {
-        case '\t':
-            seqFocus = !seqFocus;
-            if (seqFocus) {
-                //top_panel(seqPanel);
-            } else {
-                //top_panel(buttonPanel);
-            }
-            break;
-        case KEY_UP:
-            if (!seqFocus) break;
-            activeGrid->cursorUp();
-            break;
-        case KEY_DOWN:
-            if (!seqFocus) break;
-            activeGrid->cursorDown();
-            break;
-        case KEY_LEFT:
-            if (!seqFocus) break;
-            activeGrid->cursorLeft();
-            break;
-        case KEY_RIGHT:
-            if (!seqFocus) break;
-            activeGrid->cursorRight();
-            break;
-        default:
-            // if (ch >= '0' && ch <= '9') { // Edit the current cell
-            //     grid[startRow + cursorRow][startCol + cursorCol] = ch - '0';
-            // }
-            break;
-    }
-}
-
 void GUI::draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells)
 {
-    seqGrid.draw(seqWin, data, cursorX, cursorY, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
+    // seqGrid.draw(seqWin, data, cursorX, cursorY, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT);   
+    seqGrid.draw(seqWin, data, 5, 10, cursorX, cursorY, highlightCells);
+       
     update_panels();
     doupdate();
 }

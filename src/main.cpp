@@ -10,7 +10,7 @@
 std::atomic<int> playbackPosition(0);
 std::vector<std::vector<std::string>> grid;
 // Main loop
-GUI gui{3, 3};
+GUI gui{};
 
 void initGrid(std::vector<std::vector<std::string>>& grid, int rows, int cols);
 
@@ -35,7 +35,7 @@ void playbackThreadFunction(int maxPosition) {
 
 int main() {
     // maintains the data and sate of the sequencer
-    Sequencer sequencer{10, 10};
+    Sequencer sequencer{5, 5};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
     // create a grid suitable for storing the data from the sequencer 
@@ -64,9 +64,11 @@ int main() {
                 break;
         }// end first checks on the key pressed 
             
-        gui.keyPressed(ch);
+        // gui.keyPressed(ch);
         
         sequencer.prepareGridView(grid);
+        // std::cout << "grid size " << grid.size() << ":" << grid[0].size() << std::endl;
+
         gui.draw(grid, editor.getCurrentSequence(), editor.getCurrentStep(), std::vector<std::pair<int, int>>());
 
                  

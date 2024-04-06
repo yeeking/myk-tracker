@@ -11,8 +11,8 @@
 #define START_ROWS 20
 #define START_COLS 10
 // how many to display
-#define DISPLAY_ROWS 5
-#define DISPLAY_COLS 3
+#define DISPLAY_ROWS 4
+#define DISPLAY_COLS 2
 #define CELL_WIDTH 7
 #define CELL_HEIGHT 3
 
@@ -59,11 +59,7 @@ class GridWidget{
          * note that the first dimension of data is the 'column'
          * the second dimension is the row 
         */
-        void draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight);
-        void cursorLeft();
-        void cursorRight();
-        void cursorUp();
-        void cursorDown();
+        void draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int rowsToDisplay, int colsToDisplay, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells);
         /** register for grid moving events*/
         void addGridListener(GridListener* listener);
 
@@ -71,11 +67,6 @@ class GridWidget{
         void drawCell(WINDOW* win, std::string& value, int x, int y, int cellWidth, CellState state);
         GridListener* listener; 
         
-        int displayWidthInCols;
-        int displayHeightInRows; 
-        int displayStartRow; 
-        int displayStartCol; 
-
         int cursorRow;
         int cursorCol;
 
@@ -83,9 +74,8 @@ class GridWidget{
 
 class GUI {
     public:
-        GUI(int heightInRows, int widthInCols);
+        GUI();
         ~GUI();
-        void keyPressed(int ch);
         void draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells);
         
     private:
