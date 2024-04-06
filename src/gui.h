@@ -56,6 +56,8 @@ class GridWidget{
         ~GridWidget();
         /** draw the sent data as a grid. Does not show the whole grid, only from startCol/row to endCol/row
          * also highlight all cells in the highlight vector
+         * note that the first dimension of data is the 'column'
+         * the second dimension is the row 
         */
         void draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells, int cellWidth, int cellHeight);
         void cursorLeft();

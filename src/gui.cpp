@@ -31,13 +31,13 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, 
     // if (cursorRow >= data.size()) cursorRow = data.size()-1;
     int maxRow = displayStartRow + displayHeightInRows;
     int maxCol = displayStartCol + displayWidthInCols;
-    if (maxRow >= data.size()) maxRow = data.size(); 
-    if (maxCol >= data[0].size()) maxCol = data[0].size();
+    if (maxCol >= data.size()) maxCol = data.size();
+    if (maxRow >= data[0].size()) maxRow = data[0].size(); 
     if (cursorRow >= maxRow) cursorRow = maxRow -1;
     if (cursorCol >= maxCol) cursorCol = maxCol -1;
     
-    assert(maxRow <= data.size());
-    assert(maxCol <= data[0].size());
+    assert(maxCol <= data.size());
+    assert(maxRow <= data[0].size());
     
     for (int row = displayStartRow; row < maxRow; ++row) {
 
@@ -55,7 +55,7 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, 
             
             // Draw the cell
             // std::string v = std::to_string(data[row][col]);
-            drawCell(win,  data[row][col], x, y, cellWidth-1, state);
+            drawCell(win,  data[col][row], x, y, cellWidth-1, state);
         }
     }
     wrefresh(win);
