@@ -496,11 +496,13 @@ void Sequencer::setSequenceLength(unsigned int sequence, unsigned int length)
 void Sequencer::shrinkSequence(unsigned int sequence)
 {
   sequences[sequence].setLength(sequences[sequence].getLength()-1);
+  updateGridOfStrings();
 }
 void Sequencer::extendSequence(unsigned int sequence)
 {
   sequences[sequence].ensureEnoughStepsForLength(sequences[sequence].getLength()+1);
   sequences[sequence].setLength(sequences[sequence].getLength()+1);
+  updateGridOfStrings();
 }
 
 
@@ -635,12 +637,25 @@ void Sequencer::updateGridOfStrings()
   if (gridView.size() != howManySequences()){
     gridView.resize(howManySequences());
   }
+  
+
   assert (gridView.size() >= howManySequences());
+
+
+  // first. find the longest sequence
+  int maxSteps = 0;
+  for (int seq=0; seq<howManySequences(); ++ seq){
+    if (howManySteps(seq) > maxSteps) maxSteps = howManySteps(seq);
+  }
+
   for (int seq=0; seq<howManySequences() && seq<gridView.size(); ++ seq){
     // check we have the length 
-    if (gridView[seq].size() != howManySteps(seq)){
+    // if (gridView[seq].size() != howManySteps(seq)){
+    if (gridView[seq].size() != maxSteps){
+      
       // std::cout << "resizing " << seq << std::endl;
-      gridView[seq].resize(howManySteps(seq));
+      // gridView[seq].resize(howManySteps(seq));
+      gridView[seq].resize(maxSteps);
       for (int i = 0; i<gridView[seq].size(); ++i) gridView[seq][i] = "";
     }
     assert(gridView[seq].size() >= howManySteps(seq));

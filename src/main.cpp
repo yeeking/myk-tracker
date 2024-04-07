@@ -31,6 +31,27 @@ std::map<char, double> getKeyboardToMidiNotes(int transpose = 0)
     return key_to_note;
 }
 
+
+    std::map<int,char> getIntToNoteMap()
+    {
+    std::map<int, char> intToNote = 
+      {
+        {0, 'c'}, 
+        {1, 'C'},
+        {2, 'd'},
+        {3, 'D'},
+        {4, 'e'},
+        {5, 'f'},
+        {6, 'F'},
+        {7, 'g'},
+        {8, 'G'},
+        {9, 'a'},
+        {10, 'A'},
+        {11, 'b'}    
+      };
+      return intToNote;
+    }
+
 void playbackThreadFunction(int maxPosition) {
     while (true) { // Add a condition for a graceful shutdown if needed
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -65,6 +86,12 @@ int main() {
         }
         switch (ch) {
             case '\t':
+                break;
+            case '-':
+                sequencer.shrinkSequence(editor.getCurrentSequence());
+                break;
+            case '=':
+                sequencer.extendSequence(editor.getCurrentSequence());
                 break;
             case KEY_DC:
                 editor.resetAtCursor();
