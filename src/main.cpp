@@ -65,7 +65,7 @@ int main() {
 
      std::map<char, double> key_to_note = getKeyboardToMidiNotes();
     // maintains the data and sate of the sequencer
-    Sequencer sequencer{5, 100};
+    Sequencer sequencer{4, 16};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
     GUI gui{&sequencer, &editor};
@@ -88,10 +88,10 @@ int main() {
             case '\t':
                 break;
             case '-':
-                sequencer.shrinkSequence(editor.getCurrentSequence());
+                editor.decrementAtCursor();
                 break;
             case '=':
-                sequencer.extendSequence(editor.getCurrentSequence());
+                editor.incrementAtCursor();
                 break;
             case KEY_DC:
                 editor.resetAtCursor();

@@ -178,7 +178,10 @@ void GUI::draw()
     if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
         Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
         std::vector<std::vector<std::string>> grid = step->toStringGrid();
-        stepGrid.draw(seqWin, grid, 4, 6, 0, 0, std::vector<std::pair<int, int>>());
+        stepGrid.draw(seqWin, grid, 4, 6, 
+        seqEditor->getCurrentStepCol(), 
+        seqEditor->getCurrentStepRow(), 
+        std::vector<std::pair<int, int>>());
         
     }
     drawControlPanel(buttonWin);
