@@ -21,16 +21,39 @@ std::vector<std::vector<double>>* Step::getDataDirect()
 
 std::string Step::toStringFlat() 
 {
-  return std::to_string(this->data[0][Step::note1Ind]);
+  return std::to_string((int)this->data[0][Step::note1Ind]);
 }
 
 std::vector<std::vector<std::string>> Step::toStringGrid() 
 { 
+  // each data sub vector should be on its own row 
+  //
   std::vector<std::vector<std::string>> grid;
-  grid.resize(1);
-  grid[0].resize(this->data[0].size());
-  for (int i=0;i<data[0].size(); ++i){
-    grid[0][i] = std::to_string(i) + ":" + std::to_string(data[0][i]);
+  assert (data.size() > 0);
+  // a row is
+  for (int col=0;col<data[0].size();++col){
+    std::vector<std::string> colData;
+    //colData.resize(data.size());
+    for (int row=0;row<data.size();++row){
+      //  colData.push_back(std::to_string(row) + ":" + std::to_string(col) + ":" + std::to_string((int)data[row][col]));
+      std::string field = "";
+      switch (col){
+        case Step::note1Ind:
+          field = "n: ";
+          break;
+        case Step::velInd:
+          field = "v: ";
+          break;
+        case Step::lengthInd:
+          field = "d: ";
+          break;
+        case Step::channelInd:
+          field = "c: ";
+          break;
+      }
+      colData.push_back(field + std::to_string((int)data[row][col]));
+    }
+    grid.push_back(colData); 
   }
   return grid;
 } 

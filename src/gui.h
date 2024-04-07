@@ -102,7 +102,7 @@ class GUI {
         /** grid widget for the sequencer */
         GridWidget seqGrid;
         /** grid widget for sequencer track controls*/
-        GridWidget trackControlGrid;
+        GridWidget seqControlGrid;
         
         /** grid widget for editing steps */
         GridWidget stepGrid; 

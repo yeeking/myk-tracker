@@ -104,7 +104,7 @@ void SequencerEditor::resetAtCursor()
     case SequencerEditorMode::editingStep:
     //enterNoteData(0);
     //sequencer->resetSequence(currentSequence);
-    
+    enterNoteData(0);   
     break;  
     case SequencerEditorMode::settingSeqLength:
     // 
@@ -162,7 +162,7 @@ if (note < 0 || note > 127) return;
     // move to the next note
     if (editMode == SequencerEditorMode::selectingSeqAndStep)
     {
-    moveCursorRight();
+    moveCursorDown();
     }
     
     if (editMode == SequencerEditorMode::configuringSequence)
@@ -201,9 +201,9 @@ void SequencerEditor::moveCursorLeft()
     case SequencerEditorMode::editingStep:
     {
         std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
-        incrementStepData(data, sequencer->getSequenceType(currentSequence));
+        decrementStepData(data, sequencer->getSequenceType(currentSequence));
         writeStepData(data);
-        break;  
+        break;    
     }
     case SequencerEditorMode::configuringSequence:
     {
@@ -236,9 +236,9 @@ void SequencerEditor::moveCursorRight()
     case SequencerEditorMode::editingStep:
     {
         std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
-        decrementStepData(data, sequencer->getSequenceType(currentSequence));
+        incrementStepData(data, sequencer->getSequenceType(currentSequence));
         writeStepData(data);
-        break;  
+        break;
     }
     case SequencerEditorMode::configuringSequence:
     {

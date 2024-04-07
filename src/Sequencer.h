@@ -28,10 +28,10 @@ class Step{
   public:
   // these should be in an enum probably
     const static int channelInd{0};
-    const static int lengthInd{1};
+    const static int note1Ind{1};
     const static int velInd{2};
-    const static int note1Ind{3};
-  
+    const static int lengthInd{3};
+    
     Step();
     /** returns a copy of the data stored in this step*/
     std::vector<std::vector<double>> getData() const;

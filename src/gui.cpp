@@ -136,11 +136,11 @@ void GUI::initGUI()
     init_pair(PLAY_COLOR_PAIR, COLOR_BLUE, COLOR_RED); // Background color pair
 
 //    seqWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, DISPLAY_COLS*CELL_WIDTH, 1, 1);
-    seqWin = newwin(100, 100, 1, 1);
-
+    seqWin = newwin(70, 100, 3, 0); // height, width, y offset, x offset 
     seqPanel = new_panel(seqWin);
-    // buttonWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, CELL_WIDTH * 4, 1, DISPLAY_COLS*CELL_WIDTH + 1 );
-    // buttonPanel = new_panel(buttonWin);
+
+    buttonWin = newwin(3, 100, 0, 0);
+    buttonPanel = new_panel(buttonWin);
 
     update_panels();
     doupdate();
@@ -149,7 +149,16 @@ void GUI::initGUI()
 void GUI::drawControlPanel(WINDOW* win){
     // wmove(win, 1, 1);
     werase(win);
-    wprintw(win, "[Button 1]  [Button 2]  [Button 3]");
+    std::string cursorStatus = 
+        std::to_string(seqEditor->getCurrentSequence()) + ":" 
+        + std::to_string(seqEditor->getCurrentStep()) + "/"
+        + std::to_string(sequencer->howManySteps(seqEditor->getCurrentSequence()));
+
+
+    std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}};
+    seqControlGrid.draw(win, buttons, 1, 6, 2, 0, std::vector<std::pair<int, int>>());
+
+    // wprintw(win, "[Button 1]  [Button 2]  [Button 3]");
     wrefresh(win);   
 }
 
@@ -172,6 +181,7 @@ void GUI::draw()
         stepGrid.draw(seqWin, grid, 4, 6, 0, 0, std::vector<std::pair<int, int>>());
         
     }
+    drawControlPanel(buttonWin);
     update_panels();
     doupdate();
 }
