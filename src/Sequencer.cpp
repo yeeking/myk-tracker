@@ -25,8 +25,13 @@ std::string Step::toStringFlat()
 
 std::vector<std::vector<std::string>> Step::toStringGrid() 
 { 
-  std::vector<std::vector<std::string>> stringGrid = {{"row 1 col 1", "row 1 col 2"}};
-  return stringGrid;
+  std::vector<std::vector<std::string>> grid;
+  grid.resize(1);
+  grid[0].resize(this->data.size());
+  for (int i=0;i<data.size(); ++i){
+    grid[0][i] = std::to_string(i) + ":" + std::to_string(data[i]);
+  }
+  return grid;
 } 
 
 /** sets the data stored in this step */

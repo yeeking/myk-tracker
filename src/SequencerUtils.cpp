@@ -123,15 +123,16 @@ void SequencerEditor::enterAtCursor()
 {
 switch(editMode)
 {
+    case SequencerEditorMode::selectingSeqAndStep:
+    editMode = SequencerEditorMode::editingStep;
+    break;
     case SequencerEditorMode::settingSeqLength:
     editMode = SequencerEditorMode::configuringSequence;
     break;
     case SequencerEditorMode::configuringSequence:
     editMode = SequencerEditorMode::settingSeqLength;
     break;
-    case SequencerEditorMode::selectingSeqAndStep:
-    editMode = SequencerEditorMode::editingStep;
-    break;
+
     case SequencerEditorMode::editingStep:
     editMode = SequencerEditorMode::selectingSeqAndStep;
     break;  

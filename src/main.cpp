@@ -35,7 +35,7 @@ int main() {
         switch (ch) {
             case '\t':
                 break;
-            case KEY_ENTER:
+            case '\n':
                 editor.enterAtCursor();
                 break;
             case KEY_UP:

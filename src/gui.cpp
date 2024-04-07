@@ -159,15 +159,18 @@ int GUI::min(int a, int b) {
 
 void GUI::draw()
 {
-    
-    seqGrid.draw(seqWin, sequencer->getGridOfStrings(), 8, 6, 
-                seqEditor->getCurrentSequence(), 
-                seqEditor->getCurrentStep(), std::vector<std::pair<int, int>>());
-    
+    // if(false){
+    if (seqEditor->getEditMode() == SequencerEditorMode::selectingSeqAndStep){
+
+        seqGrid.draw(seqWin, sequencer->getGridOfStrings(), 8, 6, 
+                    seqEditor->getCurrentSequence(), 
+                    seqEditor->getCurrentStep(), std::vector<std::pair<int, int>>());
+    }
     if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
         Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
         std::vector<std::vector<std::string>> grid = step->toStringGrid();
         stepGrid.draw(seqWin, grid, 4, 6, 0, 0, std::vector<std::pair<int, int>>());
+        
     }
     update_panels();
     doupdate();
