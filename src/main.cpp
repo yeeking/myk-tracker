@@ -8,21 +8,8 @@
 #include "SequencerUtils.h"
 
 std::atomic<int> playbackPosition(0);
-std::vector<std::vector<std::string>> grid;
 // Main loop
 GUI gui{};
-
-void initGrid(std::vector<std::vector<std::string>>& grid, int rows, int cols);
-
-void initGrid(std::vector<std::vector<std::string>>& grid, int rows, int cols) {
-    grid.resize(rows);
-    for (int row = 0; row < rows; row++) {
-        if (grid[row].size() != cols) grid[row].resize(cols);
-        for (int col = 0; col < cols; col++) {
-            grid[row][col] = std::to_string(col); 
-        }
-    }
-}
 
 void playbackThreadFunction(int maxPosition) {
     while (true) { // Add a condition for a graceful shutdown if needed
@@ -35,12 +22,14 @@ void playbackThreadFunction(int maxPosition) {
 
 int main() {
     // maintains the data and sate of the sequencer
-    Sequencer sequencer{10, 10};
+    Sequencer sequencer{5, 100};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
     // create a grid suitable for storing the data from the sequencer 
     // the sequencerr will write to this grid when we ask it to
-    initGrid(grid, 10, 10);
+    std::vector<std::vector<std::string>> grid(10, std::vector<std::string>(2));
+
+
     sequencer.prepareGridView(grid);
     gui.draw(grid, editor.getCurrentSequence(), editor.getCurrentStep(), std::vector<std::pair<int, int>>());
 
@@ -64,16 +53,10 @@ int main() {
                 break;
             default:
                 break;
-        }// end first checks on the key pressed 
-            
-        // gui.keyPressed(ch);
+        }
         
         sequencer.prepareGridView(grid);
-        // std::cout << "grid size " << grid.size() << ":" << grid[0].size() << std::endl;
-
-        gui.draw(grid, editor.getCurrentSequence(), editor.getCurrentStep(), std::vector<std::pair<int, int>>());
-
-                 
+        gui.draw(grid, editor.getCurrentSequence(), editor.getCurrentStep(), std::vector<std::pair<int, int>>());                
     }
 
     // playbackThread.join(); // Ensure the playback thread has fini

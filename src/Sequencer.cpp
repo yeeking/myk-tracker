@@ -593,11 +593,19 @@ void Sequencer::prepareGridView(std::vector<std::vector<std::string>>& gridView)
 {
   // need to get the data in the sequences, convert it to strings and 
   // store it into the sent grid view
-  assert(gridView.size() >= howManySequences());
-  for (int seq=0; seq<howManySequences(); ++ seq){
+  if (gridView.size() != howManySequences()){
+    gridView.resize(howManySequences());
+  }
+  assert (gridView.size() >= howManySequences());
+  for (int seq=0; seq<howManySequences() && seq<gridView.size(); ++ seq){
     // check we have the length 
+    if (gridView[seq].size() != howManySteps(seq)){
+      // std::cout << "resizing " << seq << std::endl;
+      gridView[seq].resize(howManySteps(seq));
+      for (int i = 0; i<gridView[seq].size(); ++i) gridView[seq][i] = "";
+    }
     assert(gridView[seq].size() >= howManySteps(seq));
-    for (int step=0; step<howManySteps(seq); ++ step){
+    for (int step=0; step<howManySteps(seq) && step<gridView[seq].size(); ++ step){
       // step then seq, i.e. col then row
       gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + std::to_string((int)getStepDataDirect(seq, step)->at(Step::note1Ind));
     }

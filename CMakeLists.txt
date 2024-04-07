@@ -28,4 +28,4 @@ add_executable(CurTest src/gui.cpp src/curtest.cpp)
 
 # Link the ncurses library with your executable
 target_link_libraries(${PROJECT_NAME} seq-lib ${CURSES_LIBRARIES} panel)
-target_link_libraries(CurTest ${CURSES_LIBRARIES} panel)
+target_link_libraries(CurTest seq-lib ${CURSES_LIBRARIES} panel)

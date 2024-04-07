@@ -38,17 +38,22 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
     endRow = startRow + rowsToDisplay;
     endCol = startCol + colsToDisplay;
     
+    // make sure we are not displaying beyond the size of the data
     if (endRow >= data[0].size()) endRow = data[0].size();
     if (endCol >= data.size()) endCol = data.size();
-    
     
     // work out how big the cells can be based on the view 
     int winWidth, winHeight;
     getmaxyx(win, winHeight, winWidth); // query size of window
     
+    if (endRow >= data[0].size()) endRow = data[0].size();
+    if (endCol >= data.size()) endCol = data.size();
+    
+
     int cellWidth = winWidth / colsToDisplay;
     int cellHeight = winHeight / rowsToDisplay;
     cellHeight = 3; 
+    
     // cellHeight = 3;
     for (int row = startRow; row < endRow; ++row) {
         for (int col = startCol;col < endCol; ++col){
@@ -60,6 +65,10 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
             
             if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
             // Draw the cell
+            assert (data.size() >= col);
+            // std::cout << "want row " << row << " got rows " << data[col].size() << std::endl;
+            assert (data[col].size() >= row);
+            
             drawCell(win, data[col][row], x, y, cellWidth-1, state);
         }
     }
@@ -86,6 +95,7 @@ void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cel
 
     // Print value in the center of the box
     mvwprintw(win, y + 1, x + 2, "%s", value.c_str()); 
+    // mvwprintw(win, y + 1, x + 2, "%s", "test"); 
 
     // Reset color
     attroff(COLOR_PAIR(SEL_COLOR_PAIR));
@@ -148,8 +158,7 @@ int GUI::min(int a, int b) {
 
 void GUI::draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells)
 {
-    // seqGrid.draw(seqWin, data, cursorX, cursorY, std::vector<std::pair<int, int>>(), CELL_WIDTH, CELL_HEIGHT); 
-      
+
     seqGrid.draw(seqWin, data, 8, 6, cursorX, cursorY, highlightCells);
        
     update_panels();
