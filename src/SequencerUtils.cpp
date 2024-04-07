@@ -589,7 +589,7 @@ int SequencerEditor::getCurrentSequence() const
 {
 return currentSequence;
 }
-/**  */
+
 int SequencerEditor::getCurrentStep() const 
 {
 return currentStep;

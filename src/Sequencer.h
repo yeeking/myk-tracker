@@ -37,10 +37,14 @@ class Step{
     std::vector<double> getData() const;
     /** get the memory address of the data in this step for direct access*/
     std::vector<double>* getDataDirect();
-  
-    /** sets the data stored in this step */
-    void setData(std::vector<double> data);
-    /** update one value in the data vector for this step*/
+    /** returns a one line string representation of the step's data */
+    std::string toStringFlat() ;
+    /** returns a grid representation of the step's data*/
+    std::vector<std::vector<std::string>> toStringGrid() ;
+    
+    /** sets the data stored in this step and updates stored string representations */
+    void setData(std::vector<double>& data);
+    /** update one value in the data vector for this step and updates stored string representations*/
     void updateData(unsigned int dataInd, double value);
     /** set the callback function called when this step is triggered*/
     void setCallback(std::function<void(std::vector<double>*)> callback);
@@ -56,6 +60,7 @@ class Step{
     std::vector<double> data;
     bool active;
     std::function<void(std::vector<double>*)> stepCallback;
+
 };
 
 /** need this so can have a Sequencer data member in Sequence*/
@@ -198,11 +203,6 @@ class Sequencer  {
       Sequencer(unsigned int seqCount = 4, unsigned int seqLength = 16);
       ~Sequencer();
 
-      /** write a view of the sequencer's data into the sent grid by computing some sort of 'double' 
-       * representation of the data in each step and putting it into the grid 
-      */
-      void prepareGridView(std::vector<std::vector<std::string>>& grid);
-
       /** set seq channels and seq types of this sequence to the same as the sent sequence*/
       void copyChannelAndTypeSettings(Sequencer* otherSeq);
       unsigned int howManySequences() const ;
@@ -240,8 +240,9 @@ class Sequencer  {
       void updateStepData(unsigned int sequence, unsigned int step, unsigned int dataInd, double value);
       /** retrieve the data for the current step */
       std::vector<double> getCurrentStepData(int sequence) const;
-  
-      /** retrieve the data for a specific step */
+      /** returns a pointer to the step object stored at the sent sequence and step position */
+      Step* getStep(int seq, int step);
+      /** retrieve a copy of the data for a specific step */
       std::vector<double> getStepData(int sequence, int step) const;
       /** get the memory address of the data for this step for direct viewing/ editing*/
       std::vector<double>* getStepDataDirect(int sequence, int step);
@@ -252,14 +253,19 @@ class Sequencer  {
       void resetSequence(int sequence);
   /** print out a tracker style view of the sequence */
       std::string toString();
-
+  /** get a vector of vector of strings representing the sequence. */
+     std::vector<std::vector<std::string>>& getGridOfStrings();
     private:
       bool assertSeqAndStep(unsigned int sequence, unsigned int step) const;
         
       bool assertSequence(unsigned int sequence) const;
-      
+      /** regenerate the string grid representation of the sequence */
+      void updateGridOfStrings();
       /// class data members  
       std::vector<Sequence> sequences;
+    /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
+      std::vector<std::vector<std::string>> seqAsStringGrid;
+
 };
 
 

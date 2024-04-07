@@ -9,7 +9,7 @@
 
 std::atomic<int> playbackPosition(0);
 // Main loop
-GUI gui{};
+
 
 void playbackThreadFunction(int maxPosition) {
     while (true) { // Add a condition for a graceful shutdown if needed
@@ -25,19 +25,18 @@ int main() {
     Sequencer sequencer{5, 100};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
-    // create a grid suitable for storing the data from the sequencer 
-    // the sequencerr will write to this grid when we ask it to
-    std::vector<std::vector<std::string>> grid(10, std::vector<std::string>(2));
-
-
-    sequencer.prepareGridView(grid);
-    gui.draw(grid, editor.getCurrentSequence(), editor.getCurrentStep(), std::vector<std::pair<int, int>>());
-
+    GUI gui{&sequencer, &editor};
+    
+    gui.draw();
+    
     int ch;
 
     while ((ch = getch()) != 'q') {
         switch (ch) {
             case '\t':
+                break;
+            case KEY_ENTER:
+                editor.enterAtCursor();
                 break;
             case KEY_UP:
                 editor.moveCursorUp();
@@ -55,8 +54,7 @@ int main() {
                 break;
         }
         
-        sequencer.prepareGridView(grid);
-        gui.draw(grid, editor.getCurrentSequence(), editor.getCurrentStep(), std::vector<std::pair<int, int>>());                
+        gui.draw();
     }
 
     // playbackThread.join(); // Ensure the playback thread has fini

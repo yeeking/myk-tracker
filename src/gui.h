@@ -6,6 +6,8 @@
 #include <string> 
 #include <ncurses.h>
 #include <panel.h>
+#include "Sequencer.h"
+#include "SequencerUtils.h"
 
 // how many there are
 #define START_ROWS 20
@@ -74,9 +76,9 @@ class GridWidget{
 
 class GUI {
     public:
-        GUI();
+        GUI(Sequencer* sequencer, SequencerEditor* seqEditor);
         ~GUI();
-        void draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells);
+        void draw();
         
     private:
         void initGUI();
@@ -90,6 +92,10 @@ class GUI {
         WINDOW* buttonWin;
         PANEL* buttonPanel; 
         
+
+        Sequencer* sequencer;
+        SequencerEditor* seqEditor;
+
         /** pointer to currently active grid*/
         GridWidget* activeGrid;
 

@@ -18,8 +18,19 @@ std::vector<double>* Step::getDataDirect()
 }
 
 
+std::string Step::toStringFlat() 
+{
+  return std::to_string(this->data[Step::note1Ind]);
+}
+
+std::vector<std::vector<std::string>> Step::toStringGrid() 
+{ 
+  std::vector<std::vector<std::string>> stringGrid = {{"row 1 col 1", "row 1 col 2"}};
+  return stringGrid;
+} 
+
 /** sets the data stored in this step */
-void Step::setData(std::vector<double> _data)
+void Step::setData(std::vector<double>& _data)
 {
   this->data = _data; 
 }
@@ -393,6 +404,7 @@ Sequencer::Sequencer(unsigned int seqCount, unsigned int seqLength)
   {
     sequences.push_back(Sequence{this, seqLength});
   }
+  updateGridOfStrings();
 }
 
 Sequencer::~Sequencer()
@@ -505,6 +517,7 @@ void Sequencer::setStepData(unsigned int sequence, unsigned int step, std::vecto
 {
   if (!assertSeqAndStep(sequence, step)) return;
   sequences[sequence].setStepData(step, data);
+  updateGridOfStrings();
 }
 /** update a single value in the  data 
  * stored at a step in the sequencer */
@@ -512,6 +525,7 @@ void Sequencer::updateStepData(unsigned int sequence, unsigned int step, unsigne
 {
   if (!assertSeqAndStep(sequence, step)) return;
   sequences[sequence].updateStepData(step, dataInd, value);
+  updateGridOfStrings();
 }
 
 /** retrieve the data for the current step */
@@ -520,6 +534,14 @@ std::vector<double> Sequencer::getCurrentStepData(int sequence) const
   if (sequence >= sequences.size() || sequence < 0) return std::vector<double>{};
   return sequences[sequence].getCurrentStepData();
 }
+
+Step* Sequencer::getStep(int seq, int step)
+{
+  if (!assertSeqAndStep(seq, step)) assert(false); // hard crash for that, sorry 
+
+  return sequences[seq].getStep(step); 
+}
+
 
 /** retrieve the data for a specific step */
 std::vector<double> Sequencer::getStepData(int sequence, int step) const
@@ -589,8 +611,10 @@ if (sequence >= sequences.size() || sequence < 0)
 return true;
 }
 
-void Sequencer::prepareGridView(std::vector<std::vector<std::string>>& gridView)
+
+void Sequencer::updateGridOfStrings()
 {
+  std::vector<std::vector<std::string>> gridView;
   // need to get the data in the sequences, convert it to strings and 
   // store it into the sent grid view
   if (gridView.size() != howManySequences()){
@@ -607,8 +631,14 @@ void Sequencer::prepareGridView(std::vector<std::vector<std::string>>& gridView)
     assert(gridView[seq].size() >= howManySteps(seq));
     for (int step=0; step<howManySteps(seq) && step<gridView[seq].size(); ++ step){
       // step then seq, i.e. col then row
-      gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + std::to_string((int)getStepDataDirect(seq, step)->at(Step::note1Ind));
+      //gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + std::to_string((int)getStepDataDirect(seq, step)->at(Step::note1Ind));
+      gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + sequences[seq].getStep(step)->toStringFlat();   
     }
   }
+  seqAsStringGrid = gridView; 
 }
 
+std::vector<std::vector<std::string>>& Sequencer::getGridOfStrings()
+{
+  return seqAsStringGrid;
+}

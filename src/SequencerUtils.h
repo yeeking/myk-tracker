@@ -1,3 +1,5 @@
+#pragma once 
+
 /** TODO: split this to h and cpp */
 #include "Sequencer.h"
 
@@ -5,9 +7,9 @@
  * Top level modes that dictate the main UI output 
  */
 enum class SequencerEditorMode {
+  selectingSeqAndStep, 
   settingSeqLength, 
   configuringSequence, 
-  selectingSeqAndStep, 
   editingStep
   };
 
@@ -93,8 +95,9 @@ class SequencerEditor {
   void incrementTicksPerStep();
   void decrementTicksPerStep();
   static void nextSequenceType(Sequencer* seqr, unsigned int sequence);
+  /** returns the index of the sequence that the editor is currently focused on*/
   int getCurrentSequence() const;
-  /**  */
+  /** returns the index of the step that the editor is currently focused on*/
   int getCurrentStep() const;
   /** which data point in a step are we editing */
   int getCurrentStepIndex() const;

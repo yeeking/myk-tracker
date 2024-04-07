@@ -2,6 +2,7 @@
 #include <cassert> 
 #include <iostream>
 
+
 GridWidget::GridWidget() : lastStartCol{0}, lastStartRow{0}
 {
 
@@ -102,7 +103,7 @@ void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cel
     attroff(COLOR_PAIR(NOSEL_COLOR_PAIR));
 }
 
-GUI::GUI() 
+GUI::GUI(Sequencer* _sequencer, SequencerEditor* _seqEditor) : sequencer{_sequencer}, seqEditor{_seqEditor}
 {
     seqFocus = true; 
     activeGrid = &seqGrid;
@@ -156,11 +157,19 @@ int GUI::min(int a, int b) {
     return a < b ? a : b;
 }
 
-void GUI::draw(std::vector<std::vector<std::string>>& data, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells)
+void GUI::draw()
 {
-
-    seqGrid.draw(seqWin, data, 8, 6, cursorX, cursorY, highlightCells);
-       
+    
+    seqGrid.draw(seqWin, sequencer->getGridOfStrings(), 8, 6, 
+                seqEditor->getCurrentSequence(), 
+                seqEditor->getCurrentStep(), std::vector<std::pair<int, int>>());
+    
+    if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
+        Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        std::vector<std::vector<std::string>> grid = step->toStringGrid();
+        stepGrid.draw(seqWin, grid, 4, 6, 0, 0, std::vector<std::pair<int, int>>());
+    }
     update_panels();
     doupdate();
 }
+
