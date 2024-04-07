@@ -123,8 +123,15 @@ void SequencerEditor::enterAtCursor()
   switch (editMode)
   {
   case SequencerEditorMode::selectingSeqAndStep:
+  {
     editMode = SequencerEditorMode::editingStep;
+    // check if we are in the right bounds with our cursor
+    int maxRows = sequencer->getStepDataDirect(currentSequence, currentStep)->size();
+    if (currentStepRow >= maxRows) currentStepRow = maxRows - 1;//
+    int maxCols = sequencer->getStepDataDirect(currentSequence, currentStep)->at(0).size();
+    if (currentStepCol >= maxCols) currentStepRow = maxCols - 1;
     break;
+  }
   case SequencerEditorMode::settingSeqLength:
     editMode = SequencerEditorMode::configuringSequence;
     break;
@@ -150,14 +157,38 @@ void SequencerEditor::enterNoteData(double note)
   if (editMode == SequencerEditorMode::editingStep ||
       editMode == SequencerEditorMode::selectingSeqAndStep)
   {
+    // work out which data row we are editing
+    int dataRow = 0;// default to first row in sequencer view
+    int dataCol = Step::note1Ind;// default to note in sequencer view
+    if (editMode == SequencerEditorMode::editingStep){
+      // can be different in step view
+      dataRow = currentStepRow;
+      dataCol = currentStepCol;
+    }
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     // set a default vel and len if needed.
-    if (data[0][Step::velInd] == 0)
-      data[0][Step::velInd] = 64;
-    if (data[0][Step::lengthInd] == 0)
-      data[0][Step::lengthInd] = 1; // two ticks
-
-    data[0][Step::note1Ind] = note;
+    if (data[dataRow][Step::velInd] == 0)
+      data[dataRow][Step::velInd] = 64;
+    if (data[dataRow][Step::lengthInd] == 0)
+      data[dataRow][Step::lengthInd] = 1; // two ticks
+    switch (dataCol){
+      case Step::note1Ind:
+      {
+        data[dataRow][dataCol] = note;
+        break;
+      }
+      case Step::velInd:
+      {
+        data[dataRow][dataCol] = note;
+        break;
+      }
+      case Step::lengthInd:
+      {
+        data[dataRow][dataCol] = fmod(note, 4) + 1;
+        break;
+      }
+      
+    }
     writeStepData(data);
   }
   // after note update in this mode,
