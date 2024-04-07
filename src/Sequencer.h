@@ -34,22 +34,22 @@ class Step{
   
     Step();
     /** returns a copy of the data stored in this step*/
-    std::vector<double> getData() const;
+    std::vector<std::vector<double>> getData() const;
     /** get the memory address of the data in this step for direct access*/
-    std::vector<double>* getDataDirect();
+    std::vector<std::vector<double>>* getDataDirect();
     /** returns a one line string representation of the step's data */
     std::string toStringFlat() ;
     /** returns a grid representation of the step's data*/
     std::vector<std::vector<std::string>> toStringGrid() ;
     
     /** sets the data stored in this step and updates stored string representations */
-    void setData(std::vector<double>& data);
+    void setData(std::vector<std::vector<double>>& data);
     /** update one value in the data vector for this step and updates stored string representations*/
     void updateData(unsigned int dataInd, double value);
     /** set the callback function called when this step is triggered*/
-    void setCallback(std::function<void(std::vector<double>*)> callback);
+    void setCallback(std::function<void(std::vector<std::vector<double>>*)> callback);
     /** return the callback for this step*/
-    std::function<void(std::vector<double>*)> getCallback();
+    std::function<void(std::vector<std::vector<double>>*)> getCallback();
     /** trigger this step, causing it to pass its data to its callback*/
     void trigger();
     /** toggle the activity status of this step*/
@@ -57,9 +57,9 @@ class Step{
     /** returns the activity status of this step */
     bool isActive() const;
   private: 
-    std::vector<double> data;
+    std::vector<std::vector<double>> data;
     bool active;
-    std::function<void(std::vector<double>*)> stepCallback;
+    std::function<void(std::vector<std::vector<double>>*)> stepCallback;
 
 };
 
@@ -83,14 +83,14 @@ class Sequence{
     /** is this step number valid? */
     bool assertStep(unsigned int step) const;
     /** retrieve a copy of the step data for the sent step */
-    std::vector<double> getStepData(int step) const;
+    std::vector<std::vector<double>> getStepData(int step) const;
     /** get the momory address of the step data for the requested step*/
-    std::vector<double>* getStepDataDirect(int step);
+    std::vector<std::vector<double>>* getStepDataDirect(int step);
     Step* getStep(int step);
     /** set the data for the sent step */
-    void setStepData(unsigned int step, std::vector<double> data);
+    void setStepData(unsigned int step, std::vector<std::vector<double>> data);
     /** retrieve a copy of the step data for the current step */
-    std::vector<double> getCurrentStepData() const;
+    std::vector<std::vector<double>> getCurrentStepData() const;
     /** what is the length of the sequence? Length is a temporary property used
      * to define the playback length. There might be more steps than this
     */
@@ -132,7 +132,7 @@ class Sequence{
     void updateStepData(unsigned int step, unsigned int dataInd, double value);
     /** set the callback for the sent step */
     void setStepCallback(unsigned int step, 
-                  std::function<void (std::vector<double>*)> callback);
+                  std::function<void (std::vector<std::vector<double>>*)> callback);
     std::string stepToString(int step) const;
     /** activate/ deactive the sent step */
     void toggleActive(unsigned int step);
@@ -228,24 +228,24 @@ class Sequencer  {
       /** increase the length of the sequence by 1, adding new steps in memory if needed, as per setSequenceLength*/
       void extendSequence(unsigned int sequence);
       /** set all callbacks on all sequences to the sent lambda*/
-      void setAllCallbacks(std::function<void (std::vector<double>*)> callback);
+      void setAllCallbacks(std::function<void (std::vector<std::vector<double>>*)> callback);
       /** set a callback lambda for all steps in a sequence*/
-      void setSequenceCallback(unsigned int sequence, std::function<void (std::vector<double>*)> callback);
+      void setSequenceCallback(unsigned int sequence, std::function<void (std::vector<std::vector<double>>*)> callback);
       /** set a lambda to call when a particular step in a particular sequence happens */
-      void setStepCallback(unsigned int sequence, unsigned int step, std::function<void (std::vector<double>*)> callback);
+      void setStepCallback(unsigned int sequence, unsigned int step, std::function<void (std::vector<std::vector<double>>*)> callback);
       /** update the data stored at a step in the sequencer */
-      void setStepData(unsigned int sequence, unsigned int step, std::vector<double> data);
+      void setStepData(unsigned int sequence, unsigned int step, std::vector<std::vector<double>> data);
       /** update a single value in the  data 
        * stored at a step in the sequencer */
       void updateStepData(unsigned int sequence, unsigned int step, unsigned int dataInd, double value);
       /** retrieve the data for the current step */
-      std::vector<double> getCurrentStepData(int sequence) const;
+      std::vector<std::vector<double>> getCurrentStepData(int sequence) const;
       /** returns a pointer to the step object stored at the sent sequence and step position */
       Step* getStep(int seq, int step);
       /** retrieve a copy of the data for a specific step */
-      std::vector<double> getStepData(int sequence, int step) const;
+      std::vector<std::vector<double>> getStepData(int sequence, int step) const;
       /** get the memory address of the data for this step for direct viewing/ editing*/
-      std::vector<double>* getStepDataDirect(int sequence, int step);
+      std::vector<std::vector<double>>* getStepDataDirect(int sequence, int step);
       void toggleActive(int sequence, int step);
       bool isStepActive(int sequence, int step) const;
       void addStepListener();

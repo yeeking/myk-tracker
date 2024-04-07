@@ -85,7 +85,7 @@ switch(editMode)
         }
         return;
     case SequencerEditorMode::editingStep:
-        //std::vector<double> data = {0, 0, 0};
+        //std::vector<std::vector<double>> data = {0, 0, 0};
         //writeStepData(data);
         sequencer->toggleActive(currentSequence, currentStep);
         return;  
@@ -150,12 +150,12 @@ if (note < 0 || note > 127) return;
     if (editMode == SequencerEditorMode::editingStep ||
         editMode == SequencerEditorMode::selectingSeqAndStep)
     {     
-      std::vector<double> data = sequencer->getStepData(currentSequence, currentStep);
+      std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
       // set a default vel and len if needed.
-      if (data[Step::velInd] == 0) data[Step::velInd] = 64;
-      if (data[Step::lengthInd] == 0) data[Step::lengthInd] = 1; // two ticks
+      if (data[0][Step::velInd] == 0) data[0][Step::velInd] = 64;
+      if (data[0][Step::lengthInd] == 0) data[0][Step::lengthInd] = 1; // two ticks
       
-      data[Step::note1Ind] = note; 
+      data[0][Step::note1Ind] = note; 
       writeStepData(data);
     }
     // after note update in this mode, 
@@ -200,7 +200,7 @@ void SequencerEditor::moveCursorLeft()
     }
     case SequencerEditorMode::editingStep:
     {
-        std::vector<double> data = sequencer->getStepData(currentSequence, currentStep);
+        std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
         incrementStepData(data, sequencer->getSequenceType(currentSequence));
         writeStepData(data);
         break;  
@@ -235,7 +235,7 @@ void SequencerEditor::moveCursorRight()
     }
     case SequencerEditorMode::editingStep:
     {
-        std::vector<double> data = sequencer->getStepData(currentSequence, currentStep);
+        std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
         decrementStepData(data, sequencer->getSequenceType(currentSequence));
         writeStepData(data);
         break;  
@@ -345,7 +345,7 @@ SequencerEditorSubMode SequencerEditor::cycleSubModeRight(SequencerEditorSubMode
 /** decreas the sent step's data
  * based on current edit mode and edit sub mode
 */
-void SequencerEditor::decrementStepData(std::vector<double>& data, SequenceType seqType)
+void SequencerEditor::decrementStepData(std::vector<std::vector<double>>& data, SequenceType seqType)
 {
   double decrement{0};
   double targetIndex{Step::note1Ind};
@@ -406,9 +406,9 @@ void SequencerEditor::decrementStepData(std::vector<double>& data, SequenceType 
       break;
     }
   }
-  double now = data[targetIndex];
-  data[targetIndex] -= decrement;
-  if (data[targetIndex] < min) data[targetIndex] = min;
+  double now = data[0][targetIndex];
+  data[0][targetIndex] -= decrement;
+  if (data[0][targetIndex] < min) data[0][targetIndex] = min;
 
 }
 
@@ -416,7 +416,7 @@ void SequencerEditor::decrementStepData(std::vector<double>& data, SequenceType 
 /** increase the sent step's data
  * based on current edit mode and edit sub mode
 */
-void SequencerEditor::incrementStepData(std::vector<double>& data, SequenceType seqType)
+void SequencerEditor::incrementStepData(std::vector<std::vector<double>>& data, SequenceType seqType)
 {
   double increment{0};
   double targetIndex{Step::note1Ind};
@@ -476,9 +476,9 @@ void SequencerEditor::incrementStepData(std::vector<double>& data, SequenceType 
       break;
     }
   }
-  double now = data[targetIndex];
-  data[targetIndex] += increment;
-  if (data[targetIndex] > max) data[targetIndex] = max;
+  double now = data[0][targetIndex];
+  data[0][targetIndex] += increment;
+  if (data[0][targetIndex] > max) data[0][targetIndex] = max;
 
 }
 /** increase the value of the seq param relating to the 
@@ -520,8 +520,8 @@ void SequencerEditor::decrementSeqConfigParam()
 
 void SequencerEditor::incrementChannel()
 {
-    std::vector<double> data2 = sequencer->getStepData(currentSequence, 0);
-    int channel = data2[Step::channelInd];
+    std::vector<std::vector<double>> data2 = sequencer->getStepData(currentSequence, 0);
+    int channel = data2[0][Step::channelInd];
     channel = (channel + 1) % 16;
     for (int step=0; step < sequencer->howManySteps(currentSequence); ++step)
     {
@@ -531,8 +531,8 @@ void SequencerEditor::incrementChannel()
 void SequencerEditor::decrementChannel()
 {
     // set the channel based on step 0
-    std::vector<double> data2 = sequencer->getStepData(currentSequence, 0);
-    unsigned int channel = data2[Step::channelInd];
+    std::vector<std::vector<double>> data2 = sequencer->getStepData(currentSequence, 0);
+    unsigned int channel = data2[0][Step::channelInd];
     channel = (channel - 1) % 16;
     if (channel > 16) channel = 16;
     if (channel < 0) channel = 0;    
@@ -611,14 +611,14 @@ void SequencerEditor::setCurrentStep(int step)
 currentStep = step;
 }
 /** write the sent data to the current step and sequence */
-void SequencerEditor::writeStepData(std::vector<double> data)
+void SequencerEditor::writeStepData(std::vector<std::vector<double>> data)
 {
 sequencer->setStepData(currentSequence, currentStep, data);
 }
 /** write the sent data to the sequence at 'currentSequence' - 1D data version for simple one value per step -style sequences*/
-void SequencerEditor::writeSequenceData(std::vector<double> data)
+void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
 {
-std::vector<double> stepData = {0};
+std::vector<std::vector<double>> stepData = {{0}};
 for (int i=0; i<sequencer->howManySteps(currentSequence); ++i)
 {
     stepData[0] = data[i % data.size()]; // wrap it around :) 
@@ -626,11 +626,11 @@ for (int i=0; i<sequencer->howManySteps(currentSequence); ++i)
 }
 }
 /** write the sent data to a sequence - 1D data version */
-void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
-{
-for (int i=0; i<sequencer->howManySteps(currentSequence); ++i)
-{
-    sequencer->setStepData(currentSequence, currentSequence, data[i % data.size()]); // wrap around
-}
-}
+// void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
+// {
+// for (int i=0; i<sequencer->howManySteps(currentSequence); ++i)
+// {
+//     sequencer->setStepData(currentSequence, currentSequence, data[i % data.size()]); // wrap around
+// }
+// }
 

@@ -74,12 +74,12 @@ class SequencerEditor {
   /** decreas the sent step's data
    * based on current edit mode and edit sub mode
   */
-  void decrementStepData(std::vector<double>& data, SequenceType seqType);
+  void decrementStepData(std::vector<std::vector<double>>& data, SequenceType seqType);
 
   /** increase the sent step's data
    * based on current edit mode and edit sub mode
   */
-  void incrementStepData(std::vector<double>& data, SequenceType seqType);
+  void incrementStepData(std::vector<std::vector<double>>& data, SequenceType seqType);
   /** increase the value of the seq param relating to the 
    * current subMode
   */
@@ -106,11 +106,11 @@ class SequencerEditor {
   /** move the cursor to a specific step*/
   void setCurrentStep(int step);
   /** write the sent data to the current step and sequence */
-  void writeStepData(std::vector<double> data);
+  void writeStepData(std::vector<std::vector<double>> data);
   /** write the sent data to the sequence at 'currentSequence' - 1D data version for simple one value per step -style sequences*/
-  void writeSequenceData(std::vector<double> data);
-  /** write the sent data to a sequence - 1D data version */
   void writeSequenceData(std::vector<std::vector<double>> data);
+  /** write the sent data to a sequence - 1D data version */
+  // void writeSequenceData(std::vector<std::vector<double>> data);
 
   private:
     Sequencer* sequencer; 

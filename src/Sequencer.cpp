@@ -2,17 +2,18 @@
 
 Step::Step() : active{true}
 {
-  data.push_back(0.0);
-  data.push_back(0.0);
-  data.push_back(0.0);
-  data.push_back(0.0);
+  data.push_back(std::vector<double>());
+  data[0].push_back(0.0);
+  data[0].push_back(0.0);
+  data[0].push_back(0.0);
+  data[0].push_back(0.0);
 }
 /** returns a copy of the data stored in this step*/
-std::vector<double> Step::getData() const
+std::vector<std::vector<double>> Step::getData() const
 {
   return data; 
 }
-std::vector<double>* Step::getDataDirect()
+std::vector<std::vector<double>>* Step::getDataDirect()
 {
   return &data; 
 }
@@ -20,22 +21,22 @@ std::vector<double>* Step::getDataDirect()
 
 std::string Step::toStringFlat() 
 {
-  return std::to_string(this->data[Step::note1Ind]);
+  return std::to_string(this->data[0][Step::note1Ind]);
 }
 
 std::vector<std::vector<std::string>> Step::toStringGrid() 
 { 
   std::vector<std::vector<std::string>> grid;
   grid.resize(1);
-  grid[0].resize(this->data.size());
-  for (int i=0;i<data.size(); ++i){
-    grid[0][i] = std::to_string(i) + ":" + std::to_string(data[i]);
+  grid[0].resize(this->data[0].size());
+  for (int i=0;i<data[0].size(); ++i){
+    grid[0][i] = std::to_string(i) + ":" + std::to_string(data[0][i]);
   }
   return grid;
 } 
 
 /** sets the data stored in this step */
-void Step::setData(std::vector<double>& _data)
+void Step::setData(std::vector<std::vector<double>>& _data)
 {
   this->data = _data; 
 }
@@ -43,14 +44,14 @@ void Step::setData(std::vector<double>& _data)
 /** update one value in the data vector for this step*/
 void Step::updateData(unsigned int dataInd, double value)
 {
-  if(dataInd < data.size()) data[dataInd] = value;
+  if(dataInd < data[0].size()) data[0][dataInd] = value;
 }
 /** set the callback function called when this step is triggered*/
-void Step::setCallback(std::function<void(std::vector<double>*)> callback)
+void Step::setCallback(std::function<void(std::vector<std::vector<double>>*)> callback)
 {
   this->stepCallback = callback;
 }
-std::function<void(std::vector<double>*)> Step::getCallback()
+std::function<void(std::vector<std::vector<double>>*)> Step::getCallback()
 {
   return this->stepCallback;
 }
@@ -59,7 +60,7 @@ std::function<void(std::vector<double>*)> Step::getCallback()
 void Step::trigger() 
 { 
   //std::cout << "Step::trigger" << std::endl;
-  if (active && data[Step::note1Ind] != 0) stepCallback(&data);
+  if (active && data[0][Step::note1Ind] != 0) stepCallback(&data);
 }
 /** toggle the activity status of this step*/
 void Step::toggleActive()
@@ -84,7 +85,7 @@ Sequence::Sequence(Sequencer* _sequencer,
   for (unsigned int i=0;i<seqLength;i++)
   {
     Step s;
-    s.setCallback([i](std::vector<double>* data){
+    s.setCallback([i](std::vector<std::vector<double>>* data){
       if (data->size() > 0){
         //std::cout << "Sequence::Sequence default step callback " << i << " triggered " << std::endl;
       }
@@ -159,10 +160,10 @@ void Sequence::triggerMidiNoteType()
   // apply changes to local copy if needed      
   if(transpose > 0) 
   {
-    std::vector<double>* data = s.getDataDirect();//  s.getData();
-    if (data->at(Step::note1Ind) > 0 ) // only transpose non-zero steps
+    std::vector<std::vector<double>>* data = s.getDataDirect();//  s.getData();
+    if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
     {
-      data->at(Step::note1Ind) = fmod(data->at(Step::note1Ind) + transpose, 127);
+      data->at(0).at(Step::note1Ind) = fmod(data->at(0).at(Step::note1Ind) + transpose, 127);
     }
   }
   // trigger the local, adjusted copy of the step
@@ -174,14 +175,14 @@ void Sequence::triggerMidiDrumType()
   // make a local copy
   Step s = steps[currentStep];
   // transpose the midi note into the drum domain
-  std::vector<double>* data = s.getDataDirect();//  s.getData();
-  data->at(Step::note1Ind) = midiScaleToDrum[(int) data->at(Step::note1Ind)];
+  std::vector<std::vector<double>>* data = s.getDataDirect();//  s.getData();
+  data->at(0).at(Step::note1Ind) = midiScaleToDrum[(int) data->at(0).at(Step::note1Ind)];
   // apply changes to local copy if needed      
   if(transpose > 0) 
   {
-    if (data->at(Step::note1Ind) > 0 ) // only transpose non-zero steps
+    if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
     {
-      data->at(Step::note1Ind) = fmod(data->at(Step::note1Ind) + transpose, 127);
+      data->at(0).at(Step::note1Ind) = fmod(data->at(0).at(Step::note1Ind) + transpose, 127);
     }
   }
   s.trigger();
@@ -189,21 +190,7 @@ void Sequence::triggerMidiDrumType()
 
 void Sequence::triggerMidiChordType()
 {
-  // // this is a nice tricksy one
-  // // we make several local copies of the step
-  // // one for each note in the chord
-  // std::vector<double>* data = steps[currentStep].getDataDirect();
-  // assert(data->size() > 0);
-  // if (data->at(Step::note1Ind) > 0)
-  // {
-  // std::vector<double> notes = ChordUtils::getChord(
-  //  (unsigned int) data->at(Step::note1Ind),
-  //  (unsigned int) data->at(Step::velInd)
-  // );
-  // std::cout << "Sequencer::note " << notes[0] << ":" << data->at(Step::note1Ind) << std::endl;
-
  
-  // }   
 }
 
 
@@ -211,11 +198,11 @@ void Sequence::triggerTransposeType()
 {
   if (steps[currentStep].isActive() )
   {
-    std::vector<double>* data = steps[currentStep].getDataDirect();
-    if (data->at(Step::note1Ind) > 0 ) // only transpose non-zero steps
+    std::vector<std::vector<double>>* data = steps[currentStep].getDataDirect();
+    if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
     {
-      sequencer->getSequence(data->at(Step::channelInd))->setTranspose(
-        fmod(data->at(Step::note1Ind), 12) );
+      sequencer->getSequence(data->at(0).at(Step::channelInd))->setTranspose(
+        fmod(data->at(0).at(Step::note1Ind), 12) );
     }
   }
 } 
@@ -225,11 +212,11 @@ void Sequence::triggerLengthType()
   //return; 
   if (steps[currentStep].isActive())
   {
-    std::vector<double>* data = steps[currentStep].getDataDirect();
-    if (data->at(Step::note1Ind) > 0 ) // only transpose non-zero steps
+    std::vector<std::vector<double>>* data = steps[currentStep].getDataDirect();
+    if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
     {
-      sequencer->getSequence(data->at(Step::channelInd))->setLengthAdjustment(
-        fmod(data->at(Step::note1Ind), 12) );
+      sequencer->getSequence(data->at(0).at(Step::channelInd))->setLengthAdjustment(
+        fmod(data->at(0).at(Step::note1Ind), 12) );
     }
   }   
 }
@@ -238,11 +225,11 @@ void Sequence::triggerTickType()
 {
   if (steps[currentStep].isActive() )
   {
-    std::vector<double>* data = steps[currentStep].getDataDirect();
-    if (data->at(Step::note1Ind) > 0 ) // only transpose non-zero steps
+    std::vector<std::vector<double>>* data = steps[currentStep].getDataDirect();
+    if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
     {
-      sequencer->getSequence(data->at(Step::channelInd))->setTicksPerStep(
-        fmod(data->at(Step::note1Ind), 6) );
+      sequencer->getSequence(data->at(0).at(Step::channelInd))->setTicksPerStep(
+        fmod(data->at(0).at(Step::note1Ind), 6) );
     }
   }
 } 
@@ -282,11 +269,11 @@ bool Sequence::assertStep(unsigned int step) const
   if (step >= steps.size() || step < 0) return false;
   return true; 
 }
-std::vector<double> Sequence::getStepData(int step) const
+std::vector<std::vector<double>> Sequence::getStepData(int step) const
 {
   return steps[step].getData();
 }
-std::vector<double>* Sequence::getStepDataDirect(int step)
+std::vector<std::vector<double>>* Sequence::getStepDataDirect(int step)
 {
   return steps[step].getDataDirect();
 }
@@ -296,7 +283,7 @@ Step* Sequence::getStep(int step)
 }
 
 
-std::vector<double> Sequence::getCurrentStepData() const
+std::vector<std::vector<double>> Sequence::getCurrentStepData() const
 {
   return steps[currentStep].getData();
 }
@@ -331,7 +318,7 @@ void Sequence::setLength(int length)
   currentLength = length;
 }
 
-void Sequence::setStepData(unsigned int step, std::vector<double> data)
+void Sequence::setStepData(unsigned int step, std::vector<std::vector<double>> data)
 {
   steps[step].setData(data);
 }
@@ -342,15 +329,15 @@ void Sequence::updateStepData(unsigned int step, unsigned int dataInd, double va
 }
 
 void Sequence::setStepCallback(unsigned int step, 
-                  std::function<void (std::vector<double>*)> callback)
+                  std::function<void (std::vector<std::vector<double>>*)> callback)
 {
   steps[step].setCallback(callback);
 }
 std::string Sequence::stepToString(int step) const
 {
-  std::vector<double> data = getStepData(step);
+  std::vector<std::vector<double>> data = getStepData(step);
   if (data.size() > 0)
-    return std::to_string(data[0]);
+    return std::to_string(data[0][0]);
   else
     return "---";
 }
@@ -425,7 +412,7 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer* otherSeq)
   { 
     this->sequences[seq].setType(otherSeq->sequences[seq].getType());
     // assign the same channel
-    double channel = otherSeq->sequences[seq].getStepDataDirect(0)->at(Step::channelInd);
+    double channel = otherSeq->sequences[seq].getStepDataDirect(0)->at(0).at(Step::channelInd);
     for (int step=0; step < this->sequences[seq].howManySteps(); ++step)
     {
       this->updateStepData(seq, step, Step::channelInd, channel);
@@ -494,7 +481,7 @@ void Sequencer::extendSequence(unsigned int sequence)
 }
 
 
-void Sequencer::setAllCallbacks(std::function<void (std::vector<double>*)> callback)
+void Sequencer::setAllCallbacks(std::function<void (std::vector<std::vector<double>>*)> callback)
 {
     for (int seq = 0; seq < sequences.size(); ++seq)
     {
@@ -503,7 +490,7 @@ void Sequencer::setAllCallbacks(std::function<void (std::vector<double>*)> callb
 }
 
 /** set a callback for all steps in a sequence*/
-void Sequencer::setSequenceCallback(unsigned int sequence, std::function<void (std::vector<double>*)> callback)
+void Sequencer::setSequenceCallback(unsigned int sequence, std::function<void (std::vector<std::vector<double>>*)> callback)
 {
   for (int step = 0; step<sequences[sequence].howManySteps(); ++step)
   {
@@ -512,13 +499,13 @@ void Sequencer::setSequenceCallback(unsigned int sequence, std::function<void (s
 }
 
 /** set a lambda to call when a particular step in a particular sequence happens */
-void Sequencer::setStepCallback(unsigned int sequence, unsigned int step, std::function<void (std::vector<double>*)> callback)
+void Sequencer::setStepCallback(unsigned int sequence, unsigned int step, std::function<void (std::vector<std::vector<double>>*)> callback)
 {
     sequences[sequence].setStepCallback(step, callback); 
 }
 
 /** update the data stored at a step in the sequencer */
-void Sequencer::setStepData(unsigned int sequence, unsigned int step, std::vector<double> data)
+void Sequencer::setStepData(unsigned int sequence, unsigned int step, std::vector<std::vector<double>> data)
 {
   if (!assertSeqAndStep(sequence, step)) return;
   sequences[sequence].setStepData(step, data);
@@ -534,9 +521,9 @@ void Sequencer::updateStepData(unsigned int sequence, unsigned int step, unsigne
 }
 
 /** retrieve the data for the current step */
-std::vector<double> Sequencer::getCurrentStepData(int sequence) const
+std::vector<std::vector<double>> Sequencer::getCurrentStepData(int sequence) const
 {
-  if (sequence >= sequences.size() || sequence < 0) return std::vector<double>{};
+  if (sequence >= sequences.size() || sequence < 0) return std::vector<std::vector<double>>{};
   return sequences[sequence].getCurrentStepData();
 }
 
@@ -549,13 +536,13 @@ Step* Sequencer::getStep(int seq, int step)
 
 
 /** retrieve the data for a specific step */
-std::vector<double> Sequencer::getStepData(int sequence, int step) const
+std::vector<std::vector<double>> Sequencer::getStepData(int sequence, int step) const
 {
-  if (!assertSeqAndStep(sequence, step)) return std::vector<double>{};
+  if (!assertSeqAndStep(sequence, step)) return std::vector<std::vector<double>>{};
   return sequences[sequence].getStepData(step);
 }
 /** retrieve the data for a specific step */
-std::vector<double>* Sequencer::getStepDataDirect(int sequence, int step)
+std::vector<std::vector<double>>* Sequencer::getStepDataDirect(int sequence, int step)
 {
   assert(sequence < sequences.size());
   assert(step < sequences[sequence].howManySteps());
