@@ -5,7 +5,7 @@
 #include <ncurses.h>
 #include "gui.h"
 #include "Sequencer.h"
-#include "SequencerUtils.h"
+#include "SequencerEditor.h"
 
 std::atomic<int> playbackPosition(0);
 // Main loop

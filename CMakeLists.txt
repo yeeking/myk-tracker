@@ -19,7 +19,7 @@ include_directories(${CURSES_INCLUDE_DIR})
 # build the chord utils
 # add_library(chordutil-lib src/ChordUtils.cpp)
 # build the sequencer library
-add_library(seq-lib src/Sequencer.cpp src/SequencerUtils.cpp)
+add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp)
 # build the midi utils
 # add_library(midi-lib src/MidiUtils.cpp)
 

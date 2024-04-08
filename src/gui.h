@@ -7,7 +7,7 @@
 #include <ncurses.h>
 #include <panel.h>
 #include "Sequencer.h"
-#include "SequencerUtils.h"
+#include "SequencerEditor.h"
 
 // how many there are
 #define START_ROWS 20
