@@ -183,8 +183,8 @@ void SequencerEditor::enterNoteData(double note)
         break;
       }
       case Step::lengthInd:
-      {
         data[dataRow][dataCol] = fmod(note, 4) + 1;
+      {
         break;
       }
       
