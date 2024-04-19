@@ -176,8 +176,10 @@ void GUI::draw()
                     seqEditor->getCurrentStep(), std::vector<std::pair<int, int>>());
     }
     if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
-        Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-        std::vector<std::vector<std::string>> grid = step->toStringGrid();
+        
+        // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        // std::vector<std::vector<std::string>> grid = step->toStringGrid();
+        std::vector<std::vector<std::string>> grid = sequencer->stepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
         stepGrid.draw(seqWin, grid, 4, 6, 
         seqEditor->getCurrentStepCol(), 
         seqEditor->getCurrentStepRow(), 

@@ -12,7 +12,10 @@
 #include <functional>
 #include <map>
 #include <cmath> // fmod
-#include <assert.h>     /* assert */
+#include <assert.h>  
+#include <mutex> 
+#include <shared_mutex>
+#include <memory>
 //#include "ChordUtils.h"
 // #include "SequencerUtils.h"
 // #include "MidiUtils.h"
@@ -33,19 +36,36 @@ class Step{
     const static int lengthInd{3};
     
     Step();
+
+  // deleting the copy constructors as the unique_ptr 
+  // in the Step class is not copyable. This means
+  // you need to use std::move to 'copy' instances of step around. 
+    Step(const Step& other) = delete;
+    Step& operator=(const Step& other) = delete;
+    Step(Step&& other) noexcept = default;
+    Step& operator=(Step&& other) noexcept = default;
+
+
     /** returns a copy of the data stored in this step*/
-    std::vector<std::vector<double>> getData() const;
+    std::vector<std::vector<double>> getData();
     /** get the memory address of the data in this step for direct access*/
-    std::vector<std::vector<double>>* getDataDirect();
+    // std::vector<std::vector<double>>* getDataDirect();
     /** returns a one line string representation of the step's data */
     std::string toStringFlat() ;
     /** returns a grid representation of the step's data*/
     std::vector<std::vector<std::string>> toStringGrid() ;
     
-    /** sets the data stored in this step and updates stored string representations */
-    void setData(std::vector<std::vector<double>>& data);
+    /** sets the data stored in this step to a copy of the sent data and updates stored string representations */
+    void setData(const std::vector<std::vector<double>>& data);
+    /** get the value of the step data at the sent row and column, where each row is a distinct event and the col is the data vector for that event  */
+    double getDataAt(int row, int col);
+    /** how many rows of data for this step? */
+    int howManyDataRows();
+    /** how many cols of data for this step? */
+    int howManyDataCols();
+
     /** update one value in the data vector for this step and updates stored string representations*/
-    void updateData(unsigned int dataInd, double value);
+    void updateData(unsigned int row, unsigned int col, double value);
     /** set the callback function called when this step is triggered*/
     void setCallback(std::function<void(std::vector<std::vector<double>>*)> callback);
     /** return the callback for this step*/
@@ -57,6 +77,9 @@ class Step{
     /** returns the activity status of this step */
     bool isActive() const;
   private: 
+  // clever mutex that allows multiple concurrent reads but a block-all write 
+    // std::shared_mutex rw_mutex;
+    std::unique_ptr<std::shared_mutex> rw_mutex;
     std::vector<std::vector<double>> data;
     bool active;
     std::function<void(std::vector<std::vector<double>>*)> stepCallback;
@@ -83,14 +106,20 @@ class Sequence{
     /** is this step number valid? */
     bool assertStep(unsigned int step) const;
     /** retrieve a copy of the step data for the sent step */
-    std::vector<std::vector<double>> getStepData(int step) const;
-    /** get the momory address of the step data for the requested step*/
-    std::vector<std::vector<double>>* getStepDataDirect(int step);
-    Step* getStep(int step);
+    std::vector<std::vector<double>> getStepData(int step);
+    /** returns the value of the sent step's data at the sent index*/
+    double getStepDataAt(int step, int row, int col);
+    std::string stepToStringFlat(int step);
+    int howManyStepDataRows(int step);
+    /** returns the number of columns of data at the sent step (data is a rectangle)*/
+    int howManyStepDataCols(int step);
+    // /** get the momory address of the step data for the requested step*/
+    // std::vector<std::vector<double>>* getStepDataDirect(int step);
+    // Step* getStep(int step);
     /** set the data for the sent step */
     void setStepData(unsigned int step, std::vector<std::vector<double>> data);
     /** retrieve a copy of the step data for the current step */
-    std::vector<std::vector<double>> getCurrentStepData() const;
+    std::vector<std::vector<double>> getCurrentStepData();
     /** what is the length of the sequence? Length is a temporary property used
      * to define the playback length. There might be more steps than this
     */
@@ -129,11 +158,11 @@ class Sequence{
     unsigned int howManySteps() const ;
     
     /** update a single data value in a given step*/
-    void updateStepData(unsigned int step, unsigned int dataInd, double value);
+    void updateStepData(unsigned int step, unsigned int row, unsigned int col, double value);
     /** set the callback for the sent step */
     void setStepCallback(unsigned int step, 
                   std::function<void (std::vector<std::vector<double>>*)> callback);
-    std::string stepToString(int step) const;
+    std::string stepToString(int step);
     /** activate/ deactive the sent step */
     void toggleActive(unsigned int step);
     /** check if the sent step is active */
@@ -150,6 +179,7 @@ class Sequence{
     void deactivateProcessors();
     /** clear the data from this sequence. Does not clear step event functions*/
     void reset();
+    std::vector<std::vector<std::string>> stepAsGridOfStrings(int step);
 
   private:
     /** function called when the sequence ticks and it is SequenceType::midiNote
@@ -237,15 +267,21 @@ class Sequencer  {
       void setStepData(unsigned int sequence, unsigned int step, std::vector<std::vector<double>> data);
       /** update a single value in the  data 
        * stored at a step in the sequencer */
-      void updateStepData(unsigned int sequence, unsigned int step, unsigned int dataInd, double value);
-      /** retrieve the data for the current step */
-      std::vector<std::vector<double>> getCurrentStepData(int sequence) const;
+      void updateStepData(unsigned int sequence, unsigned int step, unsigned int roq, unsigned int col, double value);
+      /** retrieve a copy the data for the current step */
+      std::vector<std::vector<double>> getCurrentStepData(int sequence);
       /** returns a pointer to the step object stored at the sent sequence and step position */
-      Step* getStep(int seq, int step);
+      // Step* getStep(int seq, int step);
       /** retrieve a copy of the data for a specific step */
-      std::vector<std::vector<double>> getStepData(int sequence, int step) const;
+      std::vector<std::vector<double>> getStepData(int sequence, int step);
+      /** return the sent seq, sent step, sent row, sent col's value */
+      double getStepDataAt(int seq, int step, int row, int col) const;
+      /** returns the numner of rows of data at the sent step*/
+      int howManyStepDataRows(int seq, int step);
+      /** returns the number of columns of data at the sent step (data is a rectangle)*/
+      int howManyStepDataCols(int seq, int step);
       /** get the memory address of the data for this step for direct viewing/ editing*/
-      std::vector<std::vector<double>>* getStepDataDirect(int sequence, int step);
+      //std::vector<std::vector<double>>* getStepDataDirect(int sequence, int step);
       void toggleActive(int sequence, int step);
       bool isStepActive(int sequence, int step) const;
       void addStepListener();
@@ -255,6 +291,9 @@ class Sequencer  {
       std::string toString();
   /** get a vector of vector of strings representing the sequence. */
      std::vector<std::vector<std::string>>& getGridOfStrings();
+     /** vector of vector of string representation of a step*/
+     std::vector<std::vector<std::string>> stepAsGridOfStrings(int seq, int step);
+     
     private:
       bool assertSeqAndStep(unsigned int sequence, unsigned int step) const;
         
@@ -265,6 +304,7 @@ class Sequencer  {
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
       std::vector<std::vector<std::string>> seqAsStringGrid;
+      
 
 };
 
