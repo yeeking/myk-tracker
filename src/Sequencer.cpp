@@ -1,5 +1,5 @@
 #include "Sequencer.h"
-Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}//, command(CommandRegistry::getCommand("MIDINote"))
+Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}
 {
   data.push_back(std::vector<double>());
   data[0].push_back(0.0);
@@ -40,7 +40,7 @@ int Step::howManyDataCols()
 std::string Step::toStringFlat() 
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
-  return std::to_string((int)this->data[0][Step::note1Ind]);
+  return std::to_string((int)this->data[0][Step::p2Ind]);
 }
 
 std::vector<std::vector<std::string>> Step::toStringGrid() 
@@ -60,16 +60,16 @@ std::vector<std::vector<std::string>> Step::toStringGrid()
       //  colData.push_back(std::to_string(row) + ":" + std::to_string(col) + ":" + std::to_string((int)data[row][col]));
       std::string field = "";
       switch (col){
-        case Step::note1Ind:
+        case Step::p2Ind:
           field = "n: ";
           break;
-        case Step::velInd:
+        case Step::p3Ind:
           field = "v: ";
           break;
-        case Step::lengthInd:
+        case Step::p4Ind:
           field = "d: ";
           break;
-        case Step::channelInd:
+        case Step::p1Ind:
           field = "c: ";
           break;
       }
@@ -89,11 +89,29 @@ void Step::setData(const std::vector<std::vector<double>>& _data)
 }
 
 /** update one value in the data vector for this step*/
-void Step::updateData(unsigned int row, unsigned int col, double value)
+void Step::setDataAt(unsigned int row, unsigned int col, double value)
 {
   // uni lock as writing data 
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  if(col < data[row].size()) data[row][col] = value;
+  assert(row < data.size());
+  assert(col < data[row].size());
+
+  // apply data constraints based on current command
+  if (col == Step::cmdInd){// changing the command
+     int maxCmds = CommandRegistry::countCommands();
+     if (value >= maxCmds) value = maxCmds - 1;
+     if (value < 0) value = 0;
+  }
+  else if (col > Step::cmdInd){// it is one of the parameter columns
+    Command cmd = CommandRegistry::getCommand(data[row][Step::cmdInd]);
+    int pInd = col - 1;
+    Parameter& p = cmd.parameters[pInd];
+    // now constrain the value to the range of the parameter
+    if (value > p.max) value = p.max;
+    if (value < p.min) value = p.min;
+    if(col < data[row].size()) data[row][col] = value;
+  }
+
 }
 /** set the callback function called when this step is triggered*/
 void Step::setCallback(std::function<void(std::vector<std::vector<double>>*)> callback)
@@ -113,7 +131,7 @@ void Step::trigger()
   //std::cout << "Step::trigger" << std::endl;
   if (active) {
     for (std::vector<double>& dataRow: data){
-      Command cmd = CommandRegistry::getCommand("MIDINote");
+      Command cmd = CommandRegistry::getCommand(dataRow[Step::cmdInd]);
       // if (dataRow[Step::note1Ind] != 0){
       //   if (command.execute) {
       //     command.execute(&dataRow);
@@ -372,8 +390,8 @@ void Sequence::ensureEnoughStepsForLength(int length)
         steps[0].getCallback()
       );
       // set the channel
-      int channel = steps[0].getDataAt(0, Step::channelInd);
-      s.updateData(0, Step::channelInd, channel);
+      int channel = steps[0].getDataAt(0, Step::p1Ind);
+      s.setDataAt(0, Step::p1Ind, channel);
       steps.push_back(std::move(s));
     }
   }
@@ -394,7 +412,7 @@ void Sequence::setStepData(unsigned int step, std::vector<std::vector<double>> d
 /** update a single data value in a given step*/
 void Sequence::setStepDataAt(unsigned int step, unsigned int row, unsigned int col, double value)
 {
-  steps[step].updateData(row, col, value);
+  steps[step].setDataAt(row, col, value);
 }
 
 void Sequence::setStepCallback(unsigned int step, 
@@ -497,11 +515,11 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer* otherSeq)
   { 
     this->sequences[seq].setType(otherSeq->sequences[seq].getType());
     // assign the same channel
-    double channel = otherSeq->sequences[seq].getStepDataAt(0, 0, Step::channelInd);
+    double channel = otherSeq->sequences[seq].getStepDataAt(0, 0, Step::p1Ind);
     for (int step=0; step < this->sequences[seq].howManySteps(); ++step)
     {
       // note this assumes a single row step
-      this->setStepDataAt(seq, step, 0, Step::channelInd, channel);
+      this->setStepDataAt(seq, step, 0, Step::p1Ind, channel);
     } 
   }
 }

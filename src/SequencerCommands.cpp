@@ -27,10 +27,10 @@ void CommandRegistry::initialize() {
 //     // CommandRegistry::count ++; 
     Command midiNote{
             "MIDINote", "M", "Plays a MIDI note",
-            { Parameter("Channel", "C", 0, 100, 1, 0), 
+            { Parameter("Channel", "C", 0, 16, 1, 0), 
               Parameter("Note", "N", 0, 127, 1, 0), 
               Parameter("Vel", "V", 0, 127, 1, 0), 
-              Parameter("Dur", "D", 0, 127, 1, 0)},
+              Parameter("Dur", "D", 0, 8, 1, 0)},
             [](std::vector<double>* params) {
                 if (params->size() < 2) {
                     std::cerr << "Add command requires exactly two parameters." << std::endl;
@@ -44,6 +44,18 @@ void CommandRegistry::initialize() {
     CommandManager::commands["MIDINote"] = midiNote;
     CommandManager::commandsDouble[0] = midiNote;
 
+}
+
+
+Command CommandRegistry::getCommand(double commandInd) {
+    if (CommandManager::commands.size() == 0){
+        CommandRegistry::initialize();
+    }
+    auto it = CommandManager::commandsDouble.find(commandInd);
+    if (it != CommandManager::commandsDouble.end()) {
+        return it->second;
+    }
+    throw std::runtime_error("Command not found: " + std::to_string(commandInd));
 }
 
 // // Get a command by name
@@ -62,4 +74,9 @@ void CommandRegistry::initialize() {
 void CommandRegistry::executeCommand(const std::string& commandName, std::vector<double>* params) {
     // const Command& cmd = getCommand(commandName);
     // cmd.execute(params);
+}
+
+int CommandRegistry::countCommands()
+{
+    return CommandManager::commands.size();
 }

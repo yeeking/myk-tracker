@@ -10,9 +10,13 @@
 struct Parameter {
     std::string name;
     std::string shortName;
+    /** highest value for this parameter */
     double min;
+    /** lowest value for this parameter */
     double max;
+    /** increment step size for this parameter */
     double step;
+    /** default value for this parameter */
     double defaultValue;
 
     Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue);
@@ -35,8 +39,10 @@ struct Command {
 // Static class to manage commands
 class CommandRegistry {
 public:
+    static Command getCommand(double commandInd);
     static Command getCommand(const std::string& commandName);
     static void executeCommand(const std::string& commandName, std::vector<double>* params);
+    static int countCommands();
 private: 
 /** populates the commands variable */
     static void initialize();

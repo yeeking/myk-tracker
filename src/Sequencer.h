@@ -36,13 +36,12 @@ class Step{
   
   public:
   // these should be in an enum probably
-    const static int cmdInd{0};
-    const static int channelInd{1};
-    const static int note1Ind{2};
-    const static int velInd{3};
-    const static int lengthInd{4};
+    const static int cmdInd{0}; // maps to CommandRegistry::getCommand
+    const static int p1Ind{1};
+    const static int p2Ind{2};
+    const static int p3Ind{3};
+    const static int p4Ind{4};
     
-
     Step();
 
   // deleting the copy constructors as the unique_ptr 
@@ -73,7 +72,7 @@ class Step{
     int howManyDataCols();
 
     /** update one value in the data vector for this step and updates stored string representations*/
-    void updateData(unsigned int row, unsigned int col, double value);
+    void setDataAt(unsigned int row, unsigned int col, double value);
     /** set the callback function called when this step is triggered*/
     void setCallback(std::function<void(std::vector<std::vector<double>>*)> callback);
     /** return the callback for this step*/
@@ -85,10 +84,12 @@ class Step{
     /** returns the activity status of this step */
     bool isActive() const;
   private: 
+
   // clever mutex that allows multiple concurrent reads but a block-all write 
-    // std::shared_mutex rw_mutex;
-    // Command command;
+  // it has to be a shared pointer as the mutex constrains how this object can be used
+  // which is also why I have set the constructors up how I have above.
     std::unique_ptr<std::shared_mutex> rw_mutex;
+    /** the data for the step: rows and columns*/
     std::vector<std::vector<double>> data;
     bool active;
     std::function<void(std::vector<std::vector<double>>*)> stepCallback;
