@@ -151,9 +151,13 @@ void GUI::drawControlPanel(WINDOW* win){
     werase(win);
     std::string cursorStatus = 
         std::to_string(seqEditor->getCurrentSequence()) + ":" 
-        + std::to_string(seqEditor->getCurrentStep()) + "/"
-        + std::to_string(sequencer->howManySteps(seqEditor->getCurrentSequence()));
-
+        + std::to_string(seqEditor->getCurrentStep()) + "["
+        + std::to_string(sequencer->howManySteps(seqEditor->getCurrentSequence())) + "]";
+    // add the info about the current if editing a step 
+    if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
+        int rowsInStep = sequencer->howManyStepDataRows(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        cursorStatus += ":" + std::to_string(seqEditor->getCurrentStepRow()) + "[" + std::to_string(rowsInStep) + "]";
+    }
 
     std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}};
     seqControlGrid.draw(win, buttons, 1, 6, 2, 0, std::vector<std::pair<int, int>>());

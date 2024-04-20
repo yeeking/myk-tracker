@@ -16,9 +16,15 @@
 #include <mutex> 
 #include <shared_mutex>
 #include <memory>
+#include <unordered_map>
+
+#include "SequencerCommands.h"
 //#include "ChordUtils.h"
 // #include "SequencerUtils.h"
 // #include "MidiUtils.h"
+
+
+
 
 /** default spec for a Step's data, 
  * so data[0] specifies length, 
@@ -30,11 +36,13 @@ class Step{
   
   public:
   // these should be in an enum probably
-    const static int channelInd{0};
-    const static int note1Ind{1};
-    const static int velInd{2};
-    const static int lengthInd{3};
+    const static int cmdInd{0};
+    const static int channelInd{1};
+    const static int note1Ind{2};
+    const static int velInd{3};
+    const static int lengthInd{4};
     
+
     Step();
 
   // deleting the copy constructors as the unique_ptr 
@@ -79,6 +87,7 @@ class Step{
   private: 
   // clever mutex that allows multiple concurrent reads but a block-all write 
     // std::shared_mutex rw_mutex;
+    // Command command;
     std::unique_ptr<std::shared_mutex> rw_mutex;
     std::vector<std::vector<double>> data;
     bool active;
@@ -158,7 +167,7 @@ class Sequence{
     unsigned int howManySteps() const ;
     
     /** update a single data value in a given step*/
-    void updateStepData(unsigned int step, unsigned int row, unsigned int col, double value);
+    void setStepDataAt(unsigned int step, unsigned int row, unsigned int col, double value);
     /** set the callback for the sent step */
     void setStepCallback(unsigned int step, 
                   std::function<void (std::vector<std::vector<double>>*)> callback);
@@ -265,17 +274,20 @@ class Sequencer  {
       void setStepCallback(unsigned int sequence, unsigned int step, std::function<void (std::vector<std::vector<double>>*)> callback);
       /** update the data stored at a step in the sequencer */
       void setStepData(unsigned int sequence, unsigned int step, std::vector<std::vector<double>> data);
+      /** return the sent seq, sent step, sent row, sent col's value */
+      double getStepDataAt(int seq, int step, int row, int col);
       /** update a single value in the  data 
        * stored at a step in the sequencer */
-      void updateStepData(unsigned int sequence, unsigned int step, unsigned int roq, unsigned int col, double value);
+      void setStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col, double value);
       /** retrieve a copy the data for the current step */
       std::vector<std::vector<double>> getCurrentStepData(int sequence);
       /** returns a pointer to the step object stored at the sent sequence and step position */
       // Step* getStep(int seq, int step);
       /** retrieve a copy of the data for a specific step */
       std::vector<std::vector<double>> getStepData(int sequence, int step);
-      /** return the sent seq, sent step, sent row, sent col's value */
-      double getStepDataAt(int seq, int step, int row, int col) const;
+      /** set the sent seq, sent step, sent row, sent col's value */
+      // void setStepDataAt(int seq, int step, int row, int col, double val);
+      
       /** returns the numner of rows of data at the sent step*/
       int howManyStepDataRows(int seq, int step);
       /** returns the number of columns of data at the sent step (data is a rectangle)*/

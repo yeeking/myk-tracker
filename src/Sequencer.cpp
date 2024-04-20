@@ -1,7 +1,8 @@
 #include "Sequencer.h"
-Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}
+Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}//, command(CommandRegistry::getCommand("MIDINote"))
 {
   data.push_back(std::vector<double>());
+  data[0].push_back(0.0);
   data[0].push_back(0.0);
   data[0].push_back(0.0);
   data[0].push_back(0.0);
@@ -92,7 +93,7 @@ void Step::updateData(unsigned int row, unsigned int col, double value)
 {
   // uni lock as writing data 
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  if(col < data[0].size()) data[0][col] = value;
+  if(col < data[row].size()) data[row][col] = value;
 }
 /** set the callback function called when this step is triggered*/
 void Step::setCallback(std::function<void(std::vector<std::vector<double>>*)> callback)
@@ -110,7 +111,16 @@ void Step::trigger()
   // shared lock as reading 
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   //std::cout << "Step::trigger" << std::endl;
-  if (active && data[0][Step::note1Ind] != 0) stepCallback(&data);
+  if (active) {
+    for (std::vector<double>& dataRow: data){
+      Command cmd = CommandRegistry::getCommand("MIDINote");
+      // if (dataRow[Step::note1Ind] != 0){
+      //   if (command.execute) {
+      //     command.execute(&dataRow);
+      //   }      
+      // }
+    } 
+  }
 }
 /** toggle the activity status of this step*/
 void Step::toggleActive()
@@ -341,7 +351,6 @@ double Sequence::getStepDataAt(int step, int row, int col)
 //   return &steps[step];
 // }
 
-
 std::vector<std::vector<double>> Sequence::getCurrentStepData()
 {
   return steps[currentStep].getData();
@@ -383,7 +392,7 @@ void Sequence::setStepData(unsigned int step, std::vector<std::vector<double>> d
   steps[step].setData(data);
 }
 /** update a single data value in a given step*/
-void Sequence::updateStepData(unsigned int step, unsigned int row, unsigned int col, double value)
+void Sequence::setStepDataAt(unsigned int step, unsigned int row, unsigned int col, double value)
 {
   steps[step].updateData(row, col, value);
 }
@@ -492,7 +501,7 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer* otherSeq)
     for (int step=0; step < this->sequences[seq].howManySteps(); ++step)
     {
       // note this assumes a single row step
-      this->updateStepData(seq, step, 0, Step::channelInd, channel);
+      this->setStepDataAt(seq, step, 0, Step::channelInd, channel);
     } 
   }
 }
@@ -592,10 +601,10 @@ void Sequencer::setStepData(unsigned int sequence, unsigned int step, std::vecto
 }
 /** update a single value in the  data 
  * stored at a step in the sequencer */
-void Sequencer::updateStepData(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col, double value)
+void Sequencer::setStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col, double value)
 {
   if (!assertSeqAndStep(sequence, step)) return;
-  sequences[sequence].updateStepData(step, row, col, value);
+  sequences[sequence].setStepDataAt(step, row, col, value);
   updateGridOfStrings();
 }
 
@@ -743,4 +752,14 @@ std::vector<std::vector<std::string>> Sequencer::stepAsGridOfStrings(int seq, in
   return sequences[seq].stepAsGridOfStrings(step);
 }
 
+double Sequencer::getStepDataAt(int seq, int step, int row, int col)
+{
+  return sequences[seq].getStepDataAt(step, row, col);
+}
+
+
+// void Sequencer::setStepDataAt(int seq, int step, int row, int col, double val)
+// {
+//   sequences[seq].setStepDataAt(step, row, col, val);
+// }
 

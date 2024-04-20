@@ -88,9 +88,15 @@ int main() {
             case '\t':
                 break;
             case '-':
-                editor.decrementAtCursor();
+                editor.removeRow();
                 break;
             case '=':
+                editor.addRow();
+                break;
+            case '[':
+                editor.decrementAtCursor();
+                break;
+            case ']':
                 editor.incrementAtCursor();
                 break;
             case KEY_DC:
