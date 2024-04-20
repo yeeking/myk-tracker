@@ -51,7 +51,7 @@ std::vector<std::vector<std::string>> Step::toStringGrid()
   // each data sub vector should be on its own row 
   //
   std::vector<std::vector<std::string>> grid;
-  assert (data.size() > 0);
+  // assert (data.size() > 0);
   // a row is
   for (int col=0;col<data[0].size();++col){
     std::vector<std::string> colData;
@@ -59,21 +59,12 @@ std::vector<std::vector<std::string>> Step::toStringGrid()
     for (int row=0;row<data.size();++row){
       //  colData.push_back(std::to_string(row) + ":" + std::to_string(col) + ":" + std::to_string((int)data[row][col]));
       std::string field = "";
-      switch (col){
-        case Step::p2Ind:
-          field = "n: ";
-          break;
-        case Step::p3Ind:
-          field = "v: ";
-          break;
-        case Step::p4Ind:
-          field = "d: ";
-          break;
-        case Step::p1Ind:
-          field = "c: ";
-          break;
+      Command cmd = CommandRegistry::getCommand(data[row][Step::cmdInd]);
+      // command col
+      if (col == Step::cmdInd){
+        colData.push_back(cmd.shortName);
       }
-      colData.push_back(field + std::to_string((int)data[row][col]));
+      else {colData.push_back(cmd.parameters[col-1].shortName + std::to_string((int)data[row][col]));}
     }
     grid.push_back(colData); 
   }
@@ -85,7 +76,7 @@ void Step::setData(const std::vector<std::vector<double>>& _data)
 {
   // uni lock as writing data 
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  this->data = _data; // copy it over 
+  this->data = std::move(_data); // copy it over 
 }
 
 /** update one value in the data vector for this step*/
@@ -109,8 +100,8 @@ void Step::setDataAt(unsigned int row, unsigned int col, double value)
     // now constrain the value to the range of the parameter
     if (value > p.max) value = p.max;
     if (value < p.min) value = p.min;
-    if(col < data[row].size()) data[row][col] = value;
   }
+  if(col < data[row].size()) data[row][col] = value;
 
 }
 /** set the callback function called when this step is triggered*/
@@ -132,6 +123,8 @@ void Step::trigger()
   if (active) {
     for (std::vector<double>& dataRow: data){
       Command cmd = CommandRegistry::getCommand(dataRow[Step::cmdInd]);
+      CommandRegistry::executeCommand(dataRow[Step::cmdInd], &dataRow);
+      // CommandRegistry::executeCommand()
       // if (dataRow[Step::note1Ind] != 0){
       //   if (command.execute) {
       //     command.execute(&dataRow);

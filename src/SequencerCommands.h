@@ -39,9 +39,10 @@ struct Command {
 // Static class to manage commands
 class CommandRegistry {
 public:
-    static Command getCommand(double commandInd);
-    static Command getCommand(const std::string& commandName);
-    static void executeCommand(const std::string& commandName, std::vector<double>* params);
+    static Command& getCommand(double commandInd);
+    static Command& getCommand(const std::string& commandName);
+    // static void executeCommand(const std::string& commandName, std::vector<double>* params);
+    static void executeCommand(double cmdInd, std::vector<double>* params);
     static int countCommands();
 private: 
 /** populates the commands variable */
