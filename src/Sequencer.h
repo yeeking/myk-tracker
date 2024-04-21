@@ -79,8 +79,11 @@ class Step{
     std::function<void(std::vector<std::vector<double>>*)> getCallback();
     /** trigger this step, causing it to pass its data to its callback. if row > -1, only trigger that row */
     void trigger(int row = -1);
+    void resetRow(int row);
     /** toggle the activity status of this step*/
     void toggleActive();
+    void activate();
+    void deactivate();
     /** returns the activity status of this step */
     bool isActive() const;
   private: 
@@ -191,6 +194,9 @@ class Sequence{
     void deactivateProcessors();
     /** clear the data from this sequence. Does not clear step event functions*/
     void reset();
+    /** set this step, row values to zero */
+    void resetStepRow(int step, int row);
+
     std::vector<std::vector<std::string>> stepAsGridOfStrings(int step);
 
   private:
@@ -281,9 +287,10 @@ class Sequencer  {
       void setStepData(unsigned int sequence, unsigned int step, std::vector<std::vector<double>> data);
       /** return the sent seq, sent step, sent row, sent col's value */
       double getStepDataAt(int seq, int step, int row, int col);
-      /** update a single value in the  data 
-       * stored at a step in the sequencer */
+      /** update a single value in the  data tored at a step in the sequencer */
       void setStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col, double value);
+      /** set all values for this seq, step, row to zero */
+      void resetStepRow(int sequence, int step, int row);
       /** retrieve a copy the data for the current step */
       std::vector<std::vector<double>> getCurrentStepData(int sequence);
       /** returns a pointer to the step object stored at the sent sequence and step position */

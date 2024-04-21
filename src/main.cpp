@@ -80,7 +80,7 @@ int main() {
 
     });
 
-    clock.start(1000);
+    clock.start(50);
 
     gui.draw();
     
@@ -93,7 +93,7 @@ int main() {
             if (ch == key_note.first) 
             { 
                 // key_note_match = true;
-                editor.enterNoteData(key_note.second); 
+                editor.enterDataAtCursor(key_note.second); 
                 break;// break the for loop
             }
         }

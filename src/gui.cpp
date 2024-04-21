@@ -21,6 +21,7 @@ void GridWidget::addGridListener(GridListener* listener)
 void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data, 
                       int rowsToDisplay, int colsToDisplay, 
                       int cursorCol, int cursorRow, 
+                      // col, row/ x,y
                       std::vector<std::pair<int, int>> highlightCells)
 {
     werase(win); // Clear the screen
@@ -65,6 +66,13 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
             CellState state{CellState::NotSelected};
             
             if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
+            // check against the highlight cells
+            for (const std::pair<int, int>& p :  highlightCells){
+                if (p.first == col && p.second == row){
+                    state = CellState::Playing;
+                    break;
+                }
+            }
             // Draw the cell
             assert (data.size() >= col);
             // std::cout << "want row " << row << " got rows " << data[col].size() << std::endl;
@@ -174,10 +182,16 @@ void GUI::draw()
 {
     // if(false){
     if (seqEditor->getEditMode() == SequencerEditorMode::selectingSeqAndStep){
-
+        std::vector<std::pair<int, int>> playHeads;
+        for (int col=0;col<sequencer->howManySequences(); ++col){  
+            std::pair<int, int> colRow = {col, sequencer->getCurrentStep(col)};
+            playHeads.push_back(std::move(colRow));
+        }
         seqGrid.draw(seqWin, sequencer->getGridOfStrings(), 8, 6, 
                     seqEditor->getCurrentSequence(), 
-                    seqEditor->getCurrentStep(), std::vector<std::pair<int, int>>());
+                    seqEditor->getCurrentStep(), 
+                    playHeads);
+                    //std::vector<std::pair<int, int>>());
     }
     if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
         

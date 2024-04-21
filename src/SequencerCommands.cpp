@@ -41,7 +41,9 @@ void CommandProcessor::initialiseCommands() {
               Parameter("Dur", "D", 0, 8, 1, 0)},
             [](std::vector<double>* params) {
                 assert(params->size() == 5);// need 5 params as we also get sent the cmd index as a param
-                CommandData::midiUtils.playSingleNote((int) (*params)[Step::p1Ind],(int) (*params)[Step::p2Ind], (int) (*params)[Step::p3Ind], (long) (*params)[Step::p4Ind]);
+                if ((*params)[Step::p2Ind] > 0) {// there is a valid note
+                    CommandData::midiUtils.playSingleNote((int) (*params)[Step::p1Ind],(int) (*params)[Step::p2Ind], (int) (*params)[Step::p3Ind], (long) (*params)[Step::p4Ind]);
+                }
                 
             }
     };
