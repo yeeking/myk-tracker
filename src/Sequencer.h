@@ -77,8 +77,8 @@ class Step{
     void setCallback(std::function<void(std::vector<std::vector<double>>*)> callback);
     /** return the callback for this step*/
     std::function<void(std::vector<std::vector<double>>*)> getCallback();
-    /** trigger this step, causing it to pass its data to its callback*/
-    void trigger();
+    /** trigger this step, causing it to pass its data to its callback. if row > -1, only trigger that row */
+    void trigger(int row = -1);
     /** toggle the activity status of this step*/
     void toggleActive();
     /** returns the activity status of this step */
@@ -111,6 +111,8 @@ class Sequence{
     Sequence(Sequencer* sequencer, unsigned int seqLength = 16, unsigned short midiChannel = 1);
     /** go to the next step. If trigger is false, just move along without triggering. */
     void tick(bool trigger = true);
+    /** trigger a step's callback right now */
+    void triggerStep(int step, int row);
     /** which step are you on? */
     unsigned int getCurrentStep() const;
     /** is this step number valid? */
@@ -253,6 +255,8 @@ class Sequencer  {
 
       /** go to the next step. If trigger is false, just move along without triggering. */
       void tick(bool trigger = true);
+      /** trigget a step's callback right now */
+      void triggerStep(int seq, int step, int row);
       /** return a pointer to the sequence with sent id*/
       Sequence* getSequence(unsigned int sequence);
       /** the the type of sequence to type*/

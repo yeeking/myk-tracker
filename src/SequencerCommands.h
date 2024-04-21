@@ -37,8 +37,9 @@ struct Command {
 
 
 // Static class to manage commands
-class CommandRegistry {
+class CommandProcessor {
 public:
+    static void initialiseMIDI();
     static Command& getCommand(double commandInd);
     static Command& getCommand(const std::string& commandName);
     // static void executeCommand(const std::string& commandName, std::vector<double>* params);
@@ -46,6 +47,6 @@ public:
     static int countCommands();
 private: 
 /** populates the commands variable */
-    static void initialize();
+    static void initialiseCommands();
 };
 

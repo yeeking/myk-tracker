@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include <iostream>
 #include <assert.h>
+#include "MidiUtils.h"
+#include "Sequencer.h"
 
 // Constructor definitions
 Parameter::Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue)
@@ -13,19 +15,24 @@ Command::Command(const std::string& name, const std::string& shortName, const st
     : name(name), shortName(shortName), description(description), parameters(parameters), execute(std::move(execute)) {}
 
 
-// namespaced global vars used in the command registry
-// for speed / not passing around an object too much
-namespace CommandManager {
+// namespaced global vars used in the command processing lambdas
+// for speed / avoiding passing around objects too much
+// since they are placed in this CPP file, they are not visible
+// elsewhere. So the CommandProcessor class provides static functions that call on this data
+// its like a lazy man's singleton 
+namespace CommandData {
     // this is for string based access to commands
     std::unordered_map<std::string, Command> commands;
     // this is for fast double-based access to commands
     // when the double is stored in the Step data
     std::unordered_map<double, Command> commandsDouble;
+    MidiUtils midiUtils;
+
 }
 
 // // Initialize the command registry
-void CommandRegistry::initialize() {
-//     // CommandRegistry::count ++; 
+void CommandProcessor::initialiseCommands() {
+    // get a MIDI link going
     Command midiNote{
             "MIDINote", "Midi", "Plays a MIDI note",
             { Parameter("Channel", "C", 0, 16, 1, 0), 
@@ -34,10 +41,8 @@ void CommandRegistry::initialize() {
               Parameter("Dur", "D", 0, 8, 1, 0)},
             [](std::vector<double>* params) {
                 assert(params->size() == 5);// need 5 params as we also get sent the cmd index as a param
-                std::cout << "Executing command " << "MIDINote" << std::endl;
-                for (double d : *params){
-                    std::cout << d << std::endl;
-                }
+                CommandData::midiUtils.playSingleNote((int) (*params)[Step::p1Ind],(int) (*params)[Step::p2Ind], (int) (*params)[Step::p3Ind], (long) (*params)[Step::p4Ind]);
+                
             }
     };
     Command sample{
@@ -55,60 +60,58 @@ void CommandRegistry::initialize() {
             }
     };
 
-    CommandManager::commands[midiNote.shortName] = midiNote;
-    CommandManager::commandsDouble[0] = midiNote;
-    CommandManager::commands[sample.shortName] = sample;
-    CommandManager::commandsDouble[1] = sample;
+    CommandData::commands[midiNote.shortName] = midiNote;
+    CommandData::commandsDouble[0] = midiNote;
+    CommandData::commands[sample.shortName] = sample;
+    CommandData::commandsDouble[1] = sample;
 }
 
 
-Command& CommandRegistry::getCommand(double commandInd) {
-    if (CommandManager::commands.size() == 0){
-        CommandRegistry::initialize();
+Command& CommandProcessor::getCommand(double commandInd) {
+    if (CommandData::commands.size() == 0){
+        CommandProcessor::initialiseCommands();
     }
-    assert(CommandManager::commandsDouble.find(commandInd) != CommandManager::commandsDouble.end());
+    assert(CommandData::commandsDouble.find(commandInd) != CommandData::commandsDouble.end());
     
-    auto it = CommandManager::commandsDouble.find(commandInd);
-    if (it != CommandManager::commandsDouble.end()) {
+    auto it = CommandData::commandsDouble.find(commandInd);
+    if (it != CommandData::commandsDouble.end()) {
         return it->second;
     }
     throw std::runtime_error("Command not found: " + std::to_string(commandInd));
 }
 
 // // Get a command by name
-Command& CommandRegistry::getCommand(const std::string& commandName) {
-    if (CommandManager::commands.size() == 0){
-        CommandRegistry::initialize();
+Command& CommandProcessor::getCommand(const std::string& commandName) {
+    if (CommandData::commands.size() == 0){
+        CommandProcessor::initialiseCommands();
     }
-    auto it = CommandManager::commands.find(commandName);
-    if (it != CommandManager::commands.end()) {
+    auto it = CommandData::commands.find(commandName);
+    if (it != CommandData::commands.end()) {
         return it->second;
     }
     throw std::runtime_error("Command not found: " + commandName);
 }
 
-// // Function to execute a command
-// void CommandRegistry::executeCommand(const std::string& commandName, std::vector<double>* params) {
-//     // const Command& cmd = getCommand(commandName);
-//     // cmd.execute(params);
-// }
 
-void CommandRegistry::executeCommand(double cmdInd, std::vector<double>* params)
+void CommandProcessor::executeCommand(double cmdInd, std::vector<double>* params)
 {
-       if (CommandManager::commands.size() == 0){
-        CommandRegistry::initialize();
+    if (CommandData::commands.size() == 0){
+        CommandProcessor::initialiseCommands();
     }
-    // assert(myMap.find("banana") != myMap.end());
-    // CommandManager::commandsDouble(cmdInd)
-    assert(CommandManager::commandsDouble.find(cmdInd) != CommandManager::commandsDouble.end());
-    CommandManager::commandsDouble[cmdInd].execute(params);// later: add in other stuff commands need
+    assert(CommandData::commandsDouble.find(cmdInd) != CommandData::commandsDouble.end());
+    CommandData::commandsDouble[cmdInd].execute(params);// later: add in other stuff commands need
 }
 
 
-int CommandRegistry::countCommands()
+int CommandProcessor::countCommands()
 {
-    if (CommandManager::commands.size() == 0){
-        CommandRegistry::initialize();
+    if (CommandData::commands.size() == 0){
+        CommandProcessor::initialiseCommands();
     }
-    return CommandManager::commands.size();
+    return CommandData::commands.size();
+}
+
+void CommandProcessor::initialiseMIDI()
+{
+    CommandData::midiUtils.interactiveInitMidi();
 }

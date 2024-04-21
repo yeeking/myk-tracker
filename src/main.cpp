@@ -6,7 +6,8 @@
 #include "gui.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
-
+#include "SequencerCommands.h"
+#include "SimpleClock.h"
 std::atomic<int> playbackPosition(0);
 // Main loop
 
@@ -62,13 +63,25 @@ void playbackThreadFunction(int maxPosition) {
 }
 
 int main() {
-
-     std::map<char, double> key_to_note = getKeyboardToMidiNotes();
+    CommandProcessor::initialiseMIDI();
+    SimpleClock clock;
+    
+    std::map<char, double> key_to_note = getKeyboardToMidiNotes();
     // maintains the data and sate of the sequencer
     Sequencer sequencer{4, 16};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
     GUI gui{&sequencer, &editor};
+    
+    
+    clock.setCallback([&sequencer, &gui](){
+        sequencer.tick();
+        gui.draw();
+
+    });
+
+    clock.start(1000);
+
     gui.draw();
     
     int ch;
@@ -117,13 +130,19 @@ int main() {
             case KEY_RIGHT:
                 editor.moveCursorRight();
                 break;
+            case 'p':
+                if (editor.getEditMode() == SequencerEditorMode::editingStep){
+                    sequencer.triggerStep(editor.getCurrentSequence(), editor.getCurrentStep(), editor.getCurrentStepRow());
+                }
+                // sequencer
+                break;
             default:
                 break;
         }
         
         gui.draw();
     }
-
+    clock.stop();
     // playbackThread.join(); // Ensure the playback thread has fini
     return 0;
 }

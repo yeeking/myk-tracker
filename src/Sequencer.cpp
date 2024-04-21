@@ -59,7 +59,7 @@ std::vector<std::vector<std::string>> Step::toStringGrid()
     for (int row=0;row<data.size();++row){
       //  colData.push_back(std::to_string(row) + ":" + std::to_string(col) + ":" + std::to_string((int)data[row][col]));
       std::string field = "";
-      Command cmd = CommandRegistry::getCommand(data[row][Step::cmdInd]);
+      Command cmd = CommandProcessor::getCommand(data[row][Step::cmdInd]);
       // command col
       if (col == Step::cmdInd){
         colData.push_back(cmd.shortName);
@@ -89,12 +89,12 @@ void Step::setDataAt(unsigned int row, unsigned int col, double value)
 
   // apply data constraints based on current command
   if (col == Step::cmdInd){// changing the command
-     int maxCmds = CommandRegistry::countCommands();
+     int maxCmds = CommandProcessor::countCommands();
      if (value >= maxCmds) value = maxCmds - 1;
      if (value < 0) value = 0;
   }
   else if (col > Step::cmdInd){// it is one of the parameter columns
-    Command cmd = CommandRegistry::getCommand(data[row][Step::cmdInd]);
+    Command cmd = CommandProcessor::getCommand(data[row][Step::cmdInd]);
     int pInd = col - 1;
     Parameter& p = cmd.parameters[pInd];
     // now constrain the value to the range of the parameter
@@ -115,22 +115,23 @@ std::function<void(std::vector<std::vector<double>>*)> Step::getCallback()
 }
 
 /** trigger this step, causing it to pass its data to its callback*/
-void Step::trigger() 
+void Step::trigger(int row) 
 { 
   // shared lock as reading 
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   //std::cout << "Step::trigger" << std::endl;
   if (active) {
-    for (std::vector<double>& dataRow: data){
-      Command cmd = CommandRegistry::getCommand(dataRow[Step::cmdInd]);
-      CommandRegistry::executeCommand(dataRow[Step::cmdInd], &dataRow);
-      // CommandRegistry::executeCommand()
-      // if (dataRow[Step::note1Ind] != 0){
-      //   if (command.execute) {
-      //     command.execute(&dataRow);
-      //   }      
-      // }
-    } 
+    if (row > -1){
+        assert(row < data.size());
+        // Command cmd = CommandRegistry::getCommand(data[row][Step::cmdInd]);
+        CommandProcessor::executeCommand(data[row][Step::cmdInd], &data[row]);
+    }
+    else {
+      for (std::vector<double>& dataRow: data){
+        // Command cmd = CommandRegistry::getCommand(dataRow[Step::cmdInd]);
+        CommandProcessor::executeCommand(dataRow[Step::cmdInd], &dataRow);
+      } 
+    }
   }
 }
 /** toggle the activity status of this step*/
@@ -149,7 +150,7 @@ Sequence::Sequence(Sequencer* _sequencer,
                   unsigned short _midiChannel) 
 : sequencer{_sequencer}, currentStep{0},  
   midiChannel{_midiChannel}, type{SequenceType::midiNote}, 
-  transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, ticksElapsed{0}
+  transpose{0}, lengthAdjustment{0}, ticksPerStep{1}, originalTicksPerStep{4}, ticksElapsed{0}
   // , midiScaleToDrum{MidiUtils::getScaleMidiToDrumMidi()}
 {
   currentLength = seqLength;
@@ -171,38 +172,12 @@ void Sequence::tick(bool trigger)
   //std::cout << "Sequence::tick" << std::endl;
   ++ticksElapsed;
 
-  if (ticksElapsed == ticksPerStep)
-    {
+  if (ticksElapsed == ticksPerStep){
       ticksElapsed = 0;
       if (trigger) {
-      switch (type){
-        case SequenceType::midiNote:
-          triggerMidiNoteType();
-          break;
-        case SequenceType::drumMidi:
-          triggerMidiDrumType();
-          break;
-        // case SequenceType::chordMidi:
-        //   triggerMidiChordType();
-        //   break;
-          
-        case SequenceType::transposer:
-          triggerTransposeType();
-          break;
-        case SequenceType::lengthChanger:
-          triggerLengthType();
-          break;
-        case SequenceType::tickChanger:
-          triggerTickType();
-          break;
-        case SequenceType::chordMidi:
-          break;
-        case SequenceType::samplePlayer:
-          break;
-        default:
-          std::cout << "Sequnce::tick warning unkown seq type" << std::endl;
-          break;
+        steps[currentStep].trigger();
       }
+
       if (currentLength + lengthAdjustment < 1) currentStep = 0;
       else currentStep = (++currentStep) % (currentLength + lengthAdjustment);
       if (currentStep >= steps.size()) currentStep = 0;
@@ -210,10 +185,12 @@ void Sequence::tick(bool trigger)
       // switch off any adjusters when we are at step 0
       if (currentStep == 0) deactivateProcessors();
 
-    } // end of if trigger
-
   }
+}
   
+void Sequence::triggerStep(int step, int row)
+{
+  steps[step].trigger(row);
 }
 
 void Sequence::deactivateProcessors()
@@ -551,6 +528,12 @@ void Sequencer::tick(bool trigger)
       seq.tick(trigger);
   }
 }
+
+void Sequencer::triggerStep(int seq, int step, int row)
+{
+  sequences[seq].triggerStep(step, row);
+}
+
 
 Sequence* Sequencer::getSequence(unsigned int sequence)
 {
