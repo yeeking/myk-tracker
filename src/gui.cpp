@@ -65,7 +65,6 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
             // Determine if the current cell is selected
             CellState state{CellState::NotSelected};
             
-            if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
             // check against the highlight cells
             for (const std::pair<int, int>& p :  highlightCells){
                 if (p.first == col && p.second == row){
@@ -73,6 +72,9 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
                     break;
                 }
             }
+            // editing supercedes playback highlighter 
+            if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
+            
             // Draw the cell
             assert (data.size() >= col);
             // std::cout << "want row " << row << " got rows " << data[col].size() << std::endl;
@@ -88,19 +90,23 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
 
 void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cellWidth, CellState state) {
     // Set color based on selection
-    if (state == CellState::Editing) wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
-    else if (state == CellState::Playing) wattron(win, COLOR_PAIR(PLAY_COLOR_PAIR));
-    else if (state == CellState::NotSelected) wattron(win, COLOR_PAIR(SEL_COLOR_PAIR));
+    if (state == CellState::Playing) wattron(win, COLOR_PAIR(PLAY_COLOR_PAIR));
+    else if (state == CellState::Editing) wattron(win, COLOR_PAIR(SEL_COLOR_PAIR));
+    else if (state == CellState::NotSelected) wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
 
     // Draw box for the cell
     mvwaddch(win, y, x, ACS_ULCORNER);
-    mvwhline(win, y, x + 1, ACS_HLINE, cellWidth);
+    mvwhline(win, y, x + 1, ACS_HLINE, cellWidth);  
     mvwaddch(win, y, x + cellWidth, ACS_URCORNER);
     mvwvline(win, y + 1, x, ACS_VLINE, 1);
     mvwvline(win, y + 1, x + cellWidth, ACS_VLINE, 1);
     mvwaddch(win, y + 2, x, ACS_LLCORNER);
     mvwhline(win, y + 2, x + 1, ACS_HLINE, cellWidth);
     mvwaddch(win, y + 2, x + cellWidth, ACS_LRCORNER);
+    
+    // now set it back to the regular colour for the 
+    // cell contents
+    wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
 
     // Print value in the center of the box
     mvwprintw(win, y + 1, x + 2, "%s", value.c_str()); 
@@ -111,7 +117,7 @@ void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cel
     attroff(COLOR_PAIR(NOSEL_COLOR_PAIR));
 }
 
-GUI::GUI(Sequencer* _sequencer, SequencerEditor* _seqEditor) : sequencer{_sequencer}, seqEditor{_seqEditor}
+GUI::GUI(Sequencer* _sequencer, SequencerEditor* _seqEditor) : sequencer{_sequencer}, seqEditor{_seqEditor}, rw_mutex{std::make_unique<std::shared_mutex>()}
 {
     seqFocus = true; 
     activeGrid = &seqGrid;
@@ -138,11 +144,18 @@ void GUI::initGUI()
     keypad(stdscr, TRUE); // Enable keyboard mapping
     curs_set(0); // Hide the cursor
 
-    // Initialize colors
-    init_pair(SEL_COLOR_PAIR, COLOR_WHITE, COLOR_BLACK); // Foreground color pair
-    init_pair(NOSEL_COLOR_PAIR, COLOR_BLACK, COLOR_WHITE); // Background color pair
-    init_pair(PLAY_COLOR_PAIR, COLOR_BLUE, COLOR_RED); // Background color pair
+    init_color(COLOR_ORANGE, 1000, 500, 0);  // orange
+    init_color(COLOR_YELLOWB, 1000, 1000, 0); // yellow bright
+    init_color(COLOR_GREY, 500, 500, 500); // yellow bright
 
+    // Initialize colors
+    // init_pair(SEL_COLOR_PAIR, COLOR_BLACK, COLOR_WHITE); // Background color pair
+    init_pair(SEL_COLOR_PAIR, COLOR_GREY, COLOR_BLACK); // Background color pair
+    
+    init_pair(NOSEL_COLOR_PAIR, COLOR_WHITE, COLOR_BLACK); // Foreground color pair
+    init_pair(PLAY_COLOR_PAIR, COLOR_ORANGE, COLOR_BLACK); // Background color pair
+
+    
 //    seqWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, DISPLAY_COLS*CELL_WIDTH, 1, 1);
     seqWin = newwin(70, 100, 3, 0); // height, width, y offset, x offset 
     seqPanel = new_panel(seqWin);
@@ -180,6 +193,9 @@ int GUI::min(int a, int b) {
 
 void GUI::draw()
 {
+    // uni lock as writing data
+    std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
     // if(false){
     if (seqEditor->getEditMode() == SequencerEditorMode::selectingSeqAndStep){
         std::vector<std::pair<int, int>> playHeads;

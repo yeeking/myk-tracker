@@ -602,13 +602,11 @@ void Sequencer::setSequenceLength(unsigned int sequence, unsigned int length)
 void Sequencer::shrinkSequence(unsigned int sequence)
 {
   sequences[sequence].setLength(sequences[sequence].getLength() - 1);
-  updateGridOfStrings();
 }
 void Sequencer::extendSequence(unsigned int sequence)
 {
   sequences[sequence].ensureEnoughStepsForLength(sequences[sequence].getLength() + 1);
   sequences[sequence].setLength(sequences[sequence].getLength() + 1);
-  updateGridOfStrings();
 }
 
 void Sequencer::setAllCallbacks(std::function<void(std::vector<std::vector<double>> *)> callback)
@@ -640,7 +638,6 @@ void Sequencer::setStepData(unsigned int sequence, unsigned int step, std::vecto
   if (!assertSeqAndStep(sequence, step))
     return;
   sequences[sequence].setStepData(step, data);
-  updateGridOfStrings();
 }
 /** update a single value in the  data
  * stored at a step in the sequencer */
@@ -649,7 +646,6 @@ void Sequencer::setStepDataAt(unsigned int sequence, unsigned int step, unsigned
   if (!assertSeqAndStep(sequence, step))
     return;
   sequences[sequence].setStepDataAt(step, row, col, value);
-  updateGridOfStrings();
 }
 
 /** retrieve the data for the current step */

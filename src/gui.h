@@ -20,9 +20,17 @@
 #define CELL_WIDTH 7
 #define CELL_HEIGHT 3
 
+
 #define SEL_COLOR_PAIR 1
 #define NOSEL_COLOR_PAIR 2
 #define PLAY_COLOR_PAIR 3
+// THIS WILL BE SET TO A FANCY ORANGE COLOUR
+#define COLOR_ORANGE 4
+#define COLOR_YELLOWB 5
+#define COLOR_GREY 6
+
+
+
 
 enum class GUIState{
     SeqView, 
@@ -83,6 +91,7 @@ class GUI {
         void draw();
         
     private:
+        std::unique_ptr<std::shared_mutex> rw_mutex;
         void initGUI();
         void drawControlPanel(WINDOW* win);
 

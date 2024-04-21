@@ -318,12 +318,12 @@ class Sequencer  {
      /** vector of vector of string representation of a step*/
      std::vector<std::vector<std::string>> stepAsGridOfStrings(int seq, int step);
      
+      /** regenerate the string grid representation of the sequence */
+      void updateGridOfStrings();
     private:
       bool assertSeqAndStep(unsigned int sequence, unsigned int step) const;
         
       bool assertSequence(unsigned int sequence) const;
-      /** regenerate the string grid representation of the sequence */
-      void updateGridOfStrings();
       /// class data members  
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */

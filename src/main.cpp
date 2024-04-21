@@ -64,7 +64,8 @@ void playbackThreadFunction(int maxPosition) {
 
 int main() {
     CommandProcessor::initialiseMIDI();
-    SimpleClock clock;
+    SimpleClock seqClock;
+    SimpleClock guiClock;
     
     std::map<char, double> key_to_note = getKeyboardToMidiNotes();
     // maintains the data and sate of the sequencer
@@ -74,15 +75,17 @@ int main() {
     GUI gui{&sequencer, &editor};
     
     
-    clock.setCallback([&sequencer, &gui](){
+    seqClock.setCallback([&sequencer](){
         sequencer.tick();
+    });
+    guiClock.setCallback([&gui](){
         gui.draw();
-
     });
 
-    clock.start(50);
-
-    gui.draw();
+    int intervalMs = 50;
+    seqClock.start(intervalMs);
+    guiClock.start(intervalMs * 4);
+    
     
     int ch;
     while ((ch = getch()) != 'q') {
@@ -139,10 +142,10 @@ int main() {
             default:
                 break;
         }
-        
+        sequencer.updateGridOfStrings();
         gui.draw();
     }
-    clock.stop();
-    // playbackThread.join(); // Ensure the playback thread has fini
+    seqClock.stop();
+    guiClock.stop();
     return 0;
 }
