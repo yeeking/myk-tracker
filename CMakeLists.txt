@@ -23,8 +23,8 @@ add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerComma
 # build the midi utils
 add_library(midi-lib src/MidiUtils.cpp)
 
-add_executable(MykTracker src/gui.cpp src/main.cpp)
-add_executable(CurTest src/gui.cpp src/curtest.cpp)
+add_executable(MykTracker src/Gui.cpp src/main.cpp)
+add_executable(CurTest src/Gui.cpp src/curtest.cpp)
 
 # Link the ncurses library with your executable
 target_link_libraries(${PROJECT_NAME} seq-lib midi-lib ${CURSES_LIBRARIES} panel -lrtmidi)

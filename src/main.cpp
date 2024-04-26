@@ -3,7 +3,7 @@
 #include <thread>
 #include <vector>
 #include <ncurses.h>
-#include "gui.h"
+#include "Gui.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "SequencerCommands.h"
@@ -33,25 +33,25 @@ std::map<char, double> getKeyboardToMidiNotes(int transpose = 0)
 }
 
 
-    std::map<int,char> getIntToNoteMap()
+std::map<int,char> getIntToNoteMap()
+{
+        std::map<int, char> intToNote = 
     {
-    std::map<int, char> intToNote = 
-      {
-        {0, 'c'}, 
-        {1, 'C'},
-        {2, 'd'},
-        {3, 'D'},
-        {4, 'e'},
-        {5, 'f'},
-        {6, 'F'},
-        {7, 'g'},
-        {8, 'G'},
-        {9, 'a'},
-        {10, 'A'},
-        {11, 'b'}    
-      };
-      return intToNote;
-    }
+    {0, 'c'}, 
+    {1, 'C'},
+    {2, 'd'},
+    {3, 'D'},
+    {4, 'e'},
+    {5, 'f'},
+    {6, 'F'},
+    {7, 'g'},
+    {8, 'G'},
+    {9, 'a'},
+    {10, 'A'},
+    {11, 'b'}    
+    };
+    return intToNote;
+}
 
 void playbackThreadFunction(int maxPosition) {
     while (true) { // Add a condition for a graceful shutdown if needed
@@ -63,11 +63,16 @@ void playbackThreadFunction(int maxPosition) {
 }
 
 int main() {
-    CommandProcessor::initialiseMIDI();
+
+
     SimpleClock seqClock;
     SimpleClock guiClock;
+    CommandProcessor::assignMasterClock(&seqClock);
     
-    std::map<char, double> key_to_note = getKeyboardToMidiNotes();
+    CommandProcessor::initialiseMIDI();
+    CommandProcessor::sendAllNotesOff();
+
+    std::map<char, double> key_to_note = getKeyboardToMidiNotes(12);
     // maintains the data and sate of the sequencer
     Sequencer sequencer{4, 16};
     // maintains a stateful editor - knows the edit mode, etc. 
@@ -75,7 +80,8 @@ int main() {
     GUI gui{&sequencer, &editor};
     
     
-    seqClock.setCallback([&sequencer](){
+    seqClock.setCallback([&sequencer, &seqClock](){
+        CommandProcessor::sendQueuedMIDI(seqClock.getCurrentTick());
         sequencer.tick();
     });
     guiClock.setCallback([&gui](){
@@ -117,6 +123,7 @@ int main() {
                 break;
             case KEY_DC:
                 editor.resetAtCursor();
+                CommandProcessor::sendAllNotesOff();
                 break; 
             case '\n':
                 editor.enterAtCursor();
@@ -145,6 +152,7 @@ int main() {
         sequencer.updateGridOfStrings();
         gui.draw();
     }
+    CommandProcessor::sendAllNotesOff();
     seqClock.stop();
     guiClock.stop();
     return 0;

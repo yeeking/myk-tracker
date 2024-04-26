@@ -5,6 +5,7 @@
 #include <vector>
 #include <tuple>
 #include <functional>
+#include "SimpleClock.h"
 
 // Define the structure for a parameter of a command
 struct Parameter {
@@ -39,7 +40,11 @@ struct Command {
 // Static class to manage commands
 class CommandProcessor {
 public:
+    static void assignMasterClock(SimpleClock* masterClock);
     static void initialiseMIDI();
+    static void sendAllNotesOff();
+    static void sendQueuedMIDI(long tick);
+
     static Command& getCommand(double commandInd);
     static Command& getCommand(const std::string& commandName);
     // static void executeCommand(const std::string& commandName, std::vector<double>* params);

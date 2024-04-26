@@ -27,11 +27,21 @@ namespace CommandData {
     // when the double is stored in the Step data
     std::unordered_map<double, Command> commandsDouble;
     MidiUtils midiUtils;
+    // the clock is externally created but 
+    // we need access to it for 
+    // some of the lanbdas
+    SimpleClock* masterClock = nullptr;
+}
 
+
+void CommandProcessor::assignMasterClock(SimpleClock* masterClock)
+{
+    CommandData::masterClock = masterClock;
 }
 
 // // Initialize the command registry
 void CommandProcessor::initialiseCommands() {
+    assert(CommandData::masterClock != nullptr);
     // get a MIDI link going
     Command midiNote{
             "MIDINote", "Midi", "Plays a MIDI note",
@@ -42,7 +52,9 @@ void CommandProcessor::initialiseCommands() {
             [](std::vector<double>* params) {
                 assert(params->size() == 5);// need 5 params as we also get sent the cmd index as a param
                 if ((*params)[Step::p2Ind] > 0) {// there is a valid note
-                    CommandData::midiUtils.playSingleNote((int) (*params)[Step::p1Ind],(int) (*params)[Step::p2Ind], (int) (*params)[Step::p3Ind], (long) (*params)[Step::p4Ind]);
+                    double now = CommandData::masterClock->getCurrentTick();
+                    CommandData::midiUtils.playSingleNote((int) (*params)[Step::p1Ind],(int) (*params)[Step::p2Ind], (int) (*params)[Step::p3Ind], 
+                    (long) ((*params)[Step::p4Ind]+now));
                 }
                 
             }
@@ -116,4 +128,13 @@ int CommandProcessor::countCommands()
 void CommandProcessor::initialiseMIDI()
 {
     CommandData::midiUtils.interactiveInitMidi();
+}
+
+void CommandProcessor::sendAllNotesOff()
+{
+    CommandData::midiUtils.allNotesOff();
+}
+void CommandProcessor::sendQueuedMIDI(long tick)
+{
+    CommandData::midiUtils.sendQueuedMessages(tick);
 }
