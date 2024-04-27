@@ -17,18 +17,18 @@ std::map<char, double> getKeyboardToMidiNotes(int transpose = 0)
 {
     std::map<char, double> key_to_note =
     {
-    { 'z', 48+transpose},
-    { 's', 49+transpose},
-    { 'x', 50+transpose},
-    { 'd', 51+transpose},
-    { 'c', 52+transpose},
-    { 'v', 53+transpose},
-    { 'g', 54+transpose},
-    { 'b', 55+transpose},
-    { 'h', 56+transpose},
-    { 'n', 57+transpose},
-    { 'j', 58+transpose},
-    { 'm', 59+transpose}
+    { 'z', 0+transpose},
+    { 's', 1+transpose},
+    { 'x', 2+transpose},
+    { 'd', 3+transpose},
+    { 'c', 4+transpose},
+    { 'v', 5+transpose},
+    { 'g', 6+transpose},
+    { 'b', 7+transpose},
+    { 'h', 8+transpose},
+    { 'n', 9+transpose},
+    { 'j', 10+transpose},
+    { 'm', 11+transpose}
     };
     return key_to_note;
 }
@@ -78,17 +78,19 @@ int main() {
     CommandProcessor::initialiseMIDI();
     CommandProcessor::sendAllNotesOff();
 
-    std::map<char, double> key_to_note = getKeyboardToMidiNotes(12);
+    std::map<char, double> key_to_note = getKeyboardToMidiNotes(0);
     // maintains the data and sate of the sequencer
     Sequencer sequencer{4, 16};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
     GUI gui{&sequencer, &editor};
+
+    // tell it to call a special function when the user uses ctrl-c to quit
     signal(SIGINT, handle_sigint);
-    
-    seqClock.setCallback([&sequencer, &seqClock](){
+
+    seqClock.setCallback([&sequencer, &seqClock, &editor](){
         CommandProcessor::sendQueuedMIDI(seqClock.getCurrentTick());
-        sequencer.tick();
+        sequencer.tick(editor.isTriggerActive());
     });
     guiClock.setCallback([&gui](){
         gui.draw();
@@ -97,6 +99,7 @@ int main() {
     int intervalMs = 50;
     seqClock.start(intervalMs);
     guiClock.start(intervalMs * 4);
+    bool redraw = false; 
     
     int quitCount = 0;
     int ch;
@@ -105,7 +108,7 @@ int main() {
 
     while(quitCount < 2){
         ch = getch();
-        if (ch == 27) quitCount ++;
+        if (ch == 27) quitCount ++; // two hits on ESC to quit
         else quitCount = 0; 
         // while ((ch = getch()) != 'q') {
         // handle keyboard note input 
@@ -115,7 +118,6 @@ int main() {
             if (ch == key_note.first){ 
                 // key_note_match = true;
                 editor.enterStepData(key_note.second, Step::noteInd);
-                // editor.enterDataAtCursor(key_note.second); 
                 break;// break the for loop
             }
         }
@@ -133,7 +135,16 @@ int main() {
             }
         }
         switch (ch) {
+            case ' ':
+                editor.toggleTrigger();
+                if (!editor.isTriggerActive() ){
+                    // after a 'stop', reset all sequences to zero 
+                    // for next trigger
+                    // sequencer.nextStepFromZero();
+                }
+                break;  
             case '\t':
+                editor.nextStep();
                 break;
             case '-':
                 editor.removeRow();
@@ -141,11 +152,17 @@ int main() {
             case '=':
                 editor.addRow();
                 break;
-            case '[':
+            case ',':
                 editor.decrementAtCursor();
                 break;
-            case ']':
+            case '.':
                 editor.incrementAtCursor();
+                break;
+            case '[':
+                editor.decrementOctave();
+                break;
+            case ']':
+                editor.incrementOctave();
                 break;
             case KEY_DC:
                 editor.resetAtCursor();
@@ -156,15 +173,19 @@ int main() {
                 break;
             case KEY_UP:
                 editor.moveCursorUp();
+                redraw = true; 
                 break;
             case KEY_DOWN:
                 editor.moveCursorDown();
+                redraw = true; 
                 break;
             case KEY_LEFT:
                 editor.moveCursorLeft();
+                redraw = true; 
                 break;
             case KEY_RIGHT:
                 editor.moveCursorRight();
+                redraw = true; 
                 break;
             case 'p':
                 if (editor.getEditMode() == SequencerEditorMode::editingStep){
@@ -176,7 +197,7 @@ int main() {
                 break;
         }
         sequencer.updateGridOfStrings();
-        gui.draw();
+        if (redraw) {gui.draw();redraw = false;}
     }
     CommandProcessor::sendAllNotesOff();
     seqClock.stop();

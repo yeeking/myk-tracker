@@ -1,5 +1,8 @@
 #include "Sequencer.h"
+#include "MidiUtils.h"
+
 Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}
+
 {
   data.push_back(std::vector<double>());
   data[0].push_back(0.0);
@@ -39,7 +42,24 @@ int Step::howManyDataCols()
 std::string Step::toStringFlat()
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
-  return std::to_string((int)this->data[0][Step::noteInd]);
+  if (this->data[0][Step::noteInd] == 0){
+    return "----";
+  }
+  else {
+    std::string disp = "";
+    int note = (int)this->data[0][Step::noteInd];
+    char nchar = MidiUtils::getIntToNoteMap()[note % 12];
+    int oct = note / 12; 
+    disp.push_back(nchar);
+    disp += "-" + std::to_string(oct) + " ";
+    int power = (int)this->data[0][Step::velInd] / 32; 
+    for (int p=0;p<power;++p){
+      disp += "]";
+    }
+    return disp; 
+    // return std::string(1, note);
+  }
+  // return std::to_string((int)this->data[0][Step::noteInd]);
 }
 
 std::vector<std::vector<std::string>> Step::toStringGrid()
@@ -188,7 +208,8 @@ Sequence::Sequence(Sequencer *_sequencer,
                    unsigned short _midiChannel)
     : sequencer{_sequencer}, currentStep{0},
       midiChannel{_midiChannel}, type{SequenceType::midiNote},
-      transpose{0}, lengthAdjustment{0}, ticksPerStep{1}, originalTicksPerStep{4}, ticksElapsed{0}
+      transpose{0}, lengthAdjustment{0}, ticksPerStep{1}, originalTicksPerStep{4}, ticksElapsed{0}, muted{false}, 
+      rw_mutex{std::make_unique<std::shared_mutex>()}
 // , midiScaleToDrum{MidiUtils::getScaleMidiToDrumMidi()}
 {
   currentLength = seqLength;
@@ -207,6 +228,8 @@ Sequence::Sequence(Sequencer *_sequencer,
 /** go to the next step */
 void Sequence::tick(bool trigger)
 {
+  // write lock
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   // std::cout << "Sequence::tick" << std::endl;
   ++ticksElapsed;
 
@@ -340,6 +363,7 @@ void Sequence::setLengthAdjustment(signed int lenAdjust)
 
 void Sequence::setTicksPerStep(int tps)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   if (tps < 1 || tps > 16)
     return;
   this->originalTicksPerStep = tps;
@@ -355,11 +379,13 @@ void Sequence::setTicksPerStepAdjustment(int tps)
 
 int Sequence::getTicksPerStep() const
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return this->originalTicksPerStep;
 }
 
 unsigned int Sequence::getCurrentStep() const
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return currentStep;
 }
 bool Sequence::assertStep(unsigned int step) const
@@ -393,11 +419,13 @@ std::vector<std::vector<double>> Sequence::getCurrentStepData()
 }
 unsigned int Sequence::getLength() const
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return currentLength;
 }
 
 void Sequence::ensureEnoughStepsForLength(int length)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   if (length > steps.size()) // bad need more steps
   {
     int toAdd = length - steps.size();
@@ -415,7 +443,7 @@ void Sequence::ensureEnoughStepsForLength(int length)
 }
 void Sequence::setLength(int length)
 {
-
+std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   if (length < 1)
     return;
   if (length > steps.size())
@@ -445,11 +473,12 @@ std::string Sequence::stepToString(int step)
   if (data.size() > 0)
     return std::to_string(data[0][0]);
   else
-    return "---";
+    return "-";
 }
 
 unsigned int Sequence::howManySteps() const
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   // return steps.size();
   //  case where length adjust is too high
   // if (currentLength + lengthAdjustment >= steps.size()) return currentLength;
@@ -495,6 +524,8 @@ std::string Sequence::stepToStringFlat(int step)
 
 void Sequence::reset()
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   for (Step &step : steps)
   {
     // activate the step
@@ -508,6 +539,18 @@ void Sequence::reset()
 std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(int step)
 {
   return steps[step].toStringGrid();
+}
+
+bool Sequence::isMuted()
+{
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  return muted;
+}
+/** change mote state to its opposite */
+void Sequence::toggleMuteState()
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  muted = !muted;
 }
 
 /////////////////////// Sequencer
@@ -789,7 +832,9 @@ void Sequencer::updateGridOfStrings()
     for (int step = 0; step < howManySteps(seq) && step < gridView[seq].size(); ++step)
     {
       // step then seq, i.e. col then row
-      gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + sequences[seq].stepToStringFlat(step);
+      //gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + sequences[seq].stepToStringFlat(step);
+      gridView[seq][step] = sequences[seq].stepToStringFlat(step);
+
     }
   }
   seqAsStringGrid = gridView;
@@ -813,3 +858,9 @@ double Sequencer::getStepDataAt(int seq, int step, int row, int col)
 // {
 //   sequences[seq].setStepDataAt(step, row, col, val);
 // }
+
+void Sequencer::toggleSequenceMute(int sequence)
+{
+  // sequences[sequence];
+
+}

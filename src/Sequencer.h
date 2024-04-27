@@ -112,6 +112,14 @@ enum class SequenceType {midiNote, drumMidi, chordMidi, samplePlayer, transposer
 class Sequence{
   public:
     Sequence(Sequencer* sequencer, unsigned int seqLength = 16, unsigned short midiChannel = 1);
+
+    // stop copying so mutex is ok 
+    Sequence(const Sequence& other) = delete;
+    Sequence& operator=(const Sequence& other) = delete;
+    Sequence(Sequence&& other) noexcept = default;
+    Sequence& operator=(Sequence&& other) noexcept = default;
+
+
     /** go to the next step. If trigger is false, just move along without triggering. */
     void tick(bool trigger = true);
     /** trigger a step's callback right now */
@@ -198,8 +206,12 @@ class Sequence{
     void resetStepRow(int step, int row);
 
     std::vector<std::vector<std::string>> stepAsGridOfStrings(int step);
-
+    /** returns the mute state of this sequence*/
+    bool isMuted();
+    /** change mote state to its opposite */
+    void toggleMuteState();
   private:
+
     /** function called when the sequence ticks and it is SequenceType::midiNote
      * 
     */
@@ -239,8 +251,11 @@ class Sequence{
      */
     int originalTicksPerStep;
     int ticksElapsed;
+    bool muted; 
     /** maps from linear midi scale to general midi drum notes*/
     std::map<int,int> midiScaleToDrum;
+
+    std::unique_ptr<std::shared_mutex> rw_mutex;
 
 };
 
@@ -291,6 +306,8 @@ class Sequencer  {
       void setStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col, double value);
       /** set all values for this seq, step, row to zero */
       void resetStepRow(int sequence, int step, int row);
+      /** toggle mute state of the sent sequence */
+      void toggleSequenceMute(int sequence);
       /** retrieve a copy the data for the current step */
       std::vector<std::vector<double>> getCurrentStepData(int sequence);
       /** returns a pointer to the step object stored at the sent sequence and step position */
@@ -307,6 +324,7 @@ class Sequencer  {
       /** get the memory address of the data for this step for direct viewing/ editing*/
       //std::vector<std::vector<double>>* getStepDataDirect(int sequence, int step);
       void toggleActive(int sequence, int step);
+      
       bool isStepActive(int sequence, int step) const;
       void addStepListener();
       /** wipe the data from the sent sequence*/
