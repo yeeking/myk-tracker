@@ -324,7 +324,6 @@ class Sequencer  {
       /** get the memory address of the data for this step for direct viewing/ editing*/
       //std::vector<std::vector<double>>* getStepDataDirect(int sequence, int step);
       void toggleActive(int sequence, int step);
-      
       bool isStepActive(int sequence, int step) const;
       void addStepListener();
       /** wipe the data from the sent sequence*/

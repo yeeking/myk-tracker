@@ -164,6 +164,9 @@ int main() {
             case ']':
                 editor.incrementOctave();
                 break;
+            case KEY_BACKSPACE:
+                sequencer.toggleSequenceMute(editor.getCurrentSequence());
+                break;
             case KEY_DC:
                 editor.resetAtCursor();
                 CommandProcessor::sendAllNotesOff();

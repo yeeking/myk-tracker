@@ -519,6 +519,8 @@ void Sequence::setTranspose(double transpose)
 
 std::string Sequence::stepToStringFlat(int step)
 {
+  if (isMuted()) return "";
+  
   return steps[step].toStringFlat();
 }
 
@@ -834,7 +836,6 @@ void Sequencer::updateGridOfStrings()
       // step then seq, i.e. col then row
       //gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + sequences[seq].stepToStringFlat(step);
       gridView[seq][step] = sequences[seq].stepToStringFlat(step);
-
     }
   }
   seqAsStringGrid = gridView;
@@ -861,6 +862,6 @@ double Sequencer::getStepDataAt(int seq, int step, int row, int col)
 
 void Sequencer::toggleSequenceMute(int sequence)
 {
-  // sequences[sequence];
+  sequences[sequence].toggleMuteState();
 
 }
