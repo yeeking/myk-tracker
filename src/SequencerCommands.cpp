@@ -11,8 +11,10 @@ Parameter::Parameter(const std::string& name, const std::string& shortName, doub
     : name(name), shortName(shortName), min(min), max(max), step(step), defaultValue(defaultValue) {}
 
 Command::Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
+                 int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam,
                  std::function<void(std::vector<double>*)> execute)
-    : name(name), shortName(shortName), description(description), parameters(parameters), execute(std::move(execute)) {}
+    : name(name), shortName(shortName), description(description), parameters(parameters), 
+    noteEditGoesToParam{noteEditGoesToParam}, numberEditGoesToParam{numberEditGoesToParam}, lengthEditGoesToParam{lengthEditGoesToParam}, execute(std::move(execute)) {}
 
 
 // namespaced global vars used in the command processing lambdas
@@ -49,12 +51,15 @@ void CommandProcessor::initialiseCommands() {
               Parameter("Note", "N", 0, 127, 1, 0), 
               Parameter("Vel", "V", 0, 127, 1, 0), 
               Parameter("Dur", "D", 0, 8, 1, 0)},
+            Step::noteInd, // int noteEditGoesToParam;
+            Step::velInd, // int numberEditGoesToParam;
+            Step::lengthInd, // int lengthEditGoesToParam;  
             [](std::vector<double>* params) {
                 assert(params->size() == 5);// need 5 params as we also get sent the cmd index as a param
-                if ((*params)[Step::p2Ind] > 0) {// there is a valid note
+                if ((*params)[Step::noteInd] > 0) {// there is a valid note
                     double now = CommandData::masterClock->getCurrentTick();
-                    CommandData::midiUtils.playSingleNote((int) (*params)[Step::p1Ind],(int) (*params)[Step::p2Ind], (int) (*params)[Step::p3Ind], 
-                    (long) ((*params)[Step::p4Ind]+now));
+                    CommandData::midiUtils.playSingleNote((int) (*params)[Step::chanInd],(int) (*params)[Step::noteInd], (int) (*params)[Step::velInd], 
+                    (long) ((*params)[Step::lengthInd]+now));
                 }
                 
             }
@@ -65,6 +70,9 @@ void CommandProcessor::initialiseCommands() {
               Parameter("Note", "N", 0, 127, 1, 0), 
               Parameter("Vel", "V", 0, 127, 1, 0), 
               Parameter("Dur", "D", 0, 8, 1, 0)},
+            Step::noteInd, // int noteEditGoesToParam;
+            Step::velInd, // int numberEditGoesToParam;
+            Step::lengthInd, // int lengthEditGoesToParam;  
             [](std::vector<double>* params) {
                 assert(params->size() == 5);// need 5 params as we also get sent the cmd index as a param
                 std::cout << "Executing command " << "sample" << std::endl;

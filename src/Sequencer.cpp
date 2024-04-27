@@ -39,7 +39,7 @@ int Step::howManyDataCols()
 std::string Step::toStringFlat()
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
-  return std::to_string((int)this->data[0][Step::p2Ind]);
+  return std::to_string((int)this->data[0][Step::noteInd]);
 }
 
 std::vector<std::vector<std::string>> Step::toStringGrid()
@@ -407,8 +407,8 @@ void Sequence::ensureEnoughStepsForLength(int length)
       s.setCallback(
           steps[0].getCallback());
       // set the channel
-      int channel = steps[0].getDataAt(0, Step::p1Ind);
-      s.setDataAt(0, Step::p1Ind, channel);
+      int channel = steps[0].getDataAt(0, Step::chanInd);
+      s.setDataAt(0, Step::chanInd, channel);
       steps.push_back(std::move(s));
     }
   }
@@ -534,11 +534,11 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
   {
     this->sequences[seq].setType(otherSeq->sequences[seq].getType());
     // assign the same channel
-    double channel = otherSeq->sequences[seq].getStepDataAt(0, 0, Step::p1Ind);
+    double channel = otherSeq->sequences[seq].getStepDataAt(0, 0, Step::chanInd);
     for (int step = 0; step < this->sequences[seq].howManySteps(); ++step)
     {
       // note this assumes a single row step
-      this->setStepDataAt(seq, step, 0, Step::p1Ind, channel);
+      this->setStepDataAt(seq, step, 0, Step::chanInd, channel);
     }
   }
 }

@@ -37,10 +37,10 @@ class Step{
   public:
   // these should be in an enum probably
     const static int cmdInd{0}; // maps to CommandRegistry::getCommand
-    const static int p1Ind{1};
-    const static int p2Ind{2};
-    const static int p3Ind{3};
-    const static int p4Ind{4};
+    const static int chanInd{1};
+    const static int noteInd{2};
+    const static int velInd{3};
+    const static int lengthInd{4};
     
     Step();
 

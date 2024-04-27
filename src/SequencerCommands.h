@@ -29,10 +29,17 @@ struct Command {
     std::string shortName;
     std::string description;
     std::vector<Parameter> parameters;
+    
+    /** when user provides 'note input' during editing, which param to send it to? */
+    int noteEditGoesToParam;
+    /** when user sends number input during editing of this command, which param to send it to?*/
+    int numberEditGoesToParam;
+    /** when user sends length input during editing, which param to send it to? */
+    int lengthEditGoesToParam;
     std::function<void(std::vector<double>*)> execute;
     Command(){}
     Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
-            std::function<void(std::vector<double>*)> execute);
+            int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam, std::function<void(std::vector<double>*)> execute);
 };
 
 

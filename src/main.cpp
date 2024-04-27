@@ -3,6 +3,7 @@
 #include <thread>
 #include <vector>
 #include <ncurses.h>
+#include <signal.h>
 #include "Gui.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
@@ -62,9 +63,14 @@ void playbackThreadFunction(int maxPosition) {
     }
 }
 
+// Signal handler for SIGINT
+void handle_sigint(int sig) {
+    // You can put your custom logic here
+   // printw("Ctrl-C pressed, but we won't quit!\n");
+  //  refresh();  // Refresh the screen to update the display
+}
+
 int main() {
-
-
     SimpleClock seqClock;
     SimpleClock guiClock;
     CommandProcessor::assignMasterClock(&seqClock);
@@ -78,7 +84,7 @@ int main() {
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};   
     GUI gui{&sequencer, &editor};
-    
+    signal(SIGINT, handle_sigint);
     
     seqClock.setCallback([&sequencer, &seqClock](){
         CommandProcessor::sendQueuedMIDI(seqClock.getCurrentTick());
@@ -92,18 +98,38 @@ int main() {
     seqClock.start(intervalMs);
     guiClock.start(intervalMs * 4);
     
-    
+    int quitCount = 0;
     int ch;
-    while ((ch = getch()) != 'q') {
+    // keys to set length of a step 
+    std::vector<char> lenKeys = {'q', 'w', 'e', 'r'};
+
+    while(quitCount < 2){
+        ch = getch();
+        if (ch == 27) quitCount ++;
+        else quitCount = 0; 
+        // while ((ch = getch()) != 'q') {
         // handle keyboard note input 
         // bool key_note_match{false};
         for (const std::pair<char, double>& key_note : key_to_note)
         {
-            if (ch == key_note.first) 
-            { 
+            if (ch == key_note.first){ 
                 // key_note_match = true;
-                editor.enterDataAtCursor(key_note.second); 
+                editor.enterStepData(key_note.second, Step::noteInd);
+                // editor.enterDataAtCursor(key_note.second); 
                 break;// break the for loop
+            }
+        }
+        // do the velocity controls
+        for (int num=1;num<5;++num){
+            if (ch == num + 48){
+                editor.enterStepData(num * (128/4), Step::velInd);
+                break; 
+            }
+        }
+        for (int i=0;i<lenKeys.size();++i){
+            if (lenKeys[i] == ch){
+                editor.enterStepData(i+1, Step::lengthInd);
+                break;
             }
         }
         switch (ch) {
