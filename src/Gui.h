@@ -100,6 +100,9 @@ class GUI {
         std::unique_ptr<std::shared_mutex> rw_mutex;
         void initGUI();
         void drawControlPanel(WINDOW* win);
+        void drawSequenceView();
+        void drawStepView();
+        void drawSeqConfigView();
 
         int min(int a, int b);
 

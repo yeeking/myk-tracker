@@ -563,7 +563,12 @@ Sequencer::Sequencer(unsigned int seqCount, unsigned int seqLength)
   {
     sequences.push_back(Sequence{this, seqLength});
   }
-  updateGridOfStrings();
+  updateSeqStringGrid();
+  setupSeqConfigSpecs();
+  std::vector<Parameter> paramSpecs;
+  //    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue);
+  paramSpecs.push_back(Parameter("Channel", "ch", 0, 15, 1, 1));
+  paramSpecs.push_back(Parameter("Ticks per step", "tps", 0, 15, 1, 1));
 }
 
 Sequencer::~Sequencer()
@@ -797,7 +802,7 @@ bool Sequencer::assertSequence(unsigned int sequence) const
   return true;
 }
 
-void Sequencer::updateGridOfStrings()
+void Sequencer::updateSeqStringGrid()
 {
   std::vector<std::vector<std::string>> gridView;
   // need to get the data in the sequences, convert it to strings and
@@ -841,11 +846,11 @@ void Sequencer::updateGridOfStrings()
   seqAsStringGrid = gridView;
 }
 
-std::vector<std::vector<std::string>> &Sequencer::getGridOfStrings()
+std::vector<std::vector<std::string>> &Sequencer::getSequenceAsGridOfStrings()
 {
   return seqAsStringGrid;
 }
-std::vector<std::vector<std::string>> Sequencer::stepAsGridOfStrings(int seq, int step)
+std::vector<std::vector<std::string>> Sequencer::getStepAsGridOfStrings(int seq, int step)
 {
   return sequences[seq].stepAsGridOfStrings(step);
 }
@@ -864,4 +869,68 @@ void Sequencer::toggleSequenceMute(int sequence)
 {
   sequences[sequence].toggleMuteState();
 
+}
+
+std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrings()
+{
+  // editable config items for a sequence:
+// - set channel for all steps
+// - set ticks per beat
+// - set transpose maybe? 
+  // each col is a sequence
+  std::vector<std::vector<std::string>>confGrid;
+  std::vector<Parameter> params = getSeqConfigParamSpecs();
+
+  for (int seq =0;seq<howManySequences();++seq){
+    confGrid.push_back(std::vector<std::string>());
+    // channel 
+    confGrid[seq].push_back(params[0].shortName + ":" + std::to_string(getStepDataAt(seq, 0, 0, Step::chanInd)));
+    // ticks
+    confGrid[seq].push_back(params[1].shortName + ":" + std::to_string(getSequenceTicksPerStep(seq)));    
+  }
+  return confGrid;
+}
+
+
+std::vector<Parameter>& Sequencer::getSeqConfigParamSpecs()
+{
+  return seqParamSpecs; 
+}
+void Sequencer::setupSeqConfigSpecs()
+{
+  seqParamSpecs.push_back(Parameter("Channel", "ch", 0, 15, 1, 1));
+  seqParamSpecs.push_back(Parameter("Ticks per step", "tps", 1, 16, 1, 4));
+}
+
+void Sequencer::incrementSeqParam(int seq, int paramIndex)
+{
+  assert(paramIndex < getSeqConfigParamSpecs().size() &&
+         paramIndex >= 0);
+  Parameter p = seqParamSpecs[paramIndex];
+  if (p.shortName == "ch"){
+    // meed to update all steps to the new channel     sequences[seq].
+  }
+  if (p.shortName == "tps"){
+    int tps = sequences[seq].getTicksPerStep();
+    tps += p.step;
+    if (tps > p.max) tps = p.max;
+    sequences[seq].setTicksPerStep(tps);
+  }
+
+}
+void Sequencer::decrementSeqParam(int seq, int paramIndex)
+{
+  assert(paramIndex < getSeqConfigParamSpecs().size() &&
+         paramIndex >= 0);
+
+  Parameter p = seqParamSpecs[paramIndex];
+  if (p.shortName == "ch"){
+    // meed to update all steps to the new channel     sequences[seq].
+  }
+  if (p.shortName == "tps"){
+    int tps = sequences[seq].getTicksPerStep();
+    tps -= p.step;
+    if (tps < p.min) tps = p.min;
+    sequences[seq].setTicksPerStep(tps);
+  }
 }

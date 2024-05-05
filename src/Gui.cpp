@@ -178,7 +178,21 @@ void GUI::drawControlPanel(WINDOW* win){
         cursorStatus += ":" + std::to_string(seqEditor->getCurrentStepRow()) + "[" + std::to_string(rowsInStep) + "]";
     }
 
-    std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}};
+    std::string mode;
+    switch(seqEditor->getEditMode()){
+        case SequencerEditorMode::configuringSequence:
+            mode = "Conf";
+            break;
+        case SequencerEditorMode::editingStep:
+            mode = "Step";
+            break;
+        case SequencerEditorMode::selectingSeqAndStep:
+            mode = "Seq";
+            break;
+             
+    }
+
+    std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}, {mode}};
     seqControlGrid.draw(win, buttons, 1, 6, 2, 0, std::vector<std::pair<int, int>>());
 
     // wprintw(win, "[Button 1]  [Button 2]  [Button 3]");
@@ -195,39 +209,72 @@ void GUI::draw()
     std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
     // if(false){
-    if (seqEditor->getEditMode() == SequencerEditorMode::selectingSeqAndStep){
-        std::vector<std::pair<int, int>> playHeads;
-        for (int col=0;col<sequencer->howManySequences(); ++col){  
-            std::pair<int, int> colRow = {col, sequencer->getCurrentStep(col)};
-            playHeads.push_back(std::move(colRow));
+    switch(seqEditor->getEditMode()){
+        case SequencerEditorMode::selectingSeqAndStep:
+        {
+            drawSequenceView();
+            break;
         }
-        seqGrid.draw(seqWin, sequencer->getGridOfStrings(), 8, 6, 
-                    seqEditor->getCurrentSequence(), 
-                    seqEditor->getCurrentStep(), 
-                    playHeads);
-                    //std::vector<std::pair<int, int>>());
-    }
-    if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
-        
-        // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-        // std::vector<std::vector<std::string>> grid = step->toStringGrid();
-        std::vector<std::pair<int, int>> playHeads;
-        if (sequencer->getCurrentStep(seqEditor->getCurrentSequence()) == seqEditor->getCurrentStep()){
-            int cols = sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-            for (int col=0;col<cols;++col){
-                playHeads.push_back(std::pair(col, 0));
-            }
+        case SequencerEditorMode::editingStep:
+        {
+            drawStepView();
+            break; 
         }
-        std::vector<std::vector<std::string>> grid = sequencer->stepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-            stepGrid.draw(seqWin, 
-            grid, 
-            4, 6, 
-            seqEditor->getCurrentStepCol(), 
-            seqEditor->getCurrentStepRow(), 
-            playHeads);
+        case SequencerEditorMode::configuringSequence:
+        {
+            drawSeqConfigView();
+            break;
+        }
     }
+
     drawControlPanel(buttonWin);
     update_panels();
     doupdate();
+}
+
+void GUI::drawSequenceView()
+{
+    std::vector<std::pair<int, int>> playHeads;
+    for (int col=0;col<sequencer->howManySequences(); ++col){  
+        std::pair<int, int> colRow = {col, sequencer->getCurrentStep(col)};
+        playHeads.push_back(std::move(colRow));
+    }
+    seqGrid.draw(seqWin, sequencer->getSequenceAsGridOfStrings(), 
+                8, 6, 
+                seqEditor->getCurrentSequence(), 
+                seqEditor->getCurrentStep(), 
+                playHeads);
+
+}
+
+void GUI::drawStepView()
+{
+    // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+    // std::vector<std::vector<std::string>> grid = step->toStringGrid();
+    std::vector<std::pair<int, int>> playHeads;
+    if (sequencer->getCurrentStep(seqEditor->getCurrentSequence()) == seqEditor->getCurrentStep()){
+        int cols = sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        for (int col=0;col<cols;++col){
+            playHeads.push_back(std::pair(col, 0));
+        }
+    }
+    std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        stepGrid.draw(seqWin, 
+        grid, 
+        8, 6, 
+        seqEditor->getCurrentStepCol(), 
+        seqEditor->getCurrentStepRow(), 
+        playHeads);
+}
+
+void GUI::drawSeqConfigView()
+{
+    std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
+    stepGrid.draw(seqWin, 
+                grid, 
+        8, 6, 
+        seqEditor->getCurrentSequence(), 
+        seqEditor->getCurrentSeqParam(), 
+        std::vector<std::pair<int, int>>());   
 }
 

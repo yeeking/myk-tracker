@@ -2,7 +2,7 @@
 #include <cmath> // fmod
 #include <assert.h>
 
-SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer}, currentSequence{0}, currentStep{0}, currentStepRow{0}, currentStepCol{0}, editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1}, stepIncrement{0.5f}, octave{6}, triggerIsActive{true}
+SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer}, currentSequence{0}, currentStep{0}, currentStepRow{0}, currentStepCol{0}, currentSeqParam{0}, editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1}, stepIncrement{0.5f}, octave{6}, triggerIsActive{true}
 {
 }
 
@@ -138,10 +138,11 @@ void SequencerEditor::enterAtCursor()
     break;
   }
   case SequencerEditorMode::settingSeqLength:
-    editMode = SequencerEditorMode::configuringSequence;
+    // editMode = SequencerEditorMode::configuringSequence;
     break;
   case SequencerEditorMode::configuringSequence:
-    editMode = SequencerEditorMode::settingSeqLength;
+    // editMode = SequencerEditorMode::settingSeqLength;
+    editMode = SequencerEditorMode::selectingSeqAndStep;
     break;
 
   case SequencerEditorMode::editingStep:
@@ -311,7 +312,13 @@ void SequencerEditor::moveCursorLeft()
   {
     // increment the value of the currently selected
     // parameter (channel, sequence type,ticks per second)
-    incrementSeqConfigParam();
+    // incrementSeqConfigParam();
+    currentSequence -= 1;
+    if (currentSequence < 0)
+      currentSequence = 0;
+    if (currentStep >= sequencer->howManySteps(currentSequence))
+      currentStep = sequencer->howManySteps(currentSequence) - 1;
+    break;
     break;
   }
   }
@@ -351,7 +358,12 @@ void SequencerEditor::moveCursorRight()
   }
   case SequencerEditorMode::configuringSequence:
   {
-    decrementSeqConfigParam();
+    // decrementSeqConfigParam();
+     currentSequence += 1;
+    if (currentSequence >= sequencer->howManySequences())
+      currentSequence = sequencer->howManySequences() - 1;
+    if (currentStep >= sequencer->howManySteps(currentSequence))
+      currentStep = sequencer->howManySteps(currentSequence) - 1;
     break;
   }
   }
@@ -386,6 +398,8 @@ void SequencerEditor::moveCursorUp()
   case SequencerEditorMode::configuringSequence:
   {
     // SequencerEditor::nextSequenceType(sequencer, currentSequence);
+    currentSeqParam --;
+    if (currentSeqParam < 0) currentSeqParam = 0; 
     break;
   }
   }
@@ -417,8 +431,12 @@ void SequencerEditor::moveCursorDown()
   }
   case SequencerEditorMode::configuringSequence:
   {
-    // right changes the type
-    //  SequencerEditor::nextSequenceType(sequencer, currentSequence);
+    // moving down moves to the next parameter for this track
+    currentSeqParam ++;
+    int max = sequencer->getSeqConfigParamSpecs().size();
+    if (currentSeqParam >= max){
+      currentSeqParam = max-1;
+    } 
     break;
   }
   }
@@ -478,6 +496,7 @@ void SequencerEditor::incrementAtCursor()
     // nothing for now
     break;
   case SequencerEditorMode::editingStep:
+  {
     // depending on which col we are on, adjust the value 
     // std::cout << "editor: inc data at " << currentSequence << ":" << currentStep << ":" << currentStepRow << ":" << currentStepCol << std::endl;
     double val = sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
@@ -486,6 +505,12 @@ void SequencerEditor::incrementAtCursor()
     sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol, val);
     break;
   }
+  case SequencerEditorMode::configuringSequence:
+  {
+    sequencer->incrementSeqParam(currentSequence, currentSeqParam);
+    break; 
+  }
+  }
 }
 /** decrease the value at the current cursor position, e.g. increasing note number */
 void SequencerEditor::decrementAtCursor()
@@ -493,16 +518,23 @@ void SequencerEditor::decrementAtCursor()
   switch (editMode)
   {
   case SequencerEditorMode::selectingSeqAndStep:
-
     break;
   case SequencerEditorMode::editingStep:
+  {
     // depending on which col we are on, adjust the value 
     double val = sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
     val --;
     sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol, val);
     break;
   }
+  case SequencerEditorMode::configuringSequence:
+  {
+    sequencer->decrementSeqParam(currentSequence, currentSeqParam);
+    break; 
+  }
+  }
 }
+
 
 
 SequencerEditorSubMode SequencerEditor::cycleSubModeLeft(SequencerEditorSubMode subMode)
@@ -798,6 +830,13 @@ int SequencerEditor::getCurrentStepCol() const
 {
   return currentStepCol;
 }
+
+int SequencerEditor::getCurrentSeqParam() const
+{
+  return currentSeqParam;
+}
+
+
 /** move the cursor to a specific sequence*/
 void SequencerEditor::setCurrentSequence(int seq)
 {
@@ -853,3 +892,8 @@ void  SequencerEditor::toggleTrigger()
   triggerIsActive = !triggerIsActive;
 }
 
+void SequencerEditor::gotoSequenceConfigPage()
+{
+   setEditMode(SequencerEditorMode::configuringSequence);
+   
+}

@@ -174,6 +174,9 @@ int main() {
             case '\n':
                 editor.enterAtCursor();
                 break;
+            case 'S':
+                editor.gotoSequenceConfigPage();
+                break;
             case KEY_UP:
                 editor.moveCursorUp();
                 redraw = true; 
@@ -199,7 +202,7 @@ int main() {
             default:
                 break;
         }
-        sequencer.updateGridOfStrings();
+        sequencer.updateSeqStringGrid();
         if (redraw) {gui.draw();redraw = false;}
     }
     CommandProcessor::sendAllNotesOff();

@@ -330,14 +330,29 @@ class Sequencer  {
       void resetSequence(int sequence);
   /** print out a tracker style view of the sequence */
       std::string toString();
-  /** get a vector of vector of strings representing the sequence. */
-     std::vector<std::vector<std::string>>& getGridOfStrings();
-     /** vector of vector of string representation of a step*/
-     std::vector<std::vector<std::string>> stepAsGridOfStrings(int seq, int step);
+  /** get a vector of vector of strings representing the sequence. this is cached - call
+   * updateSeqStringGrid after making edits to the sequence as it will not automatically update
+   */
+     std::vector<std::vector<std::string>>& getSequenceAsGridOfStrings();
+     /** get a grid of strings representing configs for all sequences. This is generated on the fly*/
+     std::vector<std::vector<std::string>> getSequenceConfigsAsGridOfStrings();
+     
+     /** vector of vector of string representation of a step. This is genereated on the fly*/
+     std::vector<std::vector<std::string>> getStepAsGridOfStrings(int seq, int step);
      
       /** regenerate the string grid representation of the sequence */
-      void updateGridOfStrings();
+      void updateSeqStringGrid();
+      
+      /** returns a vedtor of parameter 'spec' objects for the sequencer parameters. */
+      std::vector<Parameter>& getSeqConfigParamSpecs();
+      /** increment the parameter at the sent index. uses the param spec to dictate the step and range*/
+      void incrementSeqParam(int seq, int paramIndex);
+      /** decrement the parameter at the sent index. uses param spec to dictate the step and range*/
+      void decrementSeqParam(int seq, int paramIndex);
+      
     private:
+      void setupSeqConfigSpecs();
+     
       bool assertSeqAndStep(unsigned int sequence, unsigned int step) const;
         
       bool assertSequence(unsigned int sequence) const;
@@ -345,6 +360,7 @@ class Sequencer  {
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
       std::vector<std::vector<std::string>> seqAsStringGrid;
+      std::vector<Parameter> seqParamSpecs; 
       
 
 };

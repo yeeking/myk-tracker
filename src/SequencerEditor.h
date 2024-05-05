@@ -85,6 +85,8 @@ public:
   void incrementAtCursor();
   /** decrease the value at the current cursor position, e.g. increasing note number */
   void decrementAtCursor();
+  /** enter sequence configuration page */
+  void gotoSequenceConfigPage();
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);
   static SequencerEditorSubMode cycleSubModeRight(SequencerEditorSubMode subMode);
@@ -121,6 +123,8 @@ public:
   int getCurrentStepRow() const;
   /** which data point in a step are we editing */
   int getCurrentStepCol() const;
+  /** which seq param index are we editing? */
+  int getCurrentSeqParam() const; 
   /** move the cursor to a specific sequence*/
   void setCurrentSequence(int seq);
   /** move the cursor to a specific step*/
@@ -149,6 +153,8 @@ private:
   int currentStepRow;
   /** which data point inside a step*/
   int currentStepCol;
+  /** which sequence param are you editing?*/
+  int currentSeqParam; 
   /** handy state to decide if trigger is active or not on the step functions */
   bool triggerIsActive; 
 
