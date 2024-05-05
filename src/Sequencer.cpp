@@ -909,6 +909,14 @@ void Sequencer::incrementSeqParam(int seq, int paramIndex)
   Parameter p = seqParamSpecs[paramIndex];
   if (p.shortName == "ch"){
     // meed to update all steps to the new channel     sequences[seq].
+    double ch = getStepDataAt(seq, 0, 0, Step::chanInd);
+    ch += p.step;
+    if (ch >= p.max) ch = p.max;
+    for (int step = 0; step < howManySteps(seq); ++ step){
+      for (int row =0; row < howManyStepDataRows(seq, step); ++row){
+        setStepDataAt(seq, step, row, Step::chanInd, ch);
+      }
+    }
   }
   if (p.shortName == "tps"){
     int tps = sequences[seq].getTicksPerStep();
@@ -926,6 +934,14 @@ void Sequencer::decrementSeqParam(int seq, int paramIndex)
   Parameter p = seqParamSpecs[paramIndex];
   if (p.shortName == "ch"){
     // meed to update all steps to the new channel     sequences[seq].
+    double ch = getStepDataAt(seq, 0, 0, Step::chanInd);
+    ch -= p.step;
+    if (ch < p.min) ch = p.min;
+    for (int step = 0; step < howManySteps(seq); ++ step){
+      for (int row =0; row < howManyStepDataRows(seq, step); ++row){
+        setStepDataAt(seq, step, row, Step::chanInd, ch);
+      }
+    }
   }
   if (p.shortName == "tps"){
     int tps = sequences[seq].getTicksPerStep();
