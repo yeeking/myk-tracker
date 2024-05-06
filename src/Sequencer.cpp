@@ -208,7 +208,7 @@ Sequence::Sequence(Sequencer *_sequencer,
                    unsigned short _midiChannel)
     : sequencer{_sequencer}, currentStep{0},
       midiChannel{_midiChannel}, type{SequenceType::midiNote},
-      transpose{0}, lengthAdjustment{0}, ticksPerStep{1}, originalTicksPerStep{4}, ticksElapsed{0}, muted{false}, 
+      transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, nextTicksPerStep{0}, ticksElapsed{0}, tickOfFour{0}, muted{false}, 
       rw_mutex{std::make_unique<std::shared_mutex>()}
 // , midiScaleToDrum{MidiUtils::getScaleMidiToDrumMidi()}
 {
@@ -232,11 +232,22 @@ void Sequence::tick(bool trigger)
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   // std::cout << "Sequence::tick" << std::endl;
   ++ticksElapsed;
+  tickOfFour = ++tickOfFour % 4;
+  
+  if (nextTicksPerStep  > 0 && tickOfFour == 0){// update to this tps on next zero of tickOfFour
+      this->originalTicksPerStep = this->nextTicksPerStep;
+      this->ticksElapsed = ticksPerStep;
+      currentStep = 0; 
+      // can't call this as it asks for another lock which
+      // causes a crash
+      //setTicksPerStep(nextTicksPerStep);
+      nextTicksPerStep = 0;// don't trigger it again
+  }
 
   if (ticksElapsed == ticksPerStep)
   {
     ticksElapsed = 0;
-    if (trigger)
+    if (trigger && !muted)
     {
       steps[currentStep].trigger();
     }
@@ -364,10 +375,14 @@ void Sequence::setLengthAdjustment(signed int lenAdjust)
 void Sequence::setTicksPerStep(int tps)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  if (tps < 1 || tps > 16)
-    return;
   this->originalTicksPerStep = tps;
   this->ticksElapsed = 0;
+}
+
+void Sequence::onZeroSetTicksPerStep(int _nextTicksPerStep)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  this->nextTicksPerStep = _nextTicksPerStep;
 }
 
 void Sequence::setTicksPerStepAdjustment(int tps)
@@ -922,7 +937,7 @@ void Sequencer::incrementSeqParam(int seq, int paramIndex)
     int tps = sequences[seq].getTicksPerStep();
     tps += p.step;
     if (tps > p.max) tps = p.max;
-    sequences[seq].setTicksPerStep(tps);
+    sequences[seq].onZeroSetTicksPerStep(tps);
   }
 
 }
@@ -947,6 +962,6 @@ void Sequencer::decrementSeqParam(int seq, int paramIndex)
     int tps = sequences[seq].getTicksPerStep();
     tps -= p.step;
     if (tps < p.min) tps = p.min;
-    sequences[seq].setTicksPerStep(tps);
+    sequences[seq].onZeroSetTicksPerStep(tps);
   }
 }

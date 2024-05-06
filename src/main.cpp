@@ -164,7 +164,7 @@ int main() {
             case ']':
                 editor.incrementOctave();
                 break;
-            case KEY_BACKSPACE:
+            case 'M':
                 sequencer.toggleSequenceMute(editor.getCurrentSequence());
                 break;
             case KEY_DC:

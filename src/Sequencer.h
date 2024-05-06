@@ -161,6 +161,7 @@ class Sequence{
      * change, call setTicksPerStepAdjustment
      */
     void setTicksPerStep(int ticksPerStep);
+    void onZeroSetTicksPerStep(int nextTicksPerStep);
     /** set a new ticks per step until the sequence hits step 0*/
     void setTicksPerStepAdjustment(int ticksPerStep);
     /** return my permanent ticks per step (not the adjusted one)*/
@@ -248,7 +249,11 @@ class Sequence{
      * is the temporarily adjusted one 
      */
     int originalTicksPerStep;
+    /** used to store a ticks per step update that will be applied next time tickoffour == 0*/
+    int nextTicksPerStep; 
     int ticksElapsed;
+    /** used to keep in sync with the '1'*/
+    int tickOfFour;
     bool muted; 
     /** maps from linear midi scale to general midi drum notes*/
     std::map<int,int> midiScaleToDrum;

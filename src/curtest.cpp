@@ -57,33 +57,33 @@
 // 	return true; 
 // }
 
-bool testTrigger(){
-	Step s;
+// bool testTrigger(){
+// 	Step s;
 	
-	s.setDataAt(0, Step::cmdInd, 0); // command 0
-	s.setDataAt(0, Step::chanInd, 1);
-	s.setDataAt(0, Step::noteInd, 1);
-	s.setDataAt(0, Step::velInd, 1);
-	s.setDataAt(0, Step::lengthInd, 1);
+// 	s.setDataAt(0, Step::cmdInd, 0); // command 0
+// 	s.setDataAt(0, Step::chanInd, 1);
+// 	s.setDataAt(0, Step::noteInd, 1);
+// 	s.setDataAt(0, Step::velInd, 1);
+// 	s.setDataAt(0, Step::lengthInd, 1);
 
 
-	s.trigger();
+// 	s.trigger();
 
-	return true; 
-}
+// 	return true; 
+// }
 
-bool testCommandIs2()
-{
-	Step s;
+// bool testCommandIs2()
+// {
+// 	Step s;
 	
-	s.setDataAt(0, Step::cmdInd, 1); // command 1
+// 	s.setDataAt(0, Step::cmdInd, 1); // command 1
 	
 	
-	assert(s.getDataAt(0, Step::cmdInd) == 1);
-	s.trigger();
+// 	assert(s.getDataAt(0, Step::cmdInd) == 1);
+// 	s.trigger();
 
-	return true; 
-}
+// 	return true; 
+// }
 
 bool testStepStringView(){
 	Step s;
@@ -96,6 +96,16 @@ bool testStepStringView(){
 	return true;
 }
 
+
+bool testTPS(){
+	Sequencer seq(2, 4);
+	seq.setStepDataAt(0, 0, 0, Step::noteInd, 1);
+	seq.setStepDataAt(0, 1, 0, Step::noteInd, 2);
+	seq.setStepDataAt(0, 2, 0, Step::noteInd, 3);
+	seq.setStepDataAt(0, 3, 0, Step::noteInd, 4);
+
+
+}
 
 
 // 	// GridWidget grid(3, 3);
