@@ -104,7 +104,14 @@ bool testTPS(){
 	seq.setStepDataAt(0, 2, 0, Step::noteInd, 3);
 	seq.setStepDataAt(0, 3, 0, Step::noteInd, 4);
 
-
+	for(int i=0;i<24;++i){
+		seq.tick();
+		if (i==8){
+			seq.decrementSeqParam(0, 1);
+		}
+	}
+	seq.incrementSeqParam(0, 1);// tps + 1
+	return true; 
 }
 
 
@@ -112,8 +119,8 @@ bool testTPS(){
 int main(){
 	SimpleClock clock;
 	CommandProcessor::assignMasterClock(&clock);
-	if (testStepStringView()) printf("+ testStepStringView\n");
-	else printf("X testStepStringView\n");
+	if (testTPS()) printf("+ testTPS\n");
+	else printf("X testTPS\n");
 
 	// if (testCommandIs2()) printf("+ testCommandIs2\n");
 	// else printf("X testCommandIs2\n");

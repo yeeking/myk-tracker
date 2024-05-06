@@ -233,11 +233,14 @@ void Sequence::tick(bool trigger)
   // std::cout << "Sequence::tick" << std::endl;
   ++ticksElapsed;
   tickOfFour = ++tickOfFour % 4;
-  
+  // std::cout << "elap " <<ticksElapsed << " t/4 " << tickOfFour << " tps " << ticksPerStep <<" next tps " << nextTicksPerStep << std::endl; 
   if (nextTicksPerStep  > 0 && tickOfFour == 0){// update to this tps on next zero of tickOfFour
+      // std::cout << "changing tps " << nextTicksPerStep << std::endl;
       this->originalTicksPerStep = this->nextTicksPerStep;
       this->ticksElapsed = ticksPerStep;
-      currentStep = 0; 
+      currentStep = 0;
+      deactivateProcessors();
+
       // can't call this as it asks for another lock which
       // causes a crash
       //setTicksPerStep(nextTicksPerStep);
