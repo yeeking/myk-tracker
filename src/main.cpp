@@ -152,16 +152,22 @@ int main() {
             case '=':
                 editor.addRow();
                 break;
-            case ',':
-                editor.decrementAtCursor();
+            case '_':
+            // delete the current sequence
                 break;
-            case '.':
-                editor.incrementAtCursor();
+            case '+':
+            // add a new sequence 
                 break;
             case '[':
-                editor.decrementOctave();
+                editor.decrementAtCursor();
                 break;
             case ']':
+                editor.incrementAtCursor();
+                break;
+            case ',':
+                editor.decrementOctave();
+                break;
+            case '.':
                 editor.incrementOctave();
                 break;
             case 'M':
