@@ -39,6 +39,10 @@ class Step{
     const static int noteInd{2};
     const static int velInd{3};
     const static int lengthInd{4};
+    const static int probInd{5};
+    /** when populating an empty step, use this */
+    const static int maxInd{5};
+    
     
     Step();
 

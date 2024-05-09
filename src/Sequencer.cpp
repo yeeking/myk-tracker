@@ -5,11 +5,9 @@ Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}
 
 {
   data.push_back(std::vector<double>());
-  data[0].push_back(0.0);
-  data[0].push_back(0.0);
-  data[0].push_back(0.0);
-  data[0].push_back(0.0);
-  data[0].push_back(0.0);
+  for (int i=0;i<=Step::maxInd;++i){
+    data[0].push_back(0.0);
+  }
 }
 /** returns a copy of the data stored in this step*/
 std::vector<std::vector<double>> Step::getData()
@@ -901,11 +899,17 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
 
   for (int seq =0;seq<howManySequences();++seq){
     confGrid.push_back(std::vector<std::string>());
-    // channel 
-    confGrid[seq].push_back(params[0].shortName + ":" + std::to_string(getStepDataAt(seq, 0, 0, Step::chanInd)));
-    // ticks
-    confGrid[seq].push_back(params[1].shortName + ":" + std::to_string(getSequenceTicksPerStep(seq)));    
-  }
+    for (Parameter& p : params){
+      if (p.shortName == "ch"){
+        // channel - display first step's channel
+        confGrid[seq].push_back(params[0].shortName + ":" + std::to_string(getStepDataAt(seq, 0, 0, Step::chanInd)));
+      }
+      if (p.shortName == "tps"){
+        // ticks
+        confGrid[seq].push_back(params[1].shortName + ":" + std::to_string(getSequenceTicksPerStep(seq)));    
+      }
+    }
+  }    
   return confGrid;
 }
 
@@ -918,6 +922,12 @@ void Sequencer::setupSeqConfigSpecs()
 {
   seqParamSpecs.push_back(Parameter("Channel", "ch", 0, 15, 1, 1));
   seqParamSpecs.push_back(Parameter("Ticks per step", "tps", 1, 16, 1, 4));
+  // TODO....
+  seqParamSpecs.push_back(Parameter("Probability %", "prob", 0.0, 1.0, 0.1, 1.0));
+  // seqParamSpecs.push_back(Parameter("Velocity variation plus/minus %", "velvary", 0.0, 1.0, 0.1, 0.0));
+  // seqParamSpecs.push_back(Parameter("Shuffle +/- ticks", "shuf", 0, 3, 1, 0.0));
+  
+  
 }
 
 void Sequencer::incrementSeqParam(int seq, int paramIndex)
@@ -925,17 +935,19 @@ void Sequencer::incrementSeqParam(int seq, int paramIndex)
   assert(paramIndex < getSeqConfigParamSpecs().size() &&
          paramIndex >= 0);
   Parameter p = seqParamSpecs[paramIndex];
-  if (p.shortName == "ch"){
-    // meed to update all steps to the new channel     sequences[seq].
-    double ch = getStepDataAt(seq, 0, 0, Step::chanInd);
-    ch += p.step;
-    if (ch >= p.max) ch = p.max;
+  if (p.shortName == "ch" ||
+      p.shortName == "prob"){
+    // meed to update all steps to the new parameter     sequences[seq].
+    double val = getStepDataAt(seq, 0, 0, p.stepCol);
+    val += p.step;
+    if (val >= p.max) val = p.max;
     for (int step = 0; step < howManySteps(seq); ++ step){
       for (int row =0; row < howManyStepDataRows(seq, step); ++row){
-        setStepDataAt(seq, step, row, Step::chanInd, ch);
+        setStepDataAt(seq, step, row, p.stepCol, val);
       }
     }
   }
+
   if (p.shortName == "tps"){
     int tps = sequences[seq].getTicksPerStep();
     tps += p.step;
@@ -950,14 +962,15 @@ void Sequencer::decrementSeqParam(int seq, int paramIndex)
          paramIndex >= 0);
 
   Parameter p = seqParamSpecs[paramIndex];
-  if (p.shortName == "ch"){
-    // meed to update all steps to the new channel     sequences[seq].
-    double ch = getStepDataAt(seq, 0, 0, Step::chanInd);
-    ch -= p.step;
-    if (ch < p.min) ch = p.min;
+  if (p.shortName == "ch" ||
+      p.shortName == "prob"){
+    // meed to update all steps to the new parameter     sequences[seq].
+    double val = getStepDataAt(seq, 0, 0, p.stepCol);
+    val -= p.step;
+    if (val < p.min) val = p.min;
     for (int step = 0; step < howManySteps(seq); ++ step){
       for (int row =0; row < howManyStepDataRows(seq, step); ++row){
-        setStepDataAt(seq, step, row, Step::chanInd, ch);
+        setStepDataAt(seq, step, row, p.stepCol, val);
       }
     }
   }

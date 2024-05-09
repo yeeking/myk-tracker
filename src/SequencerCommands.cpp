@@ -7,8 +7,8 @@
 #include "Sequencer.h"
 
 // Constructor definitions
-Parameter::Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue)
-    : name(name), shortName(shortName), min(min), max(max), step(step), defaultValue(defaultValue) {}
+Parameter::Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol)
+    : name(name), shortName(shortName), min(min), max(max), step(step), defaultValue(defaultValue), stepCol{stepCol} {}
 
 Command::Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
                  int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam,
@@ -50,12 +50,14 @@ void CommandProcessor::initialiseCommands() {
             { Parameter("Channel", "C", 0, 16, 1, 0), 
               Parameter("Note", "N", 0, 127, 1, 0), 
               Parameter("Vel", "V", 0, 127, 1, 0), 
-              Parameter("Dur", "D", 0, 8, 1, 0)},
+              Parameter("Dur", "D", 0, 8, 1, 0),
+              Parameter("Prob", "%", 0, 1, 0.1, 1)},
+              
             Step::noteInd, // int noteEditGoesToParam;
             Step::velInd, // int numberEditGoesToParam;
             Step::lengthInd, // int lengthEditGoesToParam;  
             [](std::vector<double>* params) {
-                assert(params->size() == 5);// need 5 params as we also get sent the cmd index as a param
+                assert(params->size() == Step::maxInd + 1);// need 5 params as we also get sent the cmd index as a param
                 if ((*params)[Step::noteInd] > 0) {// there is a valid note
                     double now = CommandData::masterClock->getCurrentTick();
                     CommandData::midiUtils.playSingleNote((int) (*params)[Step::chanInd],(int) (*params)[Step::noteInd], (int) (*params)[Step::velInd], 

@@ -19,8 +19,9 @@ struct Parameter {
     double step;
     /** default value for this parameter */
     double defaultValue;
+    int stepCol;
 
-    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue);
+    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol=0);
 };
 
 // Define the structure for a command
