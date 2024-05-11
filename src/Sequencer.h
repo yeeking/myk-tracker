@@ -88,6 +88,8 @@ class Step{
     void deactivate();
     /** returns the activity status of this step */
     bool isActive() const;
+    /** convert double to string with sent no. decimal places*/
+      static std::string dblToString(double val, int dps);
   private: 
 
   // clever mutex that allows multiple concurrent reads but a block-all write 
@@ -372,9 +374,12 @@ class Sequencer  {
        * to decide limits and step size 
       */
       void decrementStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col);
+      /** reads default value for this step data col from commands and sets it to that */
+      void setStepDataAtDefault(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col);
        
 
     private:
+
       void setupSeqConfigSpecs();
      
       bool assertSeqAndStep(unsigned int sequence, unsigned int step) const;
@@ -385,7 +390,7 @@ class Sequencer  {
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
       std::vector<std::vector<std::string>> seqAsStringGrid;
       std::vector<Parameter> seqConfigSpecs; 
-      
+
 
 };
 

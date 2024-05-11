@@ -169,23 +169,23 @@ void SequencerEditor::enterStepData(double value, int column)
     if (editMode == SequencerEditorMode::selectingSeqAndStep){
       currentStepRow = 0;
     }
-    // if the velocity is zero, we should set it to something sensible 
-    if (data[currentStepRow][Step::velInd] == 0){
-       sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, Step::velInd, 64);
+    // if the velocity is zero, we should set it to the same as the first step in this sequence 
+
+    std::vector<std::vector<double>> firstStep = sequencer->getStepData(currentSequence, 0);
+    std::vector<int> cols = {Step::velInd, Step::lengthInd, Step::probInd};
+    for (int col : cols){
+        // same for length
+        if (data[currentStepRow][col] == 0){
+          sequencer->setStepDataAtDefault(currentSequence, currentStep, currentStepRow, col);
+        }
     }
-    // same for length
-    if (data[currentStepRow][Step::lengthInd] == 0){
-       sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, Step::lengthInd, 1);
-    }
-    // and probability 
-    if (data[currentStepRow][Step::probInd] == 0){
-       sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, Step::probInd, 1);
-    }
+   
+
+
     // apply octave if needed
     if (column == Step::noteInd){
       value = (12 * octave) + value; 
     }
-    
     // always used the mutex protected function to update the data 
     sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, column, value);
     // move to the next step down 

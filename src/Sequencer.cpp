@@ -91,11 +91,7 @@ std::vector<std::vector<std::string>> Step::toStringGrid()
         // decide how to display the step 
         // based on column index
         if (col == Step::probInd){
-          // quite verbose C++ way to make a string of a double with 2sf
-          std::ostringstream oss;
-          oss << std::fixed << std::setprecision(2) << data[row][col];
-          std::string formattedString = oss.str();
-          colData.push_back(cmd.parameters[col - 1].shortName + oss.str());
+          colData.push_back(cmd.parameters[col - 1].shortName + Step::dblToString(data[row][col], 2));
         }
         else{
           colData.push_back(cmd.parameters[col - 1].shortName + std::to_string((int)data[row][col]));
@@ -213,6 +209,15 @@ bool Step::isActive() const
 {
   return active;
 }
+
+std::string Step::dblToString(double val, int dps)
+{
+  // quite verbose C++ way to make a string of a double with 2sf
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(dps) << val;
+  return oss.str();
+}
+
 
 Sequence::Sequence(Sequencer *_sequencer,
                    unsigned int seqLength,
@@ -915,8 +920,9 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
     for (Parameter& p : params){
       if (p.stepCol == Step::chanInd ||
         p.stepCol == Step::probInd){ 
-        // channel - display first step's channel
-        confGrid[seq].push_back(p.shortName + ":" + std::to_string(getStepDataAt(seq, 0, 0, p.stepCol)));
+        // display the setting on the first step in this sequence
+        double val = getStepDataAt(seq, 0, 0, p.stepCol);
+        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(val, p.decPlaces));
       }
       if (p.shortName == "tps"){
         // ticks
@@ -937,7 +943,7 @@ void Sequencer::setupSeqConfigSpecs()
   seqConfigSpecs.resize(3);
   seqConfigSpecs[Sequence::chanConfig] = Parameter("Channel", "ch", 0, 15, 1, 1, Step::chanInd); // affects step channel value
   seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "tps", 1, 16, 1, 4, -1); // -1 as no step level option
-  seqConfigSpecs[Sequence::probConfig] = Parameter("Probability %", "prob", 0.0, 1.0, 0.1, 1.0, Step::probInd); // affects step prob value
+  seqConfigSpecs[Sequence::probConfig] = Parameter("Probability %", "prob", 0.0, 1.0, 0.1, 1.0, Step::probInd, 2); // affects step prob value
   // TODO
   // seqParamSpecs.push_back(Parameter("Velocity variation plus/minus %", "velvary", 0.0, 1.0, 0.1, 0.0));
   // seqParamSpecs.push_back(Parameter("Shuffle +/- ticks", "shuf", 0, 3, 1, 0.0));
@@ -1037,4 +1043,11 @@ void Sequencer::decrementStepDataAt(unsigned int sequence, unsigned int step, un
   }
   setStepDataAt(sequence, step, row, col, val);
 }
-  
+
+void Sequencer::setStepDataAtDefault(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col)
+{
+  double stepCmd = getStepDataAt(sequence, step, row, Step::cmdInd);
+  // param dictates the step, min and max for this column
+  Parameter param = CommandProcessor::getCommand(stepCmd).parameters[col-1]; // -1 as the first col is the command which has no parameter
+  setStepDataAt(sequence, step, row, col, param.defaultValue);
+}

@@ -9,8 +9,8 @@
 
 // Constructor definitions
 Parameter::Parameter(){}
-Parameter::Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol)
-    : name(name), shortName(shortName), min(min), max(max), step(step), defaultValue(defaultValue), stepCol{stepCol} {}
+Parameter::Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol, int dps)
+    : name(name), shortName(shortName), min(min), max(max), step(step), defaultValue(defaultValue), stepCol{stepCol}, decPlaces{dps} {}
 
 Command::Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
                  int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam,
@@ -77,10 +77,10 @@ void CommandProcessor::initialiseCommands() {
             "MIDINote", "Midi", "Plays a MIDI note",
               // long, short, min, max, step,default
             { Parameter("Channel", "C", 0, 16, 1, 0, Step::chanInd), 
-              Parameter("Note", "N", 0, 127, 1, 0, Step::noteInd), 
-              Parameter("Vel", "V", 0, 127, 4, 0, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 0, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd)},
+              Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
+              Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
+              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
+              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
               
             Step::noteInd, // int noteEditGoesToParam;
             Step::velInd, // int numberEditGoesToParam;

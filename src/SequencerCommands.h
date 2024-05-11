@@ -19,10 +19,12 @@ struct Parameter {
     double step;
     /** default value for this parameter */
     double defaultValue;
-    /** */
+    /** which column in a step's data vector does this param read from?*/
     int stepCol;
+    /** how many decimal places to display on the UI?*/
+    int decPlaces;
     Parameter();
-    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol);
+    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol, int dps=0);
 };
 
 // Define the structure for a command
