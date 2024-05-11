@@ -433,9 +433,9 @@ void SequencerEditor::moveCursorDown()
   {
     // moving down moves to the next parameter for this track
     currentSeqParam ++;
-    int max = sequencer->getSeqConfigParamSpecs().size();
-    if (currentSeqParam >= max){
-      currentSeqParam = max-1;
+    int max = sequencer->getSeqConfigSpecs().size() - 1;
+    if (currentSeqParam > max){
+      currentSeqParam = max;
     } 
     break;
   }
@@ -497,12 +497,7 @@ void SequencerEditor::incrementAtCursor()
     break;
   case SequencerEditorMode::editingStep:
   {
-    // depending on which col we are on, adjust the value 
-    // std::cout << "editor: inc data at " << currentSequence << ":" << currentStep << ":" << currentStepRow << ":" << currentStepCol << std::endl;
-    double val = sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
-    // std::cout << "from " << val << " to " << (val + 1) << std::endl;
-    val ++;
-    sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol, val);
+    sequencer->incrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
     break;
   }
   case SequencerEditorMode::configuringSequence:
@@ -521,10 +516,7 @@ void SequencerEditor::decrementAtCursor()
     break;
   case SequencerEditorMode::editingStep:
   {
-    // depending on which col we are on, adjust the value 
-    double val = sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
-    val --;
-    sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol, val);
+    sequencer->decrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
     break;
   }
   case SequencerEditorMode::configuringSequence:

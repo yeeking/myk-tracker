@@ -114,13 +114,58 @@ bool testTPS(){
 	return true; 
 }
 
+bool testRandom(){
+	Sequencer seq;
+	seq.setStepDataAt(0, 0, 0, Step::noteInd, 32);
+	seq.setStepDataAt(0, 0, 0, Step::probInd, 1.0);
+	
+	// seq.setStepDataAt(0, 0, 0, Step::noteInd, 32);
+	
 
+	for (int i=0;i<10;++i){
+		seq.tick();
+	}
+	return true; 
+}
+
+bool testIncrementSeqParam(){
+	Sequencer seq;
+	seq.setStepDataAt(0, 0, 0, Step::noteInd, 32);
+	seq.setStepDataAt(0, 0, 0, Step::probInd, 0.5);
+	seq.incrementSeqParam(0, Sequence::probConfig); // should add 0.1, the step value for this param 
+	assert (seq.getStepDataAt(0, 0, 0, Step::probInd) == 0.6);
+
+	return true; 
+}
+bool testIncrementStepVal(){
+	Sequencer seq;
+	seq.setStepDataAt(0, 0, 0, Step::noteInd, 32);
+	seq.setStepDataAt(0, 0, 0, Step::probInd, 0.5);
+	seq.incrementStepDataAt(0, 0, 0, Step::probInd);
+	assert (seq.getStepDataAt(0, 0, 0, Step::probInd) == 0.6);
+	seq.decrementStepDataAt(0, 0, 0, Step::probInd);
+	assert (seq.getStepDataAt(0, 0, 0, Step::probInd) == 0.5);
+	
+	return true; 
+}
 // 	// GridWidget grid(3, 3);
 int main(){
 	SimpleClock clock;
 	CommandProcessor::assignMasterClock(&clock);
-	if (testTPS()) printf("+ testTPS\n");
-	else printf("X testTPS\n");
+
+
+	if (testIncrementStepVal()) printf("+ testIncrementStepVal\n");
+	else printf("X testIncrementStepVal\n");
+
+
+	if (testIncrementSeqParam()) printf("+ testIncrementSeqParam\n");
+	else printf("X testIncrementSeqParam\n");
+
+	// if (testRandom()) printf("+ testRandom\n");
+	// else printf("X testRandom\n");
+
+	// if (testTPS()) printf("+ testTPS\n");
+	// else printf("X testTPS\n");
 
 	// if (testCommandIs2()) printf("+ testCommandIs2\n");
 	// else printf("X testCommandIs2\n");

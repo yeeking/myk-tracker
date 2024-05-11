@@ -1,7 +1,7 @@
 /**
  * Sequencer stores a set of sequences each of which stores a step
  * By Matthew Yee-King 2020
- * Porbably should separate into header and cpp at some point
+ * Probably should separate into header and cpp at some point
  */
 
 #pragma once 
@@ -113,6 +113,14 @@ enum class SequenceType {midiNote, drumMidi, chordMidi, samplePlayer, transposer
 
 class Sequence{
   public:
+    /** param index for */
+    const static int chanConfig{0}; 
+    const static int tpsConfig{1};
+    const static int probConfig{2};
+     
+    
+
+
     Sequence(Sequencer* sequencer, unsigned int seqLength = 16, unsigned short midiChannel = 1);
 
     // stop copying so mutex is ok 
@@ -138,7 +146,7 @@ class Sequence{
     int howManyStepDataRows(int step);
     /** returns the number of columns of data at the sent step (data is a rectangle)*/
     int howManyStepDataCols(int step);
-    // /** get the momory address of the step data for the requested step*/
+    // /** get the memory address of the step data for the requested step*/
     // std::vector<std::vector<double>>* getStepDataDirect(int step);
     // Step* getStep(int step);
     /** set the data for the sent step */
@@ -189,7 +197,7 @@ class Sequence{
     void setStepCallback(unsigned int step, 
                   std::function<void (std::vector<std::vector<double>>*)> callback);
     std::string stepToString(int step);
-    /** activate/ deactive the sent step */
+    /** activate/ deactivate the sent step */
     void toggleActive(unsigned int step);
     /** check if the sent step is active */
     bool isStepActive(unsigned int step) const;
@@ -197,11 +205,11 @@ class Sequence{
     void setType(SequenceType type);
     SequenceType getType() const;
   /** add a transpose processor to this sequence. 
-     * Normally, a transposer type sequence will call this on a midiNote type seqience
+     * Normally, a transposer type sequence will call this on a midiNote type sequence
      * to apply a transpose to it 
     */
 //    void setStepProcessorTranspose(StepDataTranspose transpose);
-    /** deactivate all data processors, e.g. transposers, length adjusters */
+    /** deactivate all data processors, e.g. transposer, length adjusters */
     void deactivateProcessors();
     /** clear the data from this sequence. Does not clear step event functions*/
     void reset();
@@ -283,7 +291,7 @@ class Sequencer  {
 
       /** go to the next step. If trigger is false, just move along without triggering. */
       void tick(bool trigger = true);
-      /** trigget a step's callback right now */
+      /** trigger a step's callback right now */
       void triggerStep(int seq, int step, int row);
       /** return a pointer to the sequence with sent id*/
       Sequence* getSequence(unsigned int sequence);
@@ -309,7 +317,7 @@ class Sequencer  {
       void setStepData(unsigned int sequence, unsigned int step, std::vector<std::vector<double>> data);
       /** return the sent seq, sent step, sent row, sent col's value */
       double getStepDataAt(int seq, int step, int row, int col);
-      /** update a single value in the  data tored at a step in the sequencer */
+      /** update a single value in the  data stored at a step in the sequencer */
       void setStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col, double value);
       /** set all values for this seq, step, row to zero */
       void resetStepRow(int sequence, int step, int row);
@@ -324,7 +332,7 @@ class Sequencer  {
       /** set the sent seq, sent step, sent row, sent col's value */
       // void setStepDataAt(int seq, int step, int row, int col, double val);
       
-      /** returns the numner of rows of data at the sent step*/
+      /** returns the number of rows of data at the sent step*/
       int howManyStepDataRows(int seq, int step);
       /** returns the number of columns of data at the sent step (data is a rectangle)*/
       int howManyStepDataCols(int seq, int step);
@@ -344,19 +352,28 @@ class Sequencer  {
      /** get a grid of strings representing configs for all sequences. This is generated on the fly*/
      std::vector<std::vector<std::string>> getSequenceConfigsAsGridOfStrings();
      
-     /** vector of vector of string representation of a step. This is genereated on the fly*/
+     /** vector of vector of string representation of a step. This is generated on the fly*/
      std::vector<std::vector<std::string>> getStepAsGridOfStrings(int seq, int step);
      
       /** regenerate the string grid representation of the sequence */
       void updateSeqStringGrid();
       
-      /** returns a vedtor of parameter 'spec' objects for the sequencer parameters. */
-      std::vector<Parameter>& getSeqConfigParamSpecs();
+      /** returns a vector of parameter 'spec' objects for the sequencer parameters. */
+      std::vector<Parameter>& getSeqConfigSpecs();
       /** increment the parameter at the sent index. uses the param spec to dictate the step and range*/
       void incrementSeqParam(int seq, int paramIndex);
       /** decrement the parameter at the sent index. uses param spec to dictate the step and range*/
       void decrementSeqParam(int seq, int paramIndex);
-      
+      /** increment step data for seq, step,row,col. Checks param configs for command type 
+       * to decide limits and step size 
+      */
+      void incrementStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col);
+      /** decrement step data for seq, step,row,col. Checks param configs for command type 
+       * to decide limits and step size 
+      */
+      void decrementStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col);
+       
+
     private:
       void setupSeqConfigSpecs();
      
@@ -367,7 +384,7 @@ class Sequencer  {
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
       std::vector<std::vector<std::string>> seqAsStringGrid;
-      std::vector<Parameter> seqParamSpecs; 
+      std::vector<Parameter> seqConfigSpecs; 
       
 
 };

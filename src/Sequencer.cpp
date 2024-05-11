@@ -1,5 +1,7 @@
 #include "Sequencer.h"
 #include "MidiUtils.h"
+#include <sstream>
+#include <iomanip>
 
 Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}
 
@@ -86,7 +88,18 @@ std::vector<std::vector<std::string>> Step::toStringGrid()
       }
       else
       {
-        colData.push_back(cmd.parameters[col - 1].shortName + std::to_string((int)data[row][col]));
+        // decide how to display the step 
+        // based on column index
+        if (col == Step::probInd){
+          // quite verbose C++ way to make a string of a double with 2sf
+          std::ostringstream oss;
+          oss << std::fixed << std::setprecision(2) << data[row][col];
+          std::string formattedString = oss.str();
+          colData.push_back(cmd.parameters[col - 1].shortName + oss.str());
+        }
+        else{
+          colData.push_back(cmd.parameters[col - 1].shortName + std::to_string((int)data[row][col]));
+        }
       }
     }
     grid.push_back(colData);
@@ -581,10 +594,10 @@ Sequencer::Sequencer(unsigned int seqCount, unsigned int seqLength)
   }
   updateSeqStringGrid();
   setupSeqConfigSpecs();
-  std::vector<Parameter> paramSpecs;
-  //    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue);
-  paramSpecs.push_back(Parameter("Channel", "ch", 0, 15, 1, 1));
-  paramSpecs.push_back(Parameter("Ticks per step", "tps", 0, 15, 1, 1));
+  // std::vector<Parameter> paramSpecs;
+  // //    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue);
+  // paramSpecs.push_back(Parameter("Channel", "ch", 0, 15, 1, 1, Step::));
+  // paramSpecs.push_back(Parameter("Ticks per step", "tps", 0, 15, 1, 1));
 }
 
 Sequencer::~Sequencer()
@@ -895,18 +908,19 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
 // - set transpose maybe? 
   // each col is a sequence
   std::vector<std::vector<std::string>>confGrid;
-  std::vector<Parameter> params = getSeqConfigParamSpecs();
+  std::vector<Parameter> params = getSeqConfigSpecs();
 
   for (int seq =0;seq<howManySequences();++seq){
     confGrid.push_back(std::vector<std::string>());
     for (Parameter& p : params){
-      if (p.shortName == "ch"){
+      if (p.stepCol == Step::chanInd ||
+        p.stepCol == Step::probInd){ 
         // channel - display first step's channel
-        confGrid[seq].push_back(params[0].shortName + ":" + std::to_string(getStepDataAt(seq, 0, 0, Step::chanInd)));
+        confGrid[seq].push_back(p.shortName + ":" + std::to_string(getStepDataAt(seq, 0, 0, p.stepCol)));
       }
       if (p.shortName == "tps"){
         // ticks
-        confGrid[seq].push_back(params[1].shortName + ":" + std::to_string(getSequenceTicksPerStep(seq)));    
+        confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequenceTicksPerStep(seq)));    
       }
     }
   }    
@@ -914,16 +928,17 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
 }
 
 
-std::vector<Parameter>& Sequencer::getSeqConfigParamSpecs()
+std::vector<Parameter>& Sequencer::getSeqConfigSpecs()
 {
-  return seqParamSpecs; 
+  return seqConfigSpecs; 
 }
 void Sequencer::setupSeqConfigSpecs()
 {
-  seqParamSpecs.push_back(Parameter("Channel", "ch", 0, 15, 1, 1));
-  seqParamSpecs.push_back(Parameter("Ticks per step", "tps", 1, 16, 1, 4));
-  // TODO....
-  seqParamSpecs.push_back(Parameter("Probability %", "prob", 0.0, 1.0, 0.1, 1.0));
+  seqConfigSpecs.resize(3);
+  seqConfigSpecs[Sequence::chanConfig] = Parameter("Channel", "ch", 0, 15, 1, 1, Step::chanInd); // affects step channel value
+  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "tps", 1, 16, 1, 4, -1); // -1 as no step level option
+  seqConfigSpecs[Sequence::probConfig] = Parameter("Probability %", "prob", 0.0, 1.0, 0.1, 1.0, Step::probInd); // affects step prob value
+  // TODO
   // seqParamSpecs.push_back(Parameter("Velocity variation plus/minus %", "velvary", 0.0, 1.0, 0.1, 0.0));
   // seqParamSpecs.push_back(Parameter("Shuffle +/- ticks", "shuf", 0, 3, 1, 0.0));
   
@@ -932,11 +947,12 @@ void Sequencer::setupSeqConfigSpecs()
 
 void Sequencer::incrementSeqParam(int seq, int paramIndex)
 {
-  assert(paramIndex < getSeqConfigParamSpecs().size() &&
+  assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
-  Parameter p = seqParamSpecs[paramIndex];
-  if (p.shortName == "ch" ||
-      p.shortName == "prob"){
+  Parameter p = seqConfigSpecs[paramIndex];
+  // deal with 'step-level' where we are overriding at sequence level
+  if (paramIndex == Sequence::chanConfig || 
+     paramIndex == Sequence::probConfig){
     // meed to update all steps to the new parameter     sequences[seq].
     double val = getStepDataAt(seq, 0, 0, p.stepCol);
     val += p.step;
@@ -948,7 +964,7 @@ void Sequencer::incrementSeqParam(int seq, int paramIndex)
     }
   }
 
-  if (p.shortName == "tps"){
+  if (paramIndex == Sequence::tpsConfig){
     int tps = sequences[seq].getTicksPerStep();
     tps += p.step;
     if (tps > p.max) tps = p.max;
@@ -958,12 +974,12 @@ void Sequencer::incrementSeqParam(int seq, int paramIndex)
 }
 void Sequencer::decrementSeqParam(int seq, int paramIndex)
 {
-  assert(paramIndex < getSeqConfigParamSpecs().size() &&
+  assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
 
-  Parameter p = seqParamSpecs[paramIndex];
-  if (p.shortName == "ch" ||
-      p.shortName == "prob"){
+  Parameter p = seqConfigSpecs[paramIndex];
+  if (paramIndex == Sequence::chanConfig || 
+     paramIndex == Sequence::probConfig){
     // meed to update all steps to the new parameter     sequences[seq].
     double val = getStepDataAt(seq, 0, 0, p.stepCol);
     val -= p.step;
@@ -974,10 +990,51 @@ void Sequencer::decrementSeqParam(int seq, int paramIndex)
       }
     }
   }
-  if (p.shortName == "tps"){
+  if (paramIndex == Sequence::tpsConfig){
     int tps = sequences[seq].getTicksPerStep();
     tps -= p.step;
     if (tps < p.min) tps = p.min;
     sequences[seq].onZeroSetTicksPerStep(tps);
   }
 }
+
+
+
+void Sequencer::incrementStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col)
+{
+  double val = getStepDataAt(sequence, step, row, col);
+
+  // check if they are changing the step command. 
+  // if so, do not use param config stuff to edit. 
+  if (col == Step::cmdInd) {
+    val ++;
+    if (val >= CommandProcessor::countCommands()) val = CommandProcessor::countCommands();
+  }
+  else {
+    double stepCmd = getStepDataAt(sequence, step, row, Step::cmdInd);
+    // param dictates the step, min and max for this column
+    Parameter param = CommandProcessor::getCommand(stepCmd).parameters[col-1]; // -1 as the first col is the command which has no parameter
+    val += param.step;
+    if (val > param.max) val = param.max;
+  }
+  setStepDataAt(sequence, step, row, col, val);
+}
+
+void Sequencer::decrementStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col)
+{
+  double val = getStepDataAt(sequence, step, row, col);
+  if (col == Step::cmdInd) {
+    val --;
+    if (val < 0) val = 0;
+  }
+  else {
+    // get the step param config for the step's 
+    double stepCmd = getStepDataAt(sequence, step, row, Step::cmdInd);
+    // param dictates the step, min and max for this column
+    Parameter param = CommandProcessor::getCommand(stepCmd).parameters[col-1]; // -1 as the first col is the command which has no parameter
+    val -= param.step;
+    if (val < param.min) val = param.min;
+  }
+  setStepDataAt(sequence, step, row, col, val);
+}
+  
