@@ -173,8 +173,13 @@ void SequencerEditor::enterStepData(double value, int column)
     if (data[currentStepRow][Step::velInd] == 0){
        sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, Step::velInd, 64);
     }
+    // same for length
     if (data[currentStepRow][Step::lengthInd] == 0){
        sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, Step::lengthInd, 1);
+    }
+    // and probability 
+    if (data[currentStepRow][Step::probInd] == 0){
+       sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, Step::probInd, 1);
     }
     // apply octave if needed
     if (column == Step::noteInd){

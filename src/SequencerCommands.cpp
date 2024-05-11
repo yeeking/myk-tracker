@@ -85,16 +85,14 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd, // int noteEditGoesToParam;
             Step::velInd, // int numberEditGoesToParam;
             Step::lengthInd, // int lengthEditGoesToParam;  
-            [](std::vector<double>* params) {
-                assert(params->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
-                if ((*params)[Step::noteInd] > 0) {// there is a valid note
+            [](std::vector<double>* stepData) {
+                assert(stepData->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
+                if ((*stepData)[Step::noteInd] > 0) {// there is a valid note
                     double random_number = RandomNumberGenerator::getRandomNumber();
-                    // std::cout << "R:" << random_number << std::endl;
-                    if (random_number < Step::probInd){ 
-                        // std::cout << "Trigger" << std::endl;                  
+                    if (random_number < (*stepData)[Step::probInd]){ 
                         double now = CommandData::masterClock->getCurrentTick();
-                        CommandData::midiUtils.playSingleNote((int) (*params)[Step::chanInd],(int) (*params)[Step::noteInd], (int) (*params)[Step::velInd], 
-                        (long) ((*params)[Step::lengthInd]+now));
+                        CommandData::midiUtils.playSingleNote((int) (*stepData)[Step::chanInd],(int) (*stepData)[Step::noteInd], (int) (*stepData)[Step::velInd], 
+                        (long) ((*stepData)[Step::lengthInd]+now));
                     }
                 }
                 
