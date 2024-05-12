@@ -70,7 +70,7 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
                     break;
                 }
             }
-            // editing supercedes playback highlighter 
+            // editing supersedes playback highlighter 
             if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
             
             // Draw the cell
@@ -92,6 +92,23 @@ void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cel
     else if (state == CellState::Editing) wattron(win, COLOR_PAIR(SEL_COLOR_PAIR));
     else if (state == CellState::NotSelected) wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
 
+
+    if (state != CellState::Editing){
+        // Fill the cell background to ensure uniform background color
+        for (int i = 0; i < 3; ++i) {  // Assuming the cell height is 3 for this example
+            mvwhline(win, y + i, x, ' ', cellWidth + 1);  // +1 to include the space under the rightmost border
+        }    
+    
+    }
+    
+    // if (state == CellState::Playing) {
+    //     wattron(win, COLOR_PAIR(PLAY_COLOR_PAIR));
+    // } else if (state == CellState::Editing) {
+    //     wattron(win, COLOR_PAIR(SEL_COLOR_PAIR));
+    // } else if (state == CellState::NotSelected) {
+    //     wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
+    // }
+
     // Draw box for the cell
     mvwaddch(win, y, x, ACS_ULCORNER);
     mvwhline(win, y, x + 1, ACS_HLINE, cellWidth);  
@@ -102,17 +119,28 @@ void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cel
     mvwhline(win, y + 2, x + 1, ACS_HLINE, cellWidth);
     mvwaddch(win, y + 2, x + cellWidth, ACS_LRCORNER);
     
+
+      // Restore the color for the cell content if different from borders
+    // if (state == CellState::Playing) {
+    //     wattron(win, COLOR_PAIR(PLAY_COLOR_PAIR));
+    // } else if (state == CellState::Editing) {
+    //     wattron(win, COLOR_PAIR(SEL_COLOR_PAIR));
+    // } else if (state == CellState::NotSelected) {
+    //     wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
+    // }
+    
     // now set it back to the regular colour for the 
     // cell contents
     wattron(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
 
     // Print value in the center of the box
     mvwprintw(win, y + 1, x + 2, "%s", value.c_str()); 
-    // mvwprintw(win, y + 1, x + 2, "%s", "test"); 
 
-    // Reset color
-    attroff(COLOR_PAIR(SEL_COLOR_PAIR));
-    attroff(COLOR_PAIR(NOSEL_COLOR_PAIR));
+
+    // // Turn off the attributes after use
+    // wattroff(win, COLOR_PAIR(PLAY_COLOR_PAIR));
+    // wattroff(win, COLOR_PAIR(SEL_COLOR_PAIR));
+    // wattroff(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
 }
 
 GUI::GUI(Sequencer* _sequencer, SequencerEditor* _seqEditor) : sequencer{_sequencer}, seqEditor{_seqEditor}, rw_mutex{std::make_unique<std::shared_mutex>()}
@@ -142,24 +170,32 @@ void GUI::initGUI()
     keypad(stdscr, TRUE); // Enable keyboard mapping
     curs_set(0); // Hide the cursor
 
+
     init_color(COLOR_ORANGE, 1000, 500, 0);  // orange
-    init_color(COLOR_YELLOWB, 1000, 1000, 0); // yellow bright
+    init_color(COLOR_YELLOW_V2, 1000, 1000, 0); // yellow bright
     init_color(COLOR_GREY, 500, 500, 500); // yellow bright
+    init_color(COLOR_DARK, 0, 0, 0); // yellow bright
 
     // Initialize colors
     init_pair(SEL_COLOR_PAIR, COLOR_BLACK, COLOR_GREY); // Background color pair
-    // init_pair(SEL_COLOR_PAIR, COLOR_GREY, COLOR_BLACK); // Background color pair
     
-    init_pair(NOSEL_COLOR_PAIR, COLOR_WHITE, COLOR_BLACK); // Foreground color pair
-    init_pair(PLAY_COLOR_PAIR, COLOR_ORANGE, COLOR_BLACK); // Background color pair
+    init_pair(NOSEL_COLOR_PAIR, COLOR_WHITE, COLOR_DARK); // Foreground color pair
+    init_pair(PLAY_COLOR_PAIR, COLOR_ORANGE, COLOR_DARK); // Background color pair
+   
 
-    
+
 //    seqWin = newwin(DISPLAY_ROWS*CELL_HEIGHT, DISPLAY_COLS*CELL_WIDTH, 1, 1);
     seqWin = newwin(70, 100, 3, 0); // height, width, y offset, x offset 
     seqPanel = new_panel(seqWin);
 
     buttonWin = newwin(3, 100, 0, 0);
     buttonPanel = new_panel(buttonWin);
+
+    wbkgd(seqWin, COLOR_PAIR(NOSEL_COLOR_PAIR));
+    wbkgd(buttonWin, COLOR_PAIR(NOSEL_COLOR_PAIR));
+    
+
+    refresh();
 
     update_panels();
     doupdate();

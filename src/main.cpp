@@ -98,7 +98,7 @@ int main() {
 
     int intervalMs = 50;
     seqClock.start(intervalMs);
-    guiClock.start(intervalMs * 4);
+    guiClock.start(1000 / 25);
     bool redraw = false; 
     
     int quitCount = 0;
@@ -209,7 +209,7 @@ int main() {
                 break;
         }
         sequencer.updateSeqStringGrid();
-        if (redraw) {gui.draw();redraw = false;}
+        // if (redraw) {gui.draw();redraw = false;}
     }
     CommandProcessor::sendAllNotesOff();
     seqClock.stop();

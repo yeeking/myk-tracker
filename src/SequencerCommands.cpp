@@ -98,30 +98,30 @@ void CommandProcessor::initialiseCommands() {
                 
             }
     };
-    Command sample{
-            "Sample", "Samp", "Plays a Sample",
-            { Parameter("Sound", "Bank", 0, 16, 1, 0, Step::chanInd), 
-              Parameter("Note", "N", 0, 127, 1, 0, Step::noteInd), 
-              Parameter("Vel", "V", 0, 127, 1, 0, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 0, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1, Step::probInd)},
+    // Command sample{
+    //         "Sample", "Samp", "Plays a Sample",
+    //         { Parameter("Sound", "Bank", 0, 16, 1, 0, Step::chanInd), 
+    //           Parameter("Note", "N", 0, 127, 1, 0, Step::noteInd), 
+    //           Parameter("Vel", "V", 0, 127, 1, 0, Step::velInd), 
+    //           Parameter("Dur", "D", 0, 8, 1, 0, Step::lengthInd),
+    //           Parameter("Prob", "%", 0, 1, 0.1, 1, Step::probInd)},
 
-            Step::noteInd, // int noteEditGoesToParam;
-            Step::velInd, // int numberEditGoesToParam;
-            Step::lengthInd, // int lengthEditGoesToParam;  
-            [](std::vector<double>* params) {
-                assert(params->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
-                std::cout << "Executing command " << "sample" << std::endl;
-                for (double d : *params){
-                    std::cout << d << std::endl;
-                }
-            }
-    };
+    //         Step::noteInd, // int noteEditGoesToParam;
+    //         Step::velInd, // int numberEditGoesToParam;
+    //         Step::lengthInd, // int lengthEditGoesToParam;  
+    //         [](std::vector<double>* params) {
+    //             assert(params->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
+    //             std::cout << "Executing command " << "sample" << std::endl;
+    //             for (double d : *params){
+    //                 std::cout << d << std::endl;
+    //             }
+    //         }
+    // };
 
     CommandData::commands[midiNote.shortName] = midiNote;
     CommandData::commandsDouble[0] = midiNote;
-    CommandData::commands[sample.shortName] = sample;
-    CommandData::commandsDouble[1] = sample;
+    // CommandData::commands[sample.shortName] = sample;
+    // CommandData::commandsDouble[1] = sample;
 }
 
 
