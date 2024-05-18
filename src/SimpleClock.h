@@ -4,8 +4,9 @@
 #include <chrono>
 #include <functional>
 #include <iostream>
+#include "ClockAbs.h"
 
-class SimpleClock 
+class SimpleClock  : public ClockAbs
 {
   public:
     SimpleClock(int sleepTimeMs = 5, 
@@ -59,7 +60,7 @@ class SimpleClock
       callback();
       inTick = false; 
     }
-    long getCurrentTick() const 
+    long getCurrentTick() const override 
     {
       return currentTick;
     }

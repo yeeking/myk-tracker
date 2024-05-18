@@ -5,7 +5,8 @@
 #include <vector>
 #include <tuple>
 #include <functional>
-#include "SimpleClock.h"
+#include "ClockAbs.h"
+#include "MidiUtilsAbs.h"
 
 // Define the structure for a parameter of a command
 struct Parameter {
@@ -51,8 +52,8 @@ struct Command {
 // Static class to manage commands
 class CommandProcessor {
 public:
-    static void assignMasterClock(SimpleClock* masterClock);
-    static void initialiseMIDI();
+    static void assignMasterClock(ClockAbs* masterClock);
+    static void initialiseMIDI(MidiUtilsAbs* _midiUtils);
     static void sendAllNotesOff();
     static void sendQueuedMIDI(long tick);
 

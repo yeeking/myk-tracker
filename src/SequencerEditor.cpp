@@ -158,7 +158,8 @@ void SequencerEditor::enterStepData(double value, int column)
   {
     assert (column ==  Step::noteInd || 
             column ==  Step::velInd ||
-            column ==  Step::lengthInd);
+            column ==  Step::lengthInd ||
+            column ==  Step::chanInd);
     // get a copy of the data for reference 
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     // get the relevant parameter index
@@ -186,6 +187,11 @@ void SequencerEditor::enterStepData(double value, int column)
     if (column == Step::noteInd){
       value = (12 * octave) + value; 
     }
+    // assert we are not out of bounds for this value perhaps? 
+    // Parameter param = CommandProcessor::getCommand(data[Step::cmdInd]).parameters[(int)column]; // -1 as the first col is the command which has no parameter
+
+    // std::cout << "editor main val " << value << " col is " << column << std::endl;//" setting default on col " << col << std::endl;
+
     // always used the mutex protected function to update the data 
     sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, column, value);
     // move to the next step down 

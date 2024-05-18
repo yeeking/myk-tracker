@@ -1,5 +1,6 @@
 #include "Gui.h"
 #include "Sequencer.h"
+#include "SimpleClock.h"
 
 // bool testSeqGridResize2(){
 // 	unsigned int tracks = 5, steps = 100;

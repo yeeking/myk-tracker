@@ -5,6 +5,7 @@
 #include "/usr/include/rtmidi/RtMidi.h"
 #include <thread> // std::this_thread::sleep_for
 #include <chrono> // std::chrono::seconds
+#include "MidiUtilsAbs.h"
 
 typedef std::vector<unsigned char> MidiMessage;
 typedef std::vector<MidiMessage> MidiMessageVector;
@@ -35,7 +36,7 @@ private:
 /**
  *
  */
-class MidiUtils
+class MidiUtils : public MidiUtilsAbs
 {
 public:
   MidiUtils();
@@ -54,14 +55,15 @@ public:
    */
   void selectOutputDevice(int deviceId);
   /** send note off messages on all channels to all notes */
-  void allNotesOff();
+  void allNotesOff() override;
 
   /** play a note */
-  void playSingleNote(int channel, int note, int velocity, long offTick);
+  void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) override; 
+
   /** send any messages that are due to be sent at the sent tick
    * generally this means note offs.
    */
-  void sendQueuedMessages(long tick);
+  void sendQueuedMessages(long tick) override;
   bool portIsReady() const;
 private:
   bool portReady;

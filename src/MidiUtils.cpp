@@ -157,7 +157,7 @@ void MidiUtils::allNotesOff()
     panicMode = false;
 }
 
-void MidiUtils::playSingleNote(int channel, int note, int velocity, long offTick)
+void MidiUtils::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) 
 {
     if (panicMode) return;
     if (!portReady) return;

@@ -4,7 +4,7 @@
 #include <iostream>
 #include <assert.h>
 #include <random>
-#include "MidiUtils.h"
+#include "MidiUtilsAbs.h"
 #include "Sequencer.h"
 
 // Constructor definitions
@@ -53,15 +53,15 @@ namespace CommandData {
     // this is for fast double-based access to commands
     // when the double is stored in the Step data
     std::unordered_map<double, Command> commandsDouble;
-    MidiUtils midiUtils;
+    MidiUtilsAbs* midiUtils = nullptr;
     // the clock is externally created but 
     // we need access to it for 
     // some of the lambdas
-    SimpleClock* masterClock = nullptr;
+    ClockAbs* masterClock = nullptr;
 }
 
 
-void CommandProcessor::assignMasterClock(SimpleClock* masterClock)
+void CommandProcessor::assignMasterClock(ClockAbs* masterClock)
 {
     CommandData::masterClock = masterClock;
 }
@@ -71,6 +71,8 @@ void CommandProcessor::assignMasterClock(SimpleClock* masterClock)
 void CommandProcessor::initialiseCommands() {
 
     assert(CommandData::masterClock != nullptr);
+    assert(CommandData::midiUtils != nullptr);
+    
     RandomNumberGenerator::initialize();
     // get a MIDI link going
     Command midiNote{
@@ -91,7 +93,8 @@ void CommandProcessor::initialiseCommands() {
                     double random_number = RandomNumberGenerator::getRandomNumber();
                     if (random_number < (*stepData)[Step::probInd]){ 
                         double now = CommandData::masterClock->getCurrentTick();
-                        CommandData::midiUtils.playSingleNote((int) (*stepData)[Step::chanInd],(int) (*stepData)[Step::noteInd], (int) (*stepData)[Step::velInd], 
+                        // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
+                        CommandData::midiUtils->playSingleNote((int) (*stepData)[Step::chanInd],(int) (*stepData)[Step::noteInd], (int) (*stepData)[Step::velInd], 
                         (long) ((*stepData)[Step::lengthInd]+now));
                     }
                 }
@@ -169,17 +172,17 @@ int CommandProcessor::countCommands()
     return CommandData::commands.size();
 }
 
-void CommandProcessor::initialiseMIDI()
+void CommandProcessor::initialiseMIDI(MidiUtilsAbs* _midiUtils)
 {
-    CommandData::midiUtils.interactiveInitMidi();
+    CommandData::midiUtils = _midiUtils; 
 }
 
 void CommandProcessor::sendAllNotesOff()
 {
-    CommandData::midiUtils.allNotesOff();
+    CommandData::midiUtils->allNotesOff();
 }
 void CommandProcessor::sendQueuedMIDI(long tick)
 {
-    CommandData::midiUtils.sendQueuedMessages(tick);
+    CommandData::midiUtils->sendQueuedMessages(tick);
 }
 

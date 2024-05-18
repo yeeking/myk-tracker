@@ -9,6 +9,8 @@
 #include "SequencerEditor.h"
 #include "SequencerCommands.h"
 #include "SimpleClock.h"
+#include "MidiUtils.h"
+
 std::atomic<int> playbackPosition(0);
 // Main loop
 
@@ -73,9 +75,12 @@ void handle_sigint(int sig) {
 int main() {
     SimpleClock seqClock;
     SimpleClock guiClock;
+    MidiUtils midiUtils;
+    midiUtils.interactiveInitMidi();
+
     CommandProcessor::assignMasterClock(&seqClock);
     
-    CommandProcessor::initialiseMIDI();
+    CommandProcessor::initialiseMIDI(&midiUtils);
     CommandProcessor::sendAllNotesOff();
 
     std::map<char, double> key_to_note = getKeyboardToMidiNotes(0);
