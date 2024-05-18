@@ -15,26 +15,6 @@ std::atomic<int> playbackPosition(0);
 // Main loop
 
 
-std::map<char, double> getKeyboardToMidiNotes(int transpose = 0)
-{
-    std::map<char, double> key_to_note =
-    {
-    { 'z', 0+transpose},
-    { 's', 1+transpose},
-    { 'x', 2+transpose},
-    { 'd', 3+transpose},
-    { 'c', 4+transpose},
-    { 'v', 5+transpose},
-    { 'g', 6+transpose},
-    { 'b', 7+transpose},
-    { 'h', 8+transpose},
-    { 'n', 9+transpose},
-    { 'j', 10+transpose},
-    { 'm', 11+transpose}
-    };
-    return key_to_note;
-}
-
 
 std::map<int,char> getIntToNoteMap()
 {
@@ -83,7 +63,7 @@ int main() {
     CommandProcessor::initialiseMIDI(&midiUtils);
     CommandProcessor::sendAllNotesOff();
 
-    std::map<char, double> key_to_note = getKeyboardToMidiNotes(0);
+    std::map<char, double> key_to_note = MidiUtilsAbs::getKeyboardToMidiNotes(0);
     // maintains the data and sate of the sequencer
     Sequencer sequencer{4, 16};
     // maintains a stateful editor - knows the edit mode, etc. 

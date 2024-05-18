@@ -391,6 +391,7 @@ void SequencerEditor::moveCursorUp()
   }
   case SequencerEditorMode::selectingSeqAndStep:
   {
+
     currentStep -= 1;
     if (currentStep < 0)
       currentStep = 0;
@@ -398,6 +399,7 @@ void SequencerEditor::moveCursorUp()
   }
   case SequencerEditorMode::editingStep:
   {
+
     // cycles which data field we are editing
     // this->editSubMode = SequencerEditor::cycleSubModeLeft(this->editSubMode);
     currentStepRow -= 1;
@@ -408,12 +410,15 @@ void SequencerEditor::moveCursorUp()
   }
   case SequencerEditorMode::configuringSequence:
   {
+
     // SequencerEditor::nextSequenceType(sequencer, currentSequence);
     currentSeqParam --;
     if (currentSeqParam < 0) currentSeqParam = 0; 
     break;
   }
+
   }
+    
 }
 
 void SequencerEditor::moveCursorDown()
@@ -430,7 +435,7 @@ void SequencerEditor::moveCursorDown()
     currentStep += 1;
     if (currentStep >= sequencer->howManySteps(currentSequence))
       currentStep = sequencer->howManySteps(currentSequence) - 1;
-    break;
+       break;
   }
   case SequencerEditorMode::editingStep:
   {

@@ -12,6 +12,7 @@
 #include "MidiUtilsAbs.h"
 #include "ClockAbs.h"
 #include "Sequencer.h"
+#include "SequencerEditor.h"
 
 
 //==============================================================================
@@ -69,10 +70,13 @@ public:
 
 
     Sequencer* getSequencer();
+    SequencerEditor* getSequenceEditor();
+    
     
 private:
     unsigned long elapsedSamples;
     Sequencer sequencer;
+    SequencerEditor seqEditor; 
     ClockAbs ticker; 
 
     unsigned int samplesPerTick; 

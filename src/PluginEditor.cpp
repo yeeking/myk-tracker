@@ -13,7 +13,7 @@
 
 //==============================================================================
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p), sequencer{p.getSequencer()}, editor{p.getSequencer()}
+    : AudioProcessorEditor (&p), audioProcessor (p), seqEditor{p.getSequenceEditor()}, sequencer{p.getSequencer()}
 {
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.
@@ -32,12 +32,12 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     // sequencer.decrementSeqParam(0, 1);
 
         
-    editor.enterStepData(12, Step::noteInd);    
+   seqEditor->enterStepData(12, Step::noteInd);    
     // editor.moveCursorDown();
     // editor.enterStepData(13, Step::noteInd);
-    editor.gotoSequenceConfigPage();
-    editor.incrementSeqConfigParam();
-    
+   seqEditor->gotoSequenceConfigPage();
+   seqEditor->incrementSeqConfigParam();
+   seqEditor->setEditMode(SequencerEditorMode::selectingSeqAndStep);    
 }
 
 PluginEditor::~PluginEditor()
@@ -68,37 +68,38 @@ void PluginEditor::timerCallback ()
 {
   // sequencer->tick();
   std::vector<std::pair<int, int>> playHeads;
-  for (int col=0;col<sequencer->howManySequences(); ++col){  
-    std::pair<int, int> colRow = {col, sequencer->getCurrentStep(col)};
+  for (int col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
+    std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
     playHeads.push_back(std::move(colRow));
   }
-  rTable.draw(sequencer->getSequenceAsGridOfStrings(), 4, 4, editor.getCurrentSequence(), editor.getCurrentStep(), playHeads);
+  rTable.draw(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 4, 4,seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
   repaint();
 }
 
 
 bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
+
     switch (key.getTextCharacter())
     {
         case ' ':
-            editor.toggleTrigger();
-            if (!editor.isTriggerActive()) {
+           seqEditor->toggleTrigger();
+            if (!seqEditor->isTriggerActive()) {
                 // After a 'stop', reset all sequences to zero for next trigger
                 // sequencer.nextStepFromZero();
             }
             break;
 
         case '\t':
-            editor.nextStep();
+           seqEditor->nextStep();
             break;
 
         case '-':
-            editor.removeRow();
+           seqEditor->removeRow();
             break;
 
         case '=':
-            editor.addRow();
+           seqEditor->addRow();
             break;
 
         case '_':
@@ -110,83 +111,107 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             break;
 
         case '[':
-            editor.decrementAtCursor();
+           seqEditor->decrementAtCursor();
             break;
 
         case ']':
-            editor.incrementAtCursor();
+           seqEditor->incrementAtCursor();
             break;
 
         case ',':
-            editor.decrementOctave();
+           seqEditor->decrementOctave();
             break;
 
         case '.':
-            editor.incrementOctave();
+           seqEditor->incrementOctave();
             break;
 
         case 'M':
-            audioProcessor.getSequencer()->toggleSequenceMute(editor.getCurrentSequence());
-            // sequencer.toggleSequenceMute(editor.getCurrentSequence());
+            audioProcessor.getSequencer()->toggleSequenceMute(seqEditor->getCurrentSequence());
+            // sequencer.toggleSequenceMute(seqEditor->getCurrentSequence());
             break;
 
         // case juce::KeyPress::deleteKey:
-        //     editor.resetAtCursor();
+        //    seqEditor->resetAtCursor();
         //     CommandProcessor::sendAllNotesOff();
         //     break;
 
         case '\n':
-            editor.enterAtCursor();
+           seqEditor->enterAtCursor();
             break;
 
         case 'S':
-            editor.gotoSequenceConfigPage();
+           seqEditor->gotoSequenceConfigPage();
             break;
 
         // case juce::KeyPress::upKey:
-        //     editor.moveCursorUp();
+        //    seqEditor->moveCursorUp();
         //     return true;  // Redraw might be handled elsewhere in JUCE
 
         // case juce::KeyPress::downKey:
-        //     editor.moveCursorDown();
+        //    seqEditor->moveCursorDown();
         //     return true;  // Redraw might be handled elsewhere in JUCE
 
         // case juce::KeyPress::leftKey:
-        //     editor.moveCursorLeft();
+        //    seqEditor->moveCursorLeft();
         //     return true;  // Redraw might be handled elsewhere in JUCE
 
         // case juce::KeyPress::rightKey:
-        //     editor.moveCursorRight();
+        //    seqEditor->moveCursorRight();
         //     return true;  // Redraw might be handled elsewhere in JUCE
 
         case 'p':
-            // if (editor.getEditMode() == SequencerEditor::EditingStep) {
-            //     // sequencer.triggerStep(editor.getCurrentSequence(), editor.getCurrentStep(), editor.getCurrentStepRow());
+            // if (seqEditor->getEditMode() == SequencerEditor::EditingStep) {
+            //     // sequencer.triggerStep(seqEditor->getCurrentSequence(),seqEditor->getCurrentStep(),seqEditor->getCurrentStepRow());
             // }
             break;
 
         default:
+            char ch = key.getTextCharacter();
+            std::map<char, double> key_to_note = MidiUtilsAbs::getKeyboardToMidiNotes(0);
+            for (const std::pair<char, double>& key_note : key_to_note)
+            {
+              if (ch == key_note.first){ 
+                // key_note_match = true;
+                seqEditor->enterStepData(key_note.second, Step::noteInd);
+                break;// break the for loop
+              }
+            }
+            // do the velocity controls
+            for (int num=1;num<5;++num){
+              if (ch == num + 48){
+                seqEditor->enterStepData(num * (128/4), Step::velInd);
+                break; 
+              }
+            }
+            // for (int i=0;i<lenKeys.size();++i){
+            //   if (lenKeys[i] == ch){
+            //     editor.enterStepData(i+1, Step::lengthInd);
+            //     break;
+            //   }
+            // }
             // Handle arrow keys
             if (key.isKeyCode(juce::KeyPress::upKey)) {
-                editor.moveCursorUp();
-                return true;
+               seqEditor->moveCursorUp();
+                // return true;
             }
             if (key.isKeyCode(juce::KeyPress::downKey)) {
-                editor.moveCursorDown();
-                return true;
+
+               seqEditor->moveCursorDown();
+                // return true;
             }
             if (key.isKeyCode(juce::KeyPress::leftKey)) {
-                editor.moveCursorLeft();
-                return true;
+               seqEditor->moveCursorLeft();
+                // return true;
             }
             if (key.isKeyCode(juce::KeyPress::rightKey)) {
-                editor.moveCursorRight();
-                return true;
+               seqEditor->moveCursorRight();
+                // return true;
             }
 
-            return false; // Key was not handled
+            // return false; // Key was not handled
     }
-
+    audioProcessor.getSequencer()->updateSeqStringGrid();
     return true; // Key was handled
 }
 
@@ -194,3 +219,7 @@ bool PluginEditor::keyStateChanged(bool isKeyDown, juce::Component* originatingC
 {
   return false; 
 }
+
+
+
+
