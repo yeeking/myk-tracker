@@ -16,7 +16,10 @@
 //==============================================================================
 /**
 */
-class PluginEditor  : public juce::AudioProcessorEditor, juce::Timer
+class PluginEditor  : public juce::AudioProcessorEditor, 
+                      public juce::Timer,
+                      public juce::KeyListener 
+
 {
 public:
     PluginEditor (PluginProcessor&);
@@ -27,6 +30,11 @@ public:
     void resized() override;
 
     void timerCallback () override; 
+
+       // KeyListener overrides
+    bool keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent) override;
+    bool keyStateChanged(bool isKeyDown, juce::Component* originatingComponent) override;
+
 
 private:
 

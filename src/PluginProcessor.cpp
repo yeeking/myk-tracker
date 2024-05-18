@@ -31,13 +31,7 @@ PluginProcessor::PluginProcessor()
 
     // put some test notes into the sequencer to see if they flow through
 
-    SequencerEditor editor(&sequencer);
-    
-    editor.enterStepData(12, Step::noteInd);    
-    // editor.moveCursorDown();
-    // editor.enterStepData(13, Step::noteInd);
-    editor.gotoSequenceConfigPage();
-    editor.incrementSeqConfigParam();
+
 
     
 }
