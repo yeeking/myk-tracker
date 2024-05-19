@@ -69,7 +69,7 @@ public:
   /** opens the sent output device, ready for use
    * Should be in the range 0->(number of ports-1) inclusive
    */
-  void selectOutputDevice(int deviceId);
+  void selectOutputDevice(unsigned int deviceId);
   /** send note off messages on all channels to all notes */
   void allNotesOff() override;
 

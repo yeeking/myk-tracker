@@ -3,8 +3,8 @@ cmake_minimum_required(VERSION 3.15)
 project(myk-tracker VERSION 0.0.4)
 
 set(CMAKE_CXX_STANDARD 17)
-set (CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # mac
-set (CMAKE_OSX_ARCHITECTURES arm64;x86_64) # mac
+set (CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # mac - target macos 11
+set (CMAKE_OSX_ARCHITECTURES arm64;x86_64) # mac - build universal binary
 
 
 ########## CLI version cmake config 

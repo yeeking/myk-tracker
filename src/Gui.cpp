@@ -225,6 +225,8 @@ void GUI::drawControlPanel(WINDOW* win){
         case SequencerEditorMode::selectingSeqAndStep:
             mode = "Seq";
             break;
+        default:
+            break; 
              
     }
 

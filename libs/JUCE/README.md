@@ -3,9 +3,9 @@
 JUCE is an open-source cross-platform C++ application framework for creating high quality
 desktop and mobile applications, including VST, VST3, AU, AUv3, AAX and LV2 audio plug-ins
 and plug-in hosts. JUCE can be easily integrated with existing projects via CMake, or can
-be used as a project generation tool via the [Projucer](https://juce.com/discover/projucer),
-which supports exporting projects for Xcode (macOS and iOS), Visual Studio, Android Studio,
-Code::Blocks and Linux Makefiles as well as containing a source code editor.
+be used as a project generation tool via the [Projucer](#the-projucer), which supports
+exporting projects for Xcode (macOS and iOS), Visual Studio, Android Studio, Code::Blocks
+and Linux Makefiles as well as containing a source code editor.
 
 ## Getting Started
 
@@ -35,7 +35,7 @@ For further help getting started, please refer to the JUCE
 
 ### CMake
 
-Version 3.15 or higher is required. To use CMake, you will need to install it,
+Version 3.22 or higher is required. To use CMake, you will need to install it,
 either from your system package manager or from the [official download
 page](https://cmake.org/download/). For comprehensive documentation on JUCE's
 CMake API, see the [JUCE CMake documentation](/docs/CMake%20API.md). For
@@ -56,15 +56,16 @@ of the target you wish to build.
 
 #### Building JUCE Projects
 
+- __C++ Standard__: 17+
 - __macOS/iOS__: Xcode 10.1 (macOS 10.13.6)
-- __Windows__: Windows 8.1 and Visual Studio 2015 Update 3 64-bit
-- __Linux__: g++ 5.0 or Clang 3.4 (for a full list of dependencies, see
+- __Windows__: Windows 8.1 and Visual Studio 2017
+- __Linux__: g++ 7.0 or Clang 6.0 (for a full list of dependencies, see
 [here](/docs/Linux%20Dependencies.md)).
 - __Android__: Android Studio on Windows, macOS or Linux
 
 #### Deployment Targets
 
-- __macOS__: macOS 10.7
+- __macOS__: macOS 10.9
 - __Windows__: Windows Vista
 - __Linux__: Mainstream Linux distributions
 - __iOS__: iOS 9.0
@@ -94,7 +95,7 @@ The JUCE framework contains the following dependencies:
 - [Oboe](modules/juce_audio_devices/native/oboe/) ([Apache 2.0](modules/juce_audio_devices/native/oboe/LICENSE))
 - [FLAC](modules/juce_audio_formats/codecs/flac/) ([BSD](modules/juce_audio_formats/codecs/flac/Flac%20Licence.txt))
 - [Ogg Vorbis](modules/juce_audio_formats/codecs/oggvorbis/) ([BSD](modules/juce_audio_formats/codecs/oggvorbis/Ogg%20Vorbis%20Licence.txt))
-- [CoreAudioUtilityClasses](modules/juce_audio_plugin_client/AU/CoreAudioUtilityClasses/) ([Apple](modules/juce_audio_plugin_client/AU/CoreAudioUtilityClasses/AUBase.cpp))
+- [AudioUnitSDK](modules/juce_audio_plugin_client/AU/AudioUnitSDK/) ([Apache 2.0](modules/juce_audio_plugin_client/AU/AudioUnitSDK/LICENSE.txt))
 - [AUResources.r](modules/juce_audio_plugin_client/AUResources.r) ([Apple](modules/juce_audio_plugin_client/AUResources.r))
 - [LV2](modules/juce_audio_processors/format_types/LV2_SDK/) ([ISC](modules/juce_audio_processors/format_types/LV2_SDK/lv2/COPYING))
 - [pslextensions](modules/juce_audio_processors/format_types/pslextensions/ipslcontextinfo.h) ([Public domain](modules/juce_audio_processors/format_types/pslextensions/ipslcontextinfo.h))

@@ -30,8 +30,8 @@ static double getStepSize (const Slider& slider)
 {
     const auto interval = slider.getInterval();
 
-    return interval != 0.0 ? interval
-                           : slider.getRange().getLength() * 0.01;
+    return ! approximatelyEqual (interval, 0.0) ? interval
+                                                : slider.getRange().getLength() * 0.01;
 }
 
 class Slider::Pimpl   : public AsyncUpdater, // this needs to be public otherwise it will cause an
@@ -141,7 +141,7 @@ public:
             // interval setting.
             numDecimalPlaces = 7;
 
-            if (normRange.interval != 0.0)
+            if (! approximatelyEqual (normRange.interval, 0.0))
             {
                 int v = std::abs (roundToInt (normRange.interval * 10000000));
 
@@ -206,7 +206,7 @@ public:
                                newValue);
         }
 
-        if (newValue != lastCurrentValue)
+        if (! approximatelyEqual (newValue, lastCurrentValue))
         {
             if (valueBox != nullptr)
                 valueBox->hideEditor (true);
@@ -216,12 +216,11 @@ public:
             // Need to do this comparison because the Value will use equalsWithSameType to compare
             // the new and old values, so will generate unwanted change events if the type changes.
             // Cast to double before comparing, to prevent comparing as another type (e.g. String).
-            if (static_cast<double> (currentValue.getValue()) != newValue)
+            if (! approximatelyEqual (static_cast<double> (currentValue.getValue()), newValue))
                 currentValue = newValue;
 
             updateText();
             owner.repaint();
-            updatePopupDisplay (newValue);
 
             triggerChangeMessage (notification);
         }
@@ -250,12 +249,12 @@ public:
             newValue = jmin (lastCurrentValue, newValue);
         }
 
-        if (lastValueMin != newValue)
+        if (! approximatelyEqual (lastValueMin, newValue))
         {
             lastValueMin = newValue;
             valueMin = newValue;
             owner.repaint();
-            updatePopupDisplay (newValue);
+            updatePopupDisplay();
 
             triggerChangeMessage (notification);
         }
@@ -284,12 +283,12 @@ public:
             newValue = jmax (lastCurrentValue, newValue);
         }
 
-        if (lastValueMax != newValue)
+        if (! approximatelyEqual (lastValueMax, newValue))
         {
             lastValueMax = newValue;
             valueMax = newValue;
             owner.repaint();
-            updatePopupDisplay (valueMax.getValue());
+            updatePopupDisplay();
 
             triggerChangeMessage (notification);
         }
@@ -307,7 +306,7 @@ public:
         newMinValue = constrainedValue (newMinValue);
         newMaxValue = constrainedValue (newMaxValue);
 
-        if (lastValueMax != newMaxValue || lastValueMin != newMinValue)
+        if (! approximatelyEqual (lastValueMax, newMaxValue) || ! approximatelyEqual (lastValueMin, newMinValue))
         {
             lastValueMax = newMaxValue;
             lastValueMin = newMinValue;
@@ -360,8 +359,10 @@ public:
         if (checker.shouldBailOut())
             return;
 
-        if (owner.onValueChange != nullptr)
-            owner.onValueChange();
+        NullCheckedInvocation::invoke (owner.onValueChange);
+
+        if (checker.shouldBailOut())
+            return;
 
         if (auto* handler = owner.getAccessibilityHandler())
             handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
@@ -377,8 +378,7 @@ public:
         if (checker.shouldBailOut())
             return;
 
-        if (owner.onDragStart != nullptr)
-            owner.onDragStart();
+        NullCheckedInvocation::invoke (owner.onDragStart);
     }
 
     void sendDragEnd()
@@ -392,8 +392,7 @@ public:
         if (checker.shouldBailOut())
             return;
 
-        if (owner.onDragEnd != nullptr)
-            owner.onDragEnd();
+        NullCheckedInvocation::invoke (owner.onDragEnd);
     }
 
     void incrementOrDecrement (double delta)
@@ -435,7 +434,7 @@ public:
     {
         auto newValue = owner.snapValue (owner.getValueFromText (valueBox->getText()), notDragging);
 
-        if (newValue != static_cast<double> (currentValue.getValue()))
+        if (! approximatelyEqual (newValue, static_cast<double> (currentValue.getValue())))
         {
             ScopedDragNotification drag (owner);
             setValue (newValue, sendNotificationSync);
@@ -453,6 +452,8 @@ public:
             if (newValue != valueBox->getText())
                 valueBox->setText (newValue, dontSendNotification);
         }
+
+        updatePopupDisplay();
     }
 
     double constrainedValue (double value) const
@@ -813,7 +814,7 @@ public:
         auto maxSpeed = jmax (200.0, (double) sliderRegionSize);
         auto speed = jlimit (0.0, maxSpeed, (double) std::abs (mouseDiff));
 
-        if (speed != 0.0)
+        if (! approximatelyEqual (speed, 0.0))
         {
             speed = 0.2 * velocityModeSensitivity
                       * (1.0 + std::sin (MathConstants<double>::pi * (1.5 + jmin (0.5, velocityModeOffset
@@ -966,7 +967,7 @@ public:
         {
             restoreMouseIfHidden();
 
-            if (sendChangeOnlyOnRelease && valueOnMouseDown != static_cast<double> (currentValue.getValue()))
+            if (sendChangeOnlyOnRelease && ! approximatelyEqual (valueOnMouseDown, static_cast<double> (currentValue.getValue())))
                 triggerChangeMessage (sendNotificationAsync);
 
             currentDrag.reset();
@@ -1038,7 +1039,7 @@ public:
             return 0.0;
         }();
 
-        if (valueChange == 0.0)
+        if (approximatelyEqual (valueChange, 0.0))
             return false;
 
         setValue (getValue() + valueChange, sendNotificationSync);
@@ -1061,25 +1062,36 @@ public:
                                             | ComponentPeer::windowIgnoresKeyPresses
                                             | ComponentPeer::windowIgnoresMouseClicks);
 
-            if (style == SliderStyle::TwoValueHorizontal
-                || style == SliderStyle::TwoValueVertical)
-            {
-                updatePopupDisplay (sliderBeingDragged == 2 ? getMaxValue()
-                                                            : getMinValue());
-            }
-            else
-            {
-                updatePopupDisplay (getValue());
-            }
-
+            updatePopupDisplay();
             popupDisplay->setVisible (true);
         }
     }
 
-    void updatePopupDisplay (double valueToShow)
+    void updatePopupDisplay()
     {
-        if (popupDisplay != nullptr)
-            popupDisplay->updatePosition (owner.getTextFromValue (valueToShow));
+        if (popupDisplay == nullptr)
+            return;
+
+        const auto valueToShow = [this]
+        {
+            constexpr SliderStyle multiSliderStyles[] { SliderStyle::TwoValueHorizontal,
+                                                        SliderStyle::TwoValueVertical,
+                                                        SliderStyle::ThreeValueHorizontal,
+                                                        SliderStyle::ThreeValueVertical };
+
+            if (std::find (std::begin (multiSliderStyles), std::end (multiSliderStyles), style) == std::end (multiSliderStyles))
+                return getValue();
+
+            if (sliderBeingDragged == 2)
+                return getMaxValue();
+
+            if (sliderBeingDragged == 1)
+                return getMinValue();
+
+            return getValue();
+        }();
+
+        popupDisplay->updatePosition (owner.getTextFromValue (valueToShow));
     }
 
     bool canDoubleClickToValue() const
@@ -1133,7 +1145,7 @@ public:
                     auto delta = getMouseWheelDelta (value, (std::abs (wheel.deltaX) > std::abs (wheel.deltaY)
                                                                   ? -wheel.deltaX : wheel.deltaY)
                                                                * (wheel.isReversed ? -1.0f : 1.0f));
-                    if (delta != 0.0)
+                    if (! approximatelyEqual (delta, 0.0))
                     {
                         auto newValue = value + jmax (normRange.interval, std::abs (delta)) * (delta < 0 ? -1.0 : 1.0);
 
@@ -1226,12 +1238,6 @@ public:
                                      getLinearSliderPos (lastValueMin),
                                      getLinearSliderPos (lastValueMax),
                                      style, owner);
-            }
-
-            if ((style == LinearBar || style == LinearBarVertical) && valueBox == nullptr)
-            {
-                g.setColour (owner.findColour (Slider::textBoxOutlineColourId));
-                g.drawRect (0, 0, owner.getWidth(), owner.getHeight(), 1);
             }
         }
     }
@@ -1341,8 +1347,8 @@ public:
     std::unique_ptr<Button> incButton, decButton;
 
     //==============================================================================
-    struct PopupDisplayComponent  : public BubbleComponent,
-                                    public Timer
+    struct PopupDisplayComponent final : public BubbleComponent,
+                                         public Timer
     {
         PopupDisplayComponent (Slider& s, bool isOnDesktop)
             : owner (s),
@@ -1563,10 +1569,11 @@ void Slider::lookAndFeelChanged()   { pimpl->lookAndFeelChanged (getLookAndFeel(
 void Slider::enablementChanged()    { repaint(); pimpl->updateTextBoxEnablement(); }
 
 //==============================================================================
-Range<double> Slider::getRange() const noexcept  { return { pimpl->normRange.start, pimpl->normRange.end }; }
-double Slider::getMaximum() const noexcept       { return pimpl->normRange.end; }
-double Slider::getMinimum() const noexcept       { return pimpl->normRange.start; }
-double Slider::getInterval() const noexcept      { return pimpl->normRange.interval; }
+NormalisableRange<double> Slider::getNormalisableRange() const noexcept { return pimpl->normRange; }
+Range<double> Slider::getRange() const noexcept                         { return { pimpl->normRange.start, pimpl->normRange.end }; }
+double Slider::getMaximum() const noexcept                              { return pimpl->normRange.end; }
+double Slider::getMinimum() const noexcept                              { return pimpl->normRange.start; }
+double Slider::getInterval() const noexcept                             { return pimpl->normRange.interval; }
 
 void Slider::setRange (double newMin, double newMax, double newInt)      { pimpl->setRange (newMin, newMax, newInt); }
 void Slider::setRange (Range<double> newRange, double newInt)            { pimpl->setRange (newRange.getStart(), newRange.getEnd(), newInt); }
@@ -1747,7 +1754,7 @@ void Slider::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& wheel
 }
 
 //==============================================================================
-class SliderAccessibilityHandler  : public AccessibilityHandler
+class SliderAccessibilityHandler final : public AccessibilityHandler
 {
 public:
     explicit SliderAccessibilityHandler (Slider& sliderToWrap)
@@ -1762,7 +1769,7 @@ public:
     String getHelp() const override   { return slider.getTooltip(); }
 
 private:
-    class ValueInterface  : public AccessibilityValueInterface
+    class ValueInterface final : public AccessibilityValueInterface
     {
     public:
         explicit ValueInterface (Slider& sliderToWrap)

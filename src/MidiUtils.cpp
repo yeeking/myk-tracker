@@ -134,7 +134,7 @@ std::vector<std::string> MidiUtils::getOutputDeviceList()
     return deviceList;
 }
 
-void MidiUtils::selectOutputDevice(int deviceId)
+void MidiUtils::selectOutputDevice(unsigned int deviceId)
 {
     midiout->openPort(deviceId);
 }

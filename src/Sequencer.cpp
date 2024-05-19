@@ -3,11 +3,11 @@
 #include <sstream>
 #include <iomanip>
 
-Step::Step() : active{true}, rw_mutex{std::make_unique<std::shared_mutex>()}
+Step::Step() : rw_mutex{std::make_unique<std::shared_mutex>()}, active{true}
 
 {
   data.push_back(std::vector<double>());
-  for (int i=0;i<=Step::maxInd;++i){
+  for (std::size_t i=0;i<=Step::maxInd;++i){
     data[0].push_back(0.0);
   }
 }
@@ -17,18 +17,18 @@ std::vector<std::vector<double>> Step::getData()
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data;
 }
-double Step::getDataAt(int row, int col)
+double Step::getDataAt(std::size_t row, std::size_t col)
 {
   // this lock allows multiple concorrent reads
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data[row][col];
 }
-int Step::howManyDataRows()
+std::size_t Step::howManyDataRows()
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data.size();
 }
-int Step::howManyDataCols()
+std::size_t Step::howManyDataCols()
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data[0].size();
@@ -47,13 +47,13 @@ std::string Step::toStringFlat()
   }
   else {
     std::string disp = "";
-    int note = (int)this->data[0][Step::noteInd];
+    std::size_t note = (int)this->data[0][Step::noteInd];
     char nchar = MidiUtils::getIntToNoteMap()[note % 12];
-    int oct = note / 12; 
+    std::size_t oct = note / 12; 
     disp.push_back(nchar);
     disp += "-" + std::to_string(oct) + " ";
-    int power = (int)this->data[0][Step::velInd] / 32; 
-    for (int p=0;p<power;++p){
+    std::size_t power = (int)this->data[0][Step::velInd] / 32; 
+    for (std::size_t p=0;p<power;++p){
       disp += "]";
     }
     return disp; 
@@ -72,11 +72,11 @@ std::vector<std::vector<std::string>> Step::toStringGrid()
   std::vector<std::vector<std::string>> grid;
   // assert (data.size() > 0);
   // a row is
-  for (int col = 0; col < data[0].size(); ++col)
+  for (std::size_t col = 0; col < data[0].size(); ++col)
   {
     std::vector<std::string> colData;
     // colData.resize(data.size());
-    for (int row = 0; row < data.size(); ++row)
+    for (std::size_t row = 0; row < data.size(); ++row)
     {
       //  colData.push_back(std::to_string(row) + ":" + std::to_string(col) + ":" + std::to_string((int)data[row][col]));
       std::string field = "";
@@ -122,18 +122,18 @@ void Step::setData(const std::vector<std::vector<double>> &_data)
   this->data = std::move(_data); // copy it over
 }
 
-void Step::resetRow(int row)
+void Step::resetRow(std::size_t row)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   assert(row < data.size());
-  for (int col = 0; col < data[row].size(); ++col)
+  for (std::size_t col = 0; col < data[row].size(); ++col)
   {
     data[row][col] = 0;
   }
 }
 
 /** update one value in the data vector for this step*/
-void Step::setDataAt(unsigned int row, unsigned int col, double value)
+void Step::setDataAt(std::size_t row, std::size_t col, double value)
 {
   // uni lock as writing data
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
@@ -143,7 +143,7 @@ void Step::setDataAt(unsigned int row, unsigned int col, double value)
   // apply data constraints based on current command
   if (col == Step::cmdInd)
   { // changing the command - only allowed a value 0->no. commands
-    int maxCmds = CommandProcessor::countCommands();
+    std::size_t maxCmds = CommandProcessor::countCommands();
     if (value >= maxCmds)
       value = maxCmds - 1;
     if (value < 0)
@@ -152,7 +152,7 @@ void Step::setDataAt(unsigned int row, unsigned int col, double value)
   else if (col > Step::cmdInd)
   { // it is one of the parameter columns - use parameter spec constraints
     Command cmd = CommandProcessor::getCommand(data[row][Step::cmdInd]);
-    int pInd = col - 1;
+    std::size_t pInd = col - 1;
     Parameter &p = cmd.parameters[pInd];
     // now constrain the value to the range of the parameter
     if (value > p.max)
@@ -174,7 +174,7 @@ std::function<void(std::vector<std::vector<double>> *)> Step::getCallback()
 }
 
 /** trigger this step, causing it to pass its data to its callback*/
-void Step::trigger(int row)
+void Step::trigger(std::size_t row)
 {
   // shared lock as reading
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
@@ -210,7 +210,7 @@ bool Step::isActive() const
   return active;
 }
 
-std::string Step::dblToString(double val, int dps)
+std::string Step::dblToString(double val, std::size_t dps)
 {
   // quite verbose C++ way to make a string of a double with 2sf
   std::ostringstream oss;
@@ -220,7 +220,7 @@ std::string Step::dblToString(double val, int dps)
 
 
 Sequence::Sequence(Sequencer *_sequencer,
-                   unsigned int seqLength,
+                   std::size_t seqLength,
                    unsigned short _midiChannel)
     : sequencer{_sequencer}, currentStep{0},
       midiChannel{_midiChannel}, type{SequenceType::midiNote},
@@ -229,7 +229,7 @@ Sequence::Sequence(Sequencer *_sequencer,
 // , midiScaleToDrum{MidiUtils::getScaleMidiToDrumMidi()}
 {
   currentLength = seqLength;
-  for (unsigned int i = 0; i < seqLength; i++)
+  for (std::size_t i = 0; i < seqLength; i++)
   {
     Step s;
     s.setCallback([i](std::vector<std::vector<double>> *data)
@@ -284,7 +284,7 @@ void Sequence::tick(bool trigger)
   }
 }
 
-void Sequence::triggerStep(int step, int row)
+void Sequence::triggerStep(std::size_t step, std::size_t row)
 {
   steps[step].trigger(row);
 }
@@ -298,7 +298,7 @@ void Sequence::deactivateProcessors()
 }
 
 /** set this step, row values to zero */
-void Sequence::resetStepRow(int step, int row)
+void Sequence::resetStepRow(std::size_t step, std::size_t row)
 {
   steps[step].resetRow(row);
 }
@@ -384,65 +384,65 @@ void Sequence::triggerTickType()
   // }
 }
 
-void Sequence::setLengthAdjustment(signed int lenAdjust)
+void Sequence::setLengthAdjustment(std::size_t lenAdjust)
 {
   // make sure we have enough steps
   this->ensureEnoughStepsForLength(currentLength + lenAdjust);
   this->lengthAdjustment = lenAdjust;
 }
 
-void Sequence::setTicksPerStep(int tps)
+void Sequence::setTicksPerStep(std::size_t tps)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   this->originalTicksPerStep = tps;
   this->ticksElapsed = 0;
 }
 
-void Sequence::onZeroSetTicksPerStep(int _nextTicksPerStep)
+void Sequence::onZeroSetTicksPerStep(std::size_t _nextTicksPerStep)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   this->nextTicksPerStep = _nextTicksPerStep;
 }
 
-void Sequence::setTicksPerStepAdjustment(int tps)
+void Sequence::setTicksPerStepAdjustment(std::size_t tps)
 {
   if (tps < 1 || tps > 16)
     return;
   this->ticksPerStep = tps;
 }
 
-int Sequence::getTicksPerStep() const
+std::size_t Sequence::getTicksPerStep() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return this->originalTicksPerStep;
 }
 
-unsigned int Sequence::getCurrentStep() const
+std::size_t Sequence::getCurrentStep() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return currentStep;
 }
-bool Sequence::assertStep(unsigned int step) const
+bool Sequence::assertStep(std::size_t step) const
 {
   if (step >= steps.size() || step < 0)
     return false;
   return true;
 }
-std::vector<std::vector<double>> Sequence::getStepData(int step)
+std::vector<std::vector<double>> Sequence::getStepData(std::size_t step)
 {
   return steps[step].getData();
 }
 
-double Sequence::getStepDataAt(int step, int row, int col)
+double Sequence::getStepDataAt(std::size_t step, std::size_t row, std::size_t col)
 {
   return steps[step].getDataAt(row, col);
 }
 
-// std::vector<std::vector<double>>* Sequence::getStepDataDirect(int step)
+// std::vector<std::vector<double>>* Sequence::getStepDataDirect(std::size_t step)
 // {
 //   return steps[step].getDataDirect();
 // }
-// Step* Sequence::getStep(int step)
+// Step* Sequence::getStep(std::size_t step)
 // {
 //   return &steps[step];
 // }
@@ -451,31 +451,31 @@ std::vector<std::vector<double>> Sequence::getCurrentStepData()
 {
   return steps[currentStep].getData();
 }
-unsigned int Sequence::getLength() const
+std::size_t Sequence::getLength() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return currentLength;
 }
 
-void Sequence::ensureEnoughStepsForLength(int length)
+void Sequence::ensureEnoughStepsForLength(std::size_t length)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   if (length > steps.size()) // bad need more steps
   {
-    int toAdd = length - steps.size();
-    for (int i = 0; i < toAdd; ++i)
+    std::size_t toAdd = length - steps.size();
+    for (std::size_t i = 0; i < toAdd; ++i)
     {
       Step s;
       s.setCallback(
           steps[0].getCallback());
       // set the channel
-      int channel = steps[0].getDataAt(0, Step::chanInd);
+      std::size_t channel = steps[0].getDataAt(0, Step::chanInd);
       s.setDataAt(0, Step::chanInd, channel);
       steps.push_back(std::move(s));
     }
   }
 }
-void Sequence::setLength(int length)
+void Sequence::setLength(std::size_t length)
 {
 std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   if (length < 1)
@@ -486,22 +486,22 @@ std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   currentLength = length;
 }
 
-void Sequence::setStepData(unsigned int step, std::vector<std::vector<double>> data)
+void Sequence::setStepData(std::size_t step, std::vector<std::vector<double>> data)
 {
   steps[step].setData(data);
 }
 /** update a single data value in a given step*/
-void Sequence::setStepDataAt(unsigned int step, unsigned int row, unsigned int col, double value)
+void Sequence::setStepDataAt(std::size_t step, std::size_t row, std::size_t col, double value)
 {
   steps[step].setDataAt(row, col, value);
 }
 
-void Sequence::setStepCallback(unsigned int step,
+void Sequence::setStepCallback(std::size_t step,
                                std::function<void(std::vector<std::vector<double>> *)> callback)
 {
   steps[step].setCallback(callback);
 }
-std::string Sequence::stepToString(int step)
+std::string Sequence::stepToString(std::size_t step)
 {
   std::vector<std::vector<double>> data = getStepData(step);
   if (data.size() > 0)
@@ -510,7 +510,7 @@ std::string Sequence::stepToString(int step)
     return "-";
 }
 
-unsigned int Sequence::howManySteps() const
+std::size_t Sequence::howManySteps() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   // return steps.size();
@@ -520,20 +520,20 @@ unsigned int Sequence::howManySteps() const
   return currentLength + lengthAdjustment > 0 ? currentLength + lengthAdjustment : 1;
 }
 
-int Sequence::howManyStepDataRows(int step)
+std::size_t Sequence::howManyStepDataRows(std::size_t step)
 {
   return steps[step].howManyDataRows();
 }
-int Sequence::howManyStepDataCols(int step)
+std::size_t Sequence::howManyStepDataCols(std::size_t step)
 {
   return steps[step].howManyDataCols();
 }
 
-void Sequence::toggleActive(unsigned int step)
+void Sequence::toggleActive(std::size_t step)
 {
   steps[step].toggleActive();
 }
-bool Sequence::isStepActive(unsigned int step) const
+bool Sequence::isStepActive(std::size_t step) const
 {
   return steps[step].isActive();
 }
@@ -551,7 +551,7 @@ void Sequence::setTranspose(double transpose)
   this->transpose = transpose;
 }
 
-std::string Sequence::stepToStringFlat(int step)
+std::string Sequence::stepToStringFlat(std::size_t step)
 {
   if (isMuted()) return "";
   
@@ -572,7 +572,7 @@ void Sequence::reset()
     step.setData(cleanStep.getData());
   }
 }
-std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(int step)
+std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(std::size_t step)
 {
   return steps[step].toStringGrid();
 }
@@ -591,7 +591,7 @@ void Sequence::toggleMuteState()
 
 /////////////////////// Sequencer
 
-Sequencer::Sequencer(unsigned int seqCount, unsigned int seqLength)
+Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength)
 {
   for (auto i = 0; i < seqCount; ++i)
   {
@@ -614,12 +614,12 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
   // ignore if diff sizes
   assert(otherSeq->sequences.size() == this->sequences.size());
   // if (otherSeq->sequences.size() != this->sequences.size()) return;
-  for (int seq = 0; seq < this->sequences.size(); ++seq)
+  for (std::size_t seq = 0; seq < this->sequences.size(); ++seq)
   {
     this->sequences[seq].setType(otherSeq->sequences[seq].getType());
     // assign the same channel
     double channel = otherSeq->sequences[seq].getStepDataAt(0, 0, Step::chanInd);
-    for (int step = 0; step < this->sequences[seq].howManySteps(); ++step)
+    for (std::size_t step = 0; step < this->sequences[seq].howManySteps(); ++step)
     {
       // note this assumes a single row step
       this->setStepDataAt(seq, step, 0, Step::chanInd, channel);
@@ -627,29 +627,29 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
   }
 }
 
-unsigned int Sequencer::howManySequences() const
+std::size_t Sequencer::howManySequences() const
 {
   assert(sequences.size() < 128);
   return sequences.size();
 }
-unsigned int Sequencer::howManySteps(unsigned int sequence) const
+std::size_t Sequencer::howManySteps(std::size_t sequence) const
 {
   if (assertSequence(sequence))
     return sequences[sequence].howManySteps();
   else
     return 0;
 }
-unsigned int Sequencer::getCurrentStep(unsigned int sequence) const
+std::size_t Sequencer::getCurrentStep(std::size_t sequence) const
 {
   return sequences[sequence].getCurrentStep();
 }
 
-SequenceType Sequencer::getSequenceType(unsigned int sequence) const
+SequenceType Sequencer::getSequenceType(std::size_t sequence) const
 {
   return sequences[sequence].getType();
 }
 
-unsigned int Sequencer::getSequenceTicksPerStep(unsigned int sequence) const
+std::size_t Sequencer::getSequenceTicksPerStep(std::size_t sequence) const
 {
   return sequences[sequence].getTicksPerStep();
 }
@@ -663,31 +663,31 @@ void Sequencer::tick(bool trigger)
   }
 }
 
-void Sequencer::triggerStep(int seq, int step, int row)
+void Sequencer::triggerStep(std::size_t seq, std::size_t step, std::size_t row)
 {
   sequences[seq].triggerStep(step, row);
 }
 
-Sequence *Sequencer::getSequence(unsigned int sequence)
+Sequence *Sequencer::getSequence(std::size_t sequence)
 {
   return &(sequences[sequence]);
 }
 
-void Sequencer::setSequenceType(unsigned int sequence, SequenceType type)
+void Sequencer::setSequenceType(std::size_t sequence, SequenceType type)
 {
   sequences[sequence].setType(type);
 }
 
-void Sequencer::setSequenceLength(unsigned int sequence, unsigned int length)
+void Sequencer::setSequenceLength(std::size_t sequence, std::size_t length)
 {
   sequences[sequence].setLength(length);
 }
 
-void Sequencer::shrinkSequence(unsigned int sequence)
+void Sequencer::shrinkSequence(std::size_t sequence)
 {
   sequences[sequence].setLength(sequences[sequence].getLength() - 1);
 }
-void Sequencer::extendSequence(unsigned int sequence)
+void Sequencer::extendSequence(std::size_t sequence)
 {
   sequences[sequence].ensureEnoughStepsForLength(sequences[sequence].getLength() + 1);
   sequences[sequence].setLength(sequences[sequence].getLength() + 1);
@@ -695,29 +695,29 @@ void Sequencer::extendSequence(unsigned int sequence)
 
 void Sequencer::setAllCallbacks(std::function<void(std::vector<std::vector<double>> *)> callback)
 {
-  for (int seq = 0; seq < sequences.size(); ++seq)
+  for (std::size_t seq = 0; seq < sequences.size(); ++seq)
   {
     setSequenceCallback(seq, callback);
   }
 }
 
 /** set a callback for all steps in a sequence*/
-void Sequencer::setSequenceCallback(unsigned int sequence, std::function<void(std::vector<std::vector<double>> *)> callback)
+void Sequencer::setSequenceCallback(std::size_t sequence, std::function<void(std::vector<std::vector<double>> *)> callback)
 {
-  for (int step = 0; step < sequences[sequence].howManySteps(); ++step)
+  for (std::size_t step = 0; step < sequences[sequence].howManySteps(); ++step)
   {
     sequences[sequence].setStepCallback(step, callback);
   }
 }
 
 /** set a lambda to call when a particular step in a particular sequence happens */
-void Sequencer::setStepCallback(unsigned int sequence, unsigned int step, std::function<void(std::vector<std::vector<double>> *)> callback)
+void Sequencer::setStepCallback(std::size_t sequence, std::size_t step, std::function<void(std::vector<std::vector<double>> *)> callback)
 {
   sequences[sequence].setStepCallback(step, callback);
 }
 
 /** update the data stored at a step in the sequencer */
-void Sequencer::setStepData(unsigned int sequence, unsigned int step, std::vector<std::vector<double>> data)
+void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data)
 {
   if (!assertSeqAndStep(sequence, step))
     return;
@@ -725,7 +725,7 @@ void Sequencer::setStepData(unsigned int sequence, unsigned int step, std::vecto
 }
 /** update a single value in the  data
  * stored at a step in the sequencer */
-void Sequencer::setStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col, double value)
+void Sequencer::setStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col, double value)
 {
   if (!assertSeqAndStep(sequence, step))
     return;
@@ -733,7 +733,7 @@ void Sequencer::setStepDataAt(unsigned int sequence, unsigned int step, unsigned
 }
 
 /** retrieve the data for the current step */
-std::vector<std::vector<double>> Sequencer::getCurrentStepData(int sequence)
+std::vector<std::vector<double>> Sequencer::getCurrentStepData(std::size_t sequence)
 {
   if (sequence >= sequences.size() || sequence < 0)
     return std::vector<std::vector<double>>{};
@@ -741,16 +741,16 @@ std::vector<std::vector<double>> Sequencer::getCurrentStepData(int sequence)
   return sequences[sequence].getCurrentStepData();
 }
 
-int Sequencer::howManyStepDataRows(int seq, int step)
+std::size_t Sequencer::howManyStepDataRows(std::size_t seq, std::size_t step)
 {
   return sequences[seq].howManyStepDataRows(step);
 }
-int Sequencer::howManyStepDataCols(int seq, int step)
+std::size_t Sequencer::howManyStepDataCols(std::size_t seq, std::size_t step)
 {
   return sequences[seq].howManyStepDataCols(step);
 }
 
-// Step* Sequencer::getStep(int seq, int step)
+// Step* Sequencer::getStep(std::size_t seq, std::size_t step)
 // {
 //   if (!assertSeqAndStep(seq, step)) assert(false); // hard crash for that, sorry
 
@@ -758,7 +758,7 @@ int Sequencer::howManyStepDataCols(int seq, int step)
 // }
 
 /** retrieve the data for a specific step */
-std::vector<std::vector<double>> Sequencer::getStepData(int sequence, int step)
+std::vector<std::vector<double>> Sequencer::getStepData(std::size_t sequence, std::size_t step)
 {
   if (!assertSeqAndStep(sequence, step))
     return std::vector<std::vector<double>>{};
@@ -766,20 +766,20 @@ std::vector<std::vector<double>> Sequencer::getStepData(int sequence, int step)
 }
 
 // /** retrieve the data for a specific step */
-// std::vector<std::vector<double>>* Sequencer::getStepDataDirect(int sequence, int step)
+// std::vector<std::vector<double>>* Sequencer::getStepDataDirect(std::size_t sequence, std::size_t step)
 // {
 //   assert(sequence < sequences.size());
 //   assert(step < sequences[sequence].howManySteps());
 //   return sequences[sequence].getStepDataDirect(step);
 // }
 
-void Sequencer::toggleActive(int sequence, int step)
+void Sequencer::toggleActive(std::size_t sequence, std::size_t step)
 {
   if (!assertSeqAndStep(sequence, step))
     return;
   sequences[sequence].toggleActive(step);
 }
-bool Sequencer::isStepActive(int sequence, int step) const
+bool Sequencer::isStepActive(std::size_t sequence, std::size_t step) const
 {
   if (!assertSeqAndStep(sequence, step))
     return false;
@@ -789,11 +789,11 @@ void Sequencer::addStepListener()
 {
 }
 
-/** print out a tracker style view of the sequence */
+/** prstd::size_t out a tracker style view of the sequence */
 std::string Sequencer::toString()
 {
   std::string s{""};
-  for (int step = 0; step < 32; ++step)
+  for (std::size_t step = 0; step < 32; ++step)
   {
     s += std::to_string(step) + "\t: ";
     for (Sequence &seq : sequences)
@@ -805,20 +805,20 @@ std::string Sequencer::toString()
   return s;
 }
 
-void Sequencer::resetSequence(int sequence)
+void Sequencer::resetSequence(std::size_t sequence)
 {
   if (!assertSequence(sequence))
     return;
   sequences[sequence].reset();
 }
 
-void Sequencer::resetStepRow(int sequence, int step, int row)
+void Sequencer::resetStepRow(std::size_t sequence, std::size_t step, std::size_t row)
 {
   sequences[sequence].resetStepRow(step, row);
 }
 
 
-bool Sequencer::assertSeqAndStep(unsigned int sequence, unsigned int step) const
+bool Sequencer::assertSeqAndStep(std::size_t sequence, std::size_t step) const
 {
   if (!assertSequence(sequence))
     return false;
@@ -827,7 +827,7 @@ bool Sequencer::assertSeqAndStep(unsigned int sequence, unsigned int step) const
   return true;
 }
 
-bool Sequencer::assertSequence(unsigned int sequence) const
+bool Sequencer::assertSequence(std::size_t sequence) const
 {
   if (sequence >= sequences.size() || sequence < 0)
   {
@@ -849,14 +849,14 @@ void Sequencer::updateSeqStringGrid()
   assert(gridView.size() >= howManySequences());
 
   // first. find the longest sequence
-  int maxSteps = 0;
-  for (int seq = 0; seq < howManySequences(); ++seq)
+  std::size_t maxSteps = 0;
+  for (std::size_t seq = 0; seq < howManySequences(); ++seq)
   {
     if (howManySteps(seq) > maxSteps)
       maxSteps = howManySteps(seq);
   }
 
-  for (int seq = 0; seq < howManySequences() && seq < gridView.size(); ++seq)
+  for (std::size_t seq = 0; seq < howManySequences() && seq < gridView.size(); ++seq)
   {
     // check we have the length
     // if (gridView[seq].size() != howManySteps(seq)){
@@ -866,11 +866,11 @@ void Sequencer::updateSeqStringGrid()
       // std::cout << "resizing " << seq << std::endl;
       // gridView[seq].resize(howManySteps(seq));
       gridView[seq].resize(maxSteps);
-      for (int i = 0; i < gridView[seq].size(); ++i)
+      for (std::size_t i = 0; i < gridView[seq].size(); ++i)
         gridView[seq][i] = "";
     }
     assert(gridView[seq].size() >= howManySteps(seq));
-    for (int step = 0; step < howManySteps(seq) && step < gridView[seq].size(); ++step)
+    for (std::size_t step = 0; step < howManySteps(seq) && step < gridView[seq].size(); ++step)
     {
       // step then seq, i.e. col then row
       //gridView[seq][step] = std::to_string(seq) + ":" + std::to_string(step) + ":" + sequences[seq].stepToStringFlat(step);
@@ -884,22 +884,22 @@ std::vector<std::vector<std::string>> &Sequencer::getSequenceAsGridOfStrings()
 {
   return seqAsStringGrid;
 }
-std::vector<std::vector<std::string>> Sequencer::getStepAsGridOfStrings(int seq, int step)
+std::vector<std::vector<std::string>> Sequencer::getStepAsGridOfStrings(std::size_t seq, std::size_t step)
 {
   return sequences[seq].stepAsGridOfStrings(step);
 }
 
-double Sequencer::getStepDataAt(int seq, int step, int row, int col)
+double Sequencer::getStepDataAt(std::size_t seq, std::size_t step, std::size_t row, std::size_t col)
 {
   return sequences[seq].getStepDataAt(step, row, col);
 }
 
-// void Sequencer::setStepDataAt(int seq, int step, int row, int col, double val)
+// void Sequencer::setStepDataAt(std::size_t seq, std::size_t step, std::size_t row, std::size_t col, double val)
 // {
 //   sequences[seq].setStepDataAt(step, row, col, val);
 // }
 
-void Sequencer::toggleSequenceMute(int sequence)
+void Sequencer::toggleSequenceMute(std::size_t sequence)
 {
   sequences[sequence].toggleMuteState();
 
@@ -915,7 +915,7 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
   std::vector<std::vector<std::string>>confGrid;
   std::vector<Parameter> params = getSeqConfigSpecs();
 
-  for (int seq =0;seq<howManySequences();++seq){
+  for (std::size_t seq =0;seq<howManySequences();++seq){
     confGrid.push_back(std::vector<std::string>());
     for (Parameter& p : params){
       if (p.stepCol == Step::chanInd ||
@@ -951,7 +951,7 @@ void Sequencer::setupSeqConfigSpecs()
   
 }
 
-void Sequencer::incrementSeqParam(int seq, int paramIndex)
+void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
   assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
@@ -963,22 +963,22 @@ void Sequencer::incrementSeqParam(int seq, int paramIndex)
     double val = getStepDataAt(seq, 0, 0, p.stepCol);
     val += p.step;
     if (val >= p.max) val = p.max;
-    for (int step = 0; step < howManySteps(seq); ++ step){
-      for (int row =0; row < howManyStepDataRows(seq, step); ++row){
+    for (std::size_t step = 0; step < howManySteps(seq); ++ step){
+      for (std::size_t row =0; row < howManyStepDataRows(seq, step); ++row){
         setStepDataAt(seq, step, row, p.stepCol, val);
       }
     }
   }
 
   if (paramIndex == Sequence::tpsConfig){
-    int tps = sequences[seq].getTicksPerStep();
+    std::size_t tps = sequences[seq].getTicksPerStep();
     tps += p.step;
     if (tps > p.max) tps = p.max;
     sequences[seq].onZeroSetTicksPerStep(tps);
   }
 
 }
-void Sequencer::decrementSeqParam(int seq, int paramIndex)
+void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
   assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
@@ -990,14 +990,14 @@ void Sequencer::decrementSeqParam(int seq, int paramIndex)
     double val = getStepDataAt(seq, 0, 0, p.stepCol);
     val -= p.step;
     if (val < p.min) val = p.min;
-    for (int step = 0; step < howManySteps(seq); ++ step){
-      for (int row =0; row < howManyStepDataRows(seq, step); ++row){
+    for (std::size_t step = 0; step < howManySteps(seq); ++ step){
+      for (std::size_t row =0; row < howManyStepDataRows(seq, step); ++row){
         setStepDataAt(seq, step, row, p.stepCol, val);
       }
     }
   }
   if (paramIndex == Sequence::tpsConfig){
-    int tps = sequences[seq].getTicksPerStep();
+    std::size_t tps = sequences[seq].getTicksPerStep();
     tps -= p.step;
     if (tps < p.min) tps = p.min;
     sequences[seq].onZeroSetTicksPerStep(tps);
@@ -1006,7 +1006,7 @@ void Sequencer::decrementSeqParam(int seq, int paramIndex)
 
 
 
-void Sequencer::incrementStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col)
+void Sequencer::incrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col)
 {
   double val = getStepDataAt(sequence, step, row, col);
 
@@ -1026,7 +1026,7 @@ void Sequencer::incrementStepDataAt(unsigned int sequence, unsigned int step, un
   setStepDataAt(sequence, step, row, col, val);
 }
 
-void Sequencer::decrementStepDataAt(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col)
+void Sequencer::decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col)
 {
   double val = getStepDataAt(sequence, step, row, col);
   if (col == Step::cmdInd) {
@@ -1044,7 +1044,7 @@ void Sequencer::decrementStepDataAt(unsigned int sequence, unsigned int step, un
   setStepDataAt(sequence, step, row, col, val);
 }
 
-void Sequencer::setStepDataAtDefault(unsigned int sequence, unsigned int step, unsigned int row, unsigned int col)
+void Sequencer::setStepDataAtDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col)
 {
   double stepCmd = getStepDataAt(sequence, step, row, Step::cmdInd);
   // param dictates the step, min and max for this column
