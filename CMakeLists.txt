@@ -1,4 +1,4 @@
-
+ 
 cmake_minimum_required(VERSION 3.15)
 
 
@@ -12,6 +12,12 @@ set(CMAKE_CXX_STANDARD 17)
 find_package(Curses REQUIRED)
 # Include the ncurses headers
 include_directories(${CURSES_INCLUDE_DIR})
+
+# Conditionally add the library search path for Apple users
+if(APPLE)
+    link_directories(/opt/homebrew/lib)
+endif()
+
 # build the sequencer library
 add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp)
 # build the midi utils
@@ -20,9 +26,10 @@ add_library(midi-lib src/MidiUtils.cpp)
 add_executable(MykTracker src/Gui.cpp src/main.cpp)
 add_executable(CurTest src/Gui.cpp src/curtest.cpp)
 
+
 # Link the ncurses library with your executable
-target_link_libraries(MykTracker seq-lib midi-lib ${CURSES_LIBRARIES} panel -lrtmidi)
-target_link_libraries(CurTest seq-lib midi-lib ${CURSES_LIBRARIES} panel -lrtmidi)
+target_link_libraries(MykTracker seq-lib midi-lib ${CURSES_LIBRARIES} panel rtmidi)
+target_link_libraries(CurTest seq-lib midi-lib ${CURSES_LIBRARIES} panel rtmidi)
 
 ########## CLI version cmake config 
 
