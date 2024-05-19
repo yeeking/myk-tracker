@@ -1,11 +1,8 @@
- 
 cmake_minimum_required(VERSION 3.15)
 
-
-project(myk-tracker VERSION 0.0.1)
+project(myk-tracker VERSION 0.0.4)
 
 set(CMAKE_CXX_STANDARD 17)
-
 
 ########## CLI version cmake config 
 # Find the ncurses package
@@ -13,33 +10,30 @@ find_package(Curses REQUIRED)
 # Include the ncurses headers
 include_directories(${CURSES_INCLUDE_DIR})
 
+# Add the RtMidi subdirectory
+# Set the RTMIDI_API_JACK option to OFF
+# if(APPLE) 
+set(RTMIDI_API_JACK OFF CACHE BOOL "Disable Jack support" FORCE)
+# endif()
+add_subdirectory(./libs/rtmidi ./rtmidi)
 
-if(APPLE) # add home brew lib and include paths for rtmidi
-    link_directories(/opt/homebrew/lib)
-    include_directories(/opt/homebrew/include/rtmidi)
-elseif(UNIX AND NOT APPLE) # add rtmidi include location for linux
-    # Add for Linux users
-    include_directories(/usr/include/rtmidi)
-endif()
+
 
 
 # build the sequencer library
 add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp)
-# build the midi utils
-add_library(midi-lib src/MidiUtils.cpp)
 
-add_executable(MykTracker src/Gui.cpp src/main.cpp)
-add_executable(CurTest src/Gui.cpp src/curtest.cpp)
-
+add_executable(MykTracker src/Gui.cpp src/MidiUtils.cpp src/main.cpp)
+add_executable(CurTest src/Gui.cpp src/MidiUtils.cpp src/curtest.cpp)
 
 # Link the ncurses library with your executable
-target_link_libraries(MykTracker seq-lib midi-lib ${CURSES_LIBRARIES} panel rtmidi)
-target_link_libraries(CurTest seq-lib midi-lib ${CURSES_LIBRARIES} panel rtmidi)
+target_link_libraries(MykTracker PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
+target_link_libraries(CurTest PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
 
-########## CLI version cmake config 
+########## END/ CLI version cmake config 
 
-
-add_subdirectory(./JUCE ./JUCE)               
+########## JUCE version cmake config 
+add_subdirectory(./libs/JUCE ./JUCE)               
 
 juce_add_plugin(myk-tracker-plug
     # VERSION ...                               # Set this if the plugin version is different to the project version
