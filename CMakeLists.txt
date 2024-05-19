@@ -19,7 +19,7 @@ if(APPLE) # add home brew lib and include paths for rtmidi
     include_directories(/opt/homebrew/include/rtmidi)
 elseif(UNIX AND NOT APPLE) # add rtmidi include location for linux
     # Add for Linux users
-    target_include_directories(${PROJECT_NAME} PRIVATE /usr/include/rtmidi)
+    include_directories(/usr/include/rtmidi)
 endif()
 
 
