@@ -13,10 +13,10 @@ public:
 
     RaggedTableComponent();
     void paint(juce::Graphics& g) override;
-
-    void draw(std::vector<std::vector<std::string>>& data, int rowsToDisplay, int colsToDisplay, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells);
     void resized() override;
 
+    void draw(std::vector<std::vector<std::string>>& data, int rowsToDisplay, int colsToDisplay, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells);
+    
 private:
     std::vector<std::vector<std::string>> tableData;
     int rowsVisible;

@@ -17,9 +17,9 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 {
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.
-    setSize (400, 300);
+    setSize (1024, 768);
     addAndMakeVisible(rTable);
-    startTimer(1000 / 5);
+    startTimer(1000 / 25);
 
     // Add this editor as a key listener
     addKeyListener(this);
@@ -48,12 +48,12 @@ PluginEditor::~PluginEditor()
 //==============================================================================
 void PluginEditor::paint (juce::Graphics& g)
 {
-    // (Our component is opaque, so we must completely fill the background with a solid colour)
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    // // (Our component is opaque, so we must completely fill the background with a solid colour)
+    // g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
 
-    g.setColour (juce::Colours::white);
-    g.setFont (15.0f);
-    g.drawFittedText ("Hello World!", getLocalBounds(), juce::Justification::centred, 1);
+    // g.setColour (juce::Colours::white);
+    // g.setFont (15.0f);
+    // g.drawFittedText ("Hello World!", getLocalBounds(), juce::Justification::centred, 1);
 }
 
 void PluginEditor::resized()
@@ -66,14 +66,30 @@ void PluginEditor::resized()
 
 void PluginEditor::timerCallback ()
 {
-  // sequencer->tick();
-  std::vector<std::pair<int, int>> playHeads;
-  for (int col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
-    std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
-    playHeads.push_back(std::move(colRow));
+
+  // check what to draw based on the state of the 
+  // editor
+  switch(seqEditor->getEditMode()){
+
+      case SequencerEditorMode::selectingSeqAndStep:
+      {
+          drawSequenceView();
+          break;
+      }
+      case SequencerEditorMode::editingStep:
+      {
+          drawStepView();
+          break; 
+      }
+      case SequencerEditorMode::configuringSequence:
+      {
+          drawSeqConfigView();
+          break;
+      }
   }
-  rTable.draw(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 4, 4,seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
+
   repaint();
+
 }
 
 
@@ -89,7 +105,6 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
                 // sequencer.nextStepFromZero();
             }
             break;
-
         case '\t':
            seqEditor->nextStep();
             break;
@@ -144,21 +159,6 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
            seqEditor->gotoSequenceConfigPage();
             break;
 
-        // case juce::KeyPress::upKey:
-        //    seqEditor->moveCursorUp();
-        //     return true;  // Redraw might be handled elsewhere in JUCE
-
-        // case juce::KeyPress::downKey:
-        //    seqEditor->moveCursorDown();
-        //     return true;  // Redraw might be handled elsewhere in JUCE
-
-        // case juce::KeyPress::leftKey:
-        //    seqEditor->moveCursorLeft();
-        //     return true;  // Redraw might be handled elsewhere in JUCE
-
-        // case juce::KeyPress::rightKey:
-        //    seqEditor->moveCursorRight();
-        //     return true;  // Redraw might be handled elsewhere in JUCE
 
         case 'p':
             // if (seqEditor->getEditMode() == SequencerEditor::EditingStep) {
@@ -191,6 +191,10 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             //   }
             // }
             // Handle arrow keys
+            if (key.isKeyCode(juce::KeyPress::returnKey)) {
+               seqEditor->enterAtCursor();
+                // return true;
+            }
             if (key.isKeyCode(juce::KeyPress::upKey)) {
                seqEditor->moveCursorUp();
                 // return true;
@@ -221,5 +225,41 @@ bool PluginEditor::keyStateChanged(bool isKeyDown, juce::Component* originatingC
 }
 
 
-
+void PluginEditor::drawSequenceView()
+{
+  // sequencer->tick();
+  std::vector<std::pair<int, int>> playHeads;
+  for (int col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
+    std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
+    playHeads.push_back(std::move(colRow));
+  }
+  rTable.draw(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 8, 6,seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
+}
+void PluginEditor::drawStepView()
+{
+    // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+    // std::vector<std::vector<std::string>> grid = step->toStringGrid();
+    std::vector<std::pair<int, int>> playHeads;
+    if (sequencer->getCurrentStep(seqEditor->getCurrentSequence()) == seqEditor->getCurrentStep()){
+        int cols = sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        for (int col=0;col<cols;++col){
+            playHeads.push_back(std::pair(col, 0));
+        }
+    }
+    std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+    rTable.draw(grid, 
+        8, 6, 
+        seqEditor->getCurrentStepCol(), 
+        seqEditor->getCurrentStepRow(), 
+        playHeads);
+}
+void PluginEditor::drawSeqConfigView()
+{
+    std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
+    rTable.draw(grid, 
+        8, 6, 
+        seqEditor->getCurrentSequence(), 
+        seqEditor->getCurrentSeqParam(), 
+        std::vector<std::pair<int, int>>());   
+}
 

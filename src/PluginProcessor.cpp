@@ -30,17 +30,12 @@ PluginProcessor::PluginProcessor()
     // sequencer.decrementSeqParam(0, 1);
 
     // put some test notes into the sequencer to see if they flow through
-
-
-
-    
+  
 }
 
 PluginProcessor::~PluginProcessor()
 {
 }
-
-
 
 
 //==============================================================================
@@ -237,6 +232,7 @@ void PluginProcessor::allNotesOff()
 }
 void PluginProcessor::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick)
 {
+    channel ++; // channels come in 0-15 but we want 1-16
     long offSample =  samplesPerTick * offTick;
     // std::cout << "playSingleNote " << channel << "," << note << "," << velocity << " on " << elapsedSamples << " offtick " << offTick << " off sample " << offSample <<  std::endl;  
 

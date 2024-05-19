@@ -2,7 +2,7 @@
 #include "RaggedTableComponent.h"
 
 RaggedTableComponent::RaggedTableComponent()
-: rowsVisible(0), colsVisible(0), cursorPosition(0, 0)
+: tableData{std::vector<std::vector<std::string>>()}, rowsVisible(0), colsVisible(0), cursorPosition(0, 0)
 {
 }
 
@@ -27,7 +27,9 @@ void RaggedTableComponent::paint(juce::Graphics& g)
     
     int cellWidth = getWidth() / colsVisible;
     int cellHeight = getHeight() / rowsVisible;
+    g.fillAll(juce::Colours::black);
 
+    // std::cout << "ragged paint cell width and height" << cellWidth << "," << cellHeight << std::endl;
     for (int col = 0; col < std::min(colsVisible, (int)tableData.size()); ++col)
     {
         for (int row = 0; row < std::min(rowsVisible, (int)tableData[col].size()); ++row)
@@ -41,25 +43,31 @@ void RaggedTableComponent::drawCell(juce::Graphics& g, int x, int y, const std::
 {
     juce::Rectangle<int> cellBounds(x, y, getWidth() / colsVisible, getHeight() / rowsVisible);
     juce::Colour colour = juce::Colours::white;
-
     switch (state)
     {
         case CellState::Cursor:
             colour = juce::Colours::blue;
             break;
         case CellState::Highlight:
-            colour = juce::Colours::yellow;
+            colour = juce::Colours::orange;
             break;
+        case CellState::NotSelected:
+            colour = juce::Colours::grey;
+            break;     
         default:
             colour = juce::Colours::grey;
             break;
     }
 
     Graphics::ScopedSaveState stateGuard(g);
-    g.setColour(colour);
-    g.fillRect(cellBounds);
     g.setColour(juce::Colours::black);
-    g.drawRect(cellBounds, 1); // Draw cell border
+    g.fillRect(cellBounds);
+    g.setColour(colour);
+    g.drawRect(cellBounds, 4);
+    
+    g.setColour(juce::Colours::orange);
+    // g.drawRect(cellBounds, 1); // Draw cell border
+    g.setFont(cellBounds.getHeight() * 0.25);
     g.drawText(value, cellBounds, juce::Justification::centred, true);
 }
 

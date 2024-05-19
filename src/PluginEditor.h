@@ -44,6 +44,10 @@ private:
     Sequencer* sequencer; 
     SequencerEditor* seqEditor;
     
+    void drawSequenceView();
+    void drawStepView();
+    void drawSeqConfigView();
+
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
 
