@@ -17,7 +17,7 @@
 
 // #endif
 
-#include "RtMidi.h"
+#include "rtmidi/RtMidi.h"
 
 #include <thread> // std::this_thread::sleep_for
 #include <chrono> // std::chrono::seconds
