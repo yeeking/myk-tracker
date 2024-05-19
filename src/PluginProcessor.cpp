@@ -147,8 +147,8 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    long blockStartSample = elapsedSamples;
-    unsigned long blockEndSample = elapsedSamples + getBlockSize();
+    unsigned long blockStartSample = elapsedSamples;
+    unsigned long blockEndSample = elapsedSamples + (unsigned long) getBlockSize();
     for (int i=0;i<getBlockSize(); ++i){
         elapsedSamples ++;
         if (elapsedSamples % samplesPerTick == 0){
@@ -168,11 +168,11 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     int samplePosition;
     while (iterator.getNextEvent(message, samplePosition)) {
         // std::cout << "msg samplepos " << samplePosition << " block end " << blockEndSample << std::endl;
-        if (samplePosition <= blockEndSample) {
+        if ((unsigned long)samplePosition <= blockEndSample) {
             // fix it to be an offset within the current block
             // 
             // std::cout << "play now" << std::endl;
-            midiMessages.addEvent(message, samplePosition - blockStartSample);
+            midiMessages.addEvent(message, (unsigned long) samplePosition - blockStartSample);
         }
         else{// it is in the future 
             // std::cout << "adding future event at " << message.getTimeStamp() << ":--- " << message.getDescription() << std::endl;

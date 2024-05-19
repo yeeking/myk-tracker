@@ -268,7 +268,7 @@ void Sequence::tick(bool trigger)
     ticksElapsed = 0;
     if (trigger && !muted)
     {
-      steps[currentStep].trigger();
+      steps[currentStep].trigger(0);
     }
 
     if (currentLength + lengthAdjustment < 1)
@@ -318,7 +318,7 @@ void Sequence::triggerMidiNoteType()
   // }
   // // trigger the local, adjusted copy of the step
   // s.trigger();
-  steps[currentStep].trigger();
+  // steps[currentStep].trigger();
 }
 
 void Sequence::triggerMidiDrumType()
@@ -337,7 +337,7 @@ void Sequence::triggerMidiDrumType()
   //   }
   // }
   // s.trigger();
-  steps[currentStep].trigger();
+  // steps[currentStep].trigger();
 }
 
 void Sequence::triggerMidiChordType()

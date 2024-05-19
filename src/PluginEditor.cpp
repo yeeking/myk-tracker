@@ -13,7 +13,7 @@
 
 //==============================================================================
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p), seqEditor{p.getSequenceEditor()}, sequencer{p.getSequencer()}
+    : AudioProcessorEditor (&p), audioProcessor (p), sequencer{p.getSequencer()},  seqEditor{p.getSequenceEditor()}
 {
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.

@@ -9,10 +9,10 @@
 class SimpleClock  : public ClockAbs
 {
   public:
-    SimpleClock(int sleepTimeMs = 5, 
-                std::function<void()>callback = [](){
+    SimpleClock(int _sleepTimeMs = 5, 
+                std::function<void()>_callback = [](){
                     std::cout << "SimpleClock::default tick callback" << std::endl;
-                }) : sleepTimeMs{sleepTimeMs}, running{false}, callback{callback}, currentTick{0}, inTick{false}
+                }) : sleepTimeMs{_sleepTimeMs}, running{false}, callback{_callback}, currentTick{0}, inTick{false}
      {
        // constructor body
      }
@@ -23,12 +23,12 @@ class SimpleClock  : public ClockAbs
       if (tickThread != nullptr) delete tickThread;
     }
     /** start with the sent interval between calls the to callback*/
-    void start(int intervalMs)
+    void start(int _intervalMs)
     {
       stop();
       inTick = false;
       running = true;
-      tickThread = new std::thread(SimpleClock::ticker, this, intervalMs, sleepTimeMs);
+      tickThread = new std::thread(SimpleClock::ticker, this, _intervalMs, sleepTimeMs);
     }
 
     void stop()

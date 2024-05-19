@@ -80,7 +80,7 @@ class Step{
     /** return the callback for this step*/
     std::function<void(std::vector<std::vector<double>>*)> getCallback();
     /** trigger this step, causing it to pass its data to its callback. if row > -1, only trigger that row */
-    void trigger(std::size_t row = -1);
+    void trigger(std::size_t row);
     void resetRow(std::size_t row);
     /** toggle the activity status of this step*/
     void toggleActive();
