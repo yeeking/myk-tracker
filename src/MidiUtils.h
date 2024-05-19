@@ -3,19 +3,22 @@
 #include <map>
 #include <list>
 
-// Check for Windows
-#ifdef _WIN32
-    #include "path/to/windows/RtMidi.h"
+// // Check for Windows
+// #ifdef _WIN32
+//     #include "path/to/windows/RtMidi.h"
 
-// Check for Mac OS
-#elif defined(__APPLE__)
-    #include "/opt/homebrew/include/rtmidi/RtMidi.h"
+// // Check for Mac OS
+// #elif defined(__APPLE__)
+//     #include "/opt/homebrew/include/rtmidi/RtMidi.h"
 
-// Assume Linux for any other case
-#else
-   #include "/usr/include/rtmidi/RtMidi.h"
+// // Assume Linux for any other case
+// #else
+//    #include "/usr/include/rtmidi/RtMidi.h"
 
-#endif
+// #endif
+
+#include "RtMidi.h"
+
 #include <thread> // std::this_thread::sleep_for
 #include <chrono> // std::chrono::seconds
 #include "MidiUtilsAbs.h"

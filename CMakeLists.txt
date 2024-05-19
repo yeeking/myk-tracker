@@ -13,9 +13,10 @@ find_package(Curses REQUIRED)
 # Include the ncurses headers
 include_directories(${CURSES_INCLUDE_DIR})
 
-# Conditionally add the library search path for Apple users
+# add home brew lib path
 if(APPLE)
     link_directories(/opt/homebrew/lib)
+    include_directories(/opt/homebrew/include/rtmidi)
 endif()
 
 # build the sequencer library
