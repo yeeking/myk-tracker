@@ -19,12 +19,12 @@ PluginProcessor::PluginProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       ), elapsedSamples{0}, sequencer{4, 4}, seqEditor{&sequencer}, samplesPerTick{44100/(120/60)/4}
+                       ), elapsedSamples{0}, sequencer{8, 4}, seqEditor{&sequencer}, samplesPerTick{44100/(120/60)/4}
 #endif
 {
     
-    CommandProcessor::assignMasterClock(&ticker);
-    CommandProcessor::initialiseMIDI(this);
+    CommandProcessor::assignMasterClock(this);
+    CommandProcessor::assignMidiUtils(this);
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
@@ -148,7 +148,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         elapsedSamples ++;
         if (elapsedSamples % samplesPerTick == 0){
             // tick is from the clockabs interface and it keeps track of the absolute tick 
-            ticker.tick(); // 
+            this->tick(); // 
             // this will cause any pending messages to be added to 'midiToSend'
             sequencer.tick();
         }
@@ -248,3 +248,10 @@ void PluginProcessor::sendQueuedMessages(long tick)
 }
 
 ////////////// end MIDIUtils interface 
+
+
+void PluginProcessor::setBPM(unsigned int bpm)
+{
+    // update tick interval in samples 
+}
+

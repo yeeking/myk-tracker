@@ -32,12 +32,12 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     // sequencer.decrementSeqParam(0, 1);
 
         
-   seqEditor->enterStepData(12, Step::noteInd);    
-    // editor.moveCursorDown();
-    // editor.enterStepData(13, Step::noteInd);
-   seqEditor->gotoSequenceConfigPage();
-   seqEditor->incrementSeqConfigParam();
-   seqEditor->setEditMode(SequencerEditorMode::selectingSeqAndStep);    
+//    seqEditor->enterStepData(12, Step::noteInd);    
+//     // editor.moveCursorDown();
+//     // editor.enterStepData(13, Step::noteInd);
+//    seqEditor->gotoSequenceConfigPage();
+//    seqEditor->incrementSeqConfigParam();
+//    seqEditor->setEditMode(SequencerEditorMode::selectingSeqAndStep);    
 }
 
 PluginEditor::~PluginEditor()
@@ -87,9 +87,7 @@ void PluginEditor::timerCallback ()
           break;
       }
   }
-
   repaint();
-
 }
 
 
@@ -190,7 +188,12 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             //     break;
             //   }
             // }
-            // Handle arrow keys
+            // Handle arrow and other non character keys
+            if (key.isKeyCode(juce::KeyPress::deleteKey)) {
+                seqEditor->resetAtCursor();
+                CommandProcessor::sendAllNotesOff();
+                // return true;
+            }
             if (key.isKeyCode(juce::KeyPress::returnKey)) {
                seqEditor->enterAtCursor();
                 // return true;
@@ -229,7 +232,7 @@ void PluginEditor::drawSequenceView()
 {
   // sequencer->tick();
   std::vector<std::pair<int, int>> playHeads;
-  for (int col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
+  for (size_t col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
     std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
     playHeads.push_back(std::move(colRow));
   }

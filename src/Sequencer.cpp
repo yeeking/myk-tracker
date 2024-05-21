@@ -924,7 +924,7 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
         double val = getStepDataAt(seq, 0, 0, p.stepCol);
         confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(val, p.decPlaces));
       }
-      if (p.shortName == "tps"){
+      if (p.stepCol == -1){ // config is sequence level not step
         // ticks
         confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequenceTicksPerStep(seq)));    
       }
@@ -941,9 +941,9 @@ std::vector<Parameter>& Sequencer::getSeqConfigSpecs()
 void Sequencer::setupSeqConfigSpecs()
 {
   seqConfigSpecs.resize(3);
-  seqConfigSpecs[Sequence::chanConfig] = Parameter("Channel", "ch", 0, 15, 1, 1, Step::chanInd); // affects step channel value
-  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "tps", 1, 16, 1, 4, -1); // -1 as no step level option
-  seqConfigSpecs[Sequence::probConfig] = Parameter("Probability %", "prob", 0.0, 1.0, 0.1, 1.0, Step::probInd, 2); // affects step prob value
+  seqConfigSpecs[Sequence::chanConfig] = Parameter("Channel", "Ch", 0, 15, 1, 1, Step::chanInd); // affects step channel value
+  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1); // -1 as no step level option
+  seqConfigSpecs[Sequence::probConfig] = Parameter("Probability %", "P", 0.0, 1.0, 0.1, 1.0, Step::probInd, 2); // affects step prob value
   // TODO
   // seqParamSpecs.push_back(Parameter("Velocity variation plus/minus %", "velvary", 0.0, 1.0, 0.1, 0.0));
   // seqParamSpecs.push_back(Parameter("Shuffle +/- ticks", "shuf", 0, 3, 1, 0.0));

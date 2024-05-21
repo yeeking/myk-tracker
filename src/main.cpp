@@ -60,7 +60,7 @@ int main() {
 
     CommandProcessor::assignMasterClock(&seqClock);
     
-    CommandProcessor::initialiseMIDI(&midiUtils);
+    CommandProcessor::assignMidiUtils(&midiUtils);
     CommandProcessor::sendAllNotesOff();
 
     std::map<char, double> key_to_note = MidiUtilsAbs::getKeyboardToMidiNotes(0);

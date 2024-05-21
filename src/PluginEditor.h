@@ -31,7 +31,7 @@ public:
 
     void timerCallback () override; 
 
-       // KeyListener overrides
+    // KeyListener overrides
     bool keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent) override;
     bool keyStateChanged(bool isKeyDown, juce::Component* originatingComponent) override;
 

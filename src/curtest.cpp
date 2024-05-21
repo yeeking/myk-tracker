@@ -1,6 +1,7 @@
 #include "Gui.h"
 #include "Sequencer.h"
 #include "SimpleClock.h"
+#include "MidiUtils.h"
 
 // bool testSeqGridResize2(){
 // 	unsigned int tracks = 5, steps = 100;
@@ -149,18 +150,31 @@ bool testIncrementStepVal(){
 	
 	return true; 
 }
+
+bool testSeqConf(){
+	Sequencer seq;
+	assert (seq.getSeqConfigSpecs().size() == 3);
+	std::vector<std::vector<std::string>> conf = seq.getSequenceConfigsAsGridOfStrings();
+	for (std::string& s : conf[0]){
+		std::cout << s << std::endl;
+	}
+	assert (conf[0].size() == 3);
+	return true; 
+}
+
 // 	// GridWidget grid(3, 3);
 int main(){
 	SimpleClock clock;
 	CommandProcessor::assignMasterClock(&clock);
+	MidiUtils midi;
+	CommandProcessor::assignMidiUtils(&midi);
+
+	if (testSeqConf()) printf("+ testSeqConf\n");
+	else printf("X testSeqConf\n");
 
 
-	if (testIncrementStepVal()) printf("+ testIncrementStepVal\n");
-	else printf("X testIncrementStepVal\n");
-
-
-	if (testIncrementSeqParam()) printf("+ testIncrementSeqParam\n");
-	else printf("X testIncrementSeqParam\n");
+	// if (testIncrementSeqParam()) printf("+ testIncrementSeqParam\n");
+	// else printf("X testIncrementSeqParam\n");
 
 	// if (testRandom()) printf("+ testRandom\n");
 	// else printf("X testRandom\n");

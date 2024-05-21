@@ -22,6 +22,11 @@ class SimpleClock  : public ClockAbs
       stop();
       if (tickThread != nullptr) delete tickThread;
     }
+    void setBPM(unsigned int bpm) override 
+    {
+      // TODO
+      
+    }
     /** start with the sent interval between calls the to callback*/
     void start(int _intervalMs)
     {

@@ -19,6 +19,7 @@
 /**
 */
 class PluginProcessor  :    public MidiUtilsAbs, 
+                            public ClockAbs, 
                             public juce::AudioProcessor
                             #if JucePlugin_Enable_ARA
                              , public juce::AudioProcessorARAExtension
@@ -33,7 +34,8 @@ public:
     void allNotesOff() override;
     void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) override; 
     void sendQueuedMessages(long tick) override; 
-
+    // the ClockAbs interface
+    void setBPM(unsigned int bpm) override; 
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -77,7 +79,7 @@ private:
     unsigned long elapsedSamples;
     Sequencer sequencer;
     SequencerEditor seqEditor; 
-    ClockAbs ticker; 
+    // ClockAbs ticker; 
 
     unsigned int samplesPerTick; 
     juce::MidiBuffer midiToSend; 

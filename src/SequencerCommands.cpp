@@ -67,7 +67,8 @@ void CommandProcessor::assignMasterClock(ClockAbs* masterClock)
 }
 
 
-// // Initialize the command registry
+/** get the commands ready and verify they have the data they need
+*/
 void CommandProcessor::initialiseCommands() {
 
     assert(CommandData::masterClock != nullptr);
@@ -172,7 +173,7 @@ int CommandProcessor::countCommands()
     return CommandData::commands.size();
 }
 
-void CommandProcessor::initialiseMIDI(MidiUtilsAbs* _midiUtils)
+void CommandProcessor::assignMidiUtils(MidiUtilsAbs* _midiUtils)
 {
     CommandData::midiUtils = _midiUtils; 
 }

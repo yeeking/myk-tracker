@@ -46,9 +46,7 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
     int winWidth, winHeight;
     getmaxyx(win, winHeight, winWidth); // query size of window
     
-    if (endRow >= data[0].size()) endRow = data[0].size();
-    if (endCol >= data.size()) endCol = data.size();
-    
+
 
     int cellWidth = winWidth / colsToDisplay;
     int cellHeight = winHeight / rowsToDisplay;

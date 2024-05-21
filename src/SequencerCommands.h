@@ -8,7 +8,10 @@
 #include "ClockAbs.h"
 #include "MidiUtilsAbs.h"
 
-// Define the structure for a parameter of a command
+/** Define the structure for a parameter 
+ * parameters are used as arguments to Commands but also as a handy wrapper 
+ * for configuring things
+*/
 struct Parameter {
     std::string name;
     std::string shortName;
@@ -28,7 +31,9 @@ struct Parameter {
     Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol, int dps=0);
 };
 
-// Define the structure for a command
+/** Commands are the main things that are executed by the sequencer when triggering a step 
+ * 
+*/
 struct Command {
     std::string name;
     std::string shortName;
@@ -49,11 +54,13 @@ struct Command {
 
 
 
-// Static class to manage commands
+/** Static class to manage objects and data relating to running of commands e.g. 
+ * the MidiUtilsAbs object which allows commands to send MIDI 
+ * and the ClockAbs object which allows commands to know about time  */ 
 class CommandProcessor {
 public:
     static void assignMasterClock(ClockAbs* masterClock);
-    static void initialiseMIDI(MidiUtilsAbs* _midiUtils);
+    static void assignMidiUtils(MidiUtilsAbs* _midiUtils);
     static void sendAllNotesOff();
     static void sendQueuedMIDI(long tick);
 
