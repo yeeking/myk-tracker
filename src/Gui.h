@@ -10,6 +10,7 @@
 #include <panel.h>
 #include "Sequencer.h"
 #include "SequencerEditor.h"
+#include "TrackerController.h"
 
 // how many there are
 #define START_ROWS 20
@@ -88,14 +89,15 @@ class GridWidget{
 
 class GUI {
     public:
-        GUI(Sequencer* sequencer, SequencerEditor* seqEditor);
+        GUI(Sequencer* sequencer, SequencerEditor* seqEditor, TrackerController* trackerController);
         ~GUI();
 
         // remove copy and copy assignment constructors
         // to avoid shallow copy issues 
-        GUI(const GUI& other) = delete;  // Disallow copy to prevent shallow copy issues
+        GUI(const GUI& other) = delete; 
         GUI& operator=(const GUI& other) = delete;
         
+
         void draw();
         
     private:
@@ -117,6 +119,7 @@ class GUI {
 
         Sequencer* sequencer;
         SequencerEditor* seqEditor;
+        TrackerController* trackerController; 
 
         /** pointer to currently active grid*/
         GridWidget* activeGrid;

@@ -10,6 +10,7 @@
 #include "SequencerCommands.h"
 #include "SimpleClock.h"
 #include "MidiUtils.h"
+#include "TrackerController.h"
 
 std::atomic<int> playbackPosition(0);
 // Main loop
@@ -67,8 +68,11 @@ int main() {
     // maintains the data and sate of the sequencer
     Sequencer sequencer{4, 16};
     // maintains a stateful editor - knows the edit mode, etc. 
-    SequencerEditor editor{&sequencer};   
-    GUI gui{&sequencer, &editor};
+    SequencerEditor editor{&sequencer};  
+
+    TrackerController trackerController{&sequencer, &seqClock, &editor}; 
+
+    GUI gui{&sequencer, &editor, &trackerController};
 
     // tell it to call a special function when the user uses ctrl-c to quit
     signal(SIGINT, handle_sigint);

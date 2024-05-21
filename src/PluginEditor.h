@@ -10,9 +10,10 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-#include "RaggedTableComponent.h"
+#include "StringTable.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
+#include "TrackerController.h"
 //==============================================================================
 /**
 */
@@ -40,13 +41,16 @@ private:
 
     PluginProcessor& audioProcessor;
 
-    RaggedTableComponent rTable;
+    StringTable controlPanelTable;
+    StringTable seqViewTable;
     Sequencer* sequencer; 
     SequencerEditor* seqEditor;
+    TrackerController* trackerController; 
     
-    void drawSequenceView();
-    void drawStepView();
-    void drawSeqConfigView();
+    void prepareControlPanelView();
+    void prepareSequenceView();
+    void prepareStepView();
+    void prepareSeqConfigView();
 
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.

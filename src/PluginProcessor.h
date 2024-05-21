@@ -13,6 +13,7 @@
 #include "ClockAbs.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
+#include "TrackerController.h"
 
 
 //==============================================================================
@@ -73,14 +74,18 @@ public:
 
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
-    
+    TrackerController* getTrackerController();
     
 private:
     unsigned long elapsedSamples;
     Sequencer sequencer;
+  /** keep the seq editor in the processor as the plugineditor
+     * can be deleted but the processor persists and we want to retain state on the seqeditor
+    */
     SequencerEditor seqEditor; 
-    // ClockAbs ticker; 
-
+    /** as for the seqeditor, this is here for easy statefulness*/
+    TrackerController trackerController;
+    
     unsigned int samplesPerTick; 
     juce::MidiBuffer midiToSend; 
 

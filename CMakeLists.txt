@@ -22,9 +22,8 @@ add_subdirectory(./libs/rtmidi ./rtmidi)
 
 
 
-
 # build the sequencer library
-add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp)
+add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp)
 
 add_executable(MykTracker src/Gui.cpp src/MidiUtils.cpp src/main.cpp)
 add_executable(CurTest src/Gui.cpp src/MidiUtils.cpp src/curtest.cpp)
@@ -59,14 +58,13 @@ juce_add_plugin(myk-tracker-plug
 
 juce_generate_juce_header(myk-tracker-plug)
 
-
 target_sources(myk-tracker-plug
     PRIVATE
     src/PluginEditor.cpp
     src/PluginProcessor.cpp
-    src/RaggedTableComponent.cpp
-    src/MidiUtils.cpp src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp)
+    src/StringTable.cpp)
 
+    
 target_compile_definitions(myk-tracker-plug
     PUBLIC # 
         JUCE_ALSA=1
@@ -84,6 +82,7 @@ target_compile_definitions(myk-tracker-plug
 
 target_link_libraries(myk-tracker-plug
     PRIVATE
+        seq-lib
         # AudioPluginData           # If we'd created a binary data target, we'd link to it here
         juce::juce_audio_utils
     PUBLIC

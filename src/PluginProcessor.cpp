@@ -19,7 +19,11 @@ PluginProcessor::PluginProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       ), elapsedSamples{0}, sequencer{8, 4}, seqEditor{&sequencer}, samplesPerTick{44100/(120/60)/4}
+                       ), elapsedSamples{0}, 
+                       sequencer{8, 4}, seqEditor{&sequencer}, 
+                       // seq, clock, editor
+                       trackerController{&sequencer, this, &seqEditor},
+                       samplesPerTick{44100/(120/60)/4}
 #endif
 {
     
@@ -222,6 +226,12 @@ SequencerEditor* PluginProcessor::getSequenceEditor()
 {
     return &seqEditor;
 }
+
+TrackerController* PluginProcessor::getTrackerController()
+{
+    return &trackerController;
+}
+
 ////////////// MIDIUtils interface 
 
 void PluginProcessor::allNotesOff()

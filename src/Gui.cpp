@@ -141,7 +141,12 @@ void GridWidget::drawCell(WINDOW* win, std::string& value, int x, int y, int cel
     // wattroff(win, COLOR_PAIR(NOSEL_COLOR_PAIR));
 }
 
-GUI::GUI(Sequencer* _sequencer, SequencerEditor* _seqEditor) : sequencer{_sequencer}, seqEditor{_seqEditor}, rw_mutex{std::make_unique<std::shared_mutex>()}
+GUI::GUI(Sequencer* _sequencer, 
+        SequencerEditor* _seqEditor, 
+        TrackerController* _trackerController) 
+        : sequencer{_sequencer}, seqEditor{_seqEditor}, 
+          trackerController{_trackerController}, 
+          rw_mutex{std::make_unique<std::shared_mutex>()}
 {
     seqFocus = true; 
     activeGrid = &seqGrid;
@@ -202,33 +207,37 @@ void GUI::initGUI()
 void GUI::drawControlPanel(WINDOW* win){
     // wmove(win, 1, 1);
     werase(win);
-    std::string cursorStatus = 
-        std::to_string(seqEditor->getCurrentSequence()) + ":" 
-        + std::to_string(seqEditor->getCurrentStep()) + "["
-        + std::to_string(sequencer->howManySteps(seqEditor->getCurrentSequence())) + "]";
-    // add the info about the current if editing a step 
-    if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
-        int rowsInStep = sequencer->howManyStepDataRows(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-        cursorStatus += ":" + std::to_string(seqEditor->getCurrentStepRow()) + "[" + std::to_string(rowsInStep) + "]";
-    }
+    // std::string cursorStatus = 
+    //     std::to_string(seqEditor->getCurrentSequence()) + ":" 
+    //     + std::to_string(seqEditor->getCurrentStep()) + "["
+    //     + std::to_string(sequencer->howManySteps(seqEditor->getCurrentSequence())) + "]";
+    
+    // // add the info about the current if editing a step 
+    // if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
+    //     int rowsInStep = sequencer->howManyStepDataRows(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+    //     cursorStatus += ":" + std::to_string(seqEditor->getCurrentStepRow()) + "[" + std::to_string(rowsInStep) + "]";
+    // }
 
-    std::string mode;
-    switch(seqEditor->getEditMode()){
-        case SequencerEditorMode::configuringSequence:
-            mode = "Conf";
-            break;
-        case SequencerEditorMode::editingStep:
-            mode = "Step";
-            break;
-        case SequencerEditorMode::selectingSeqAndStep:
-            mode = "Seq";
-            break;
-        default:
-            break; 
+    // std::string mode;
+    // switch(seqEditor->getEditMode()){
+    //     case SequencerEditorMode::configuringSequence:
+    //         mode = "Conf";
+    //         break;
+    //     case SequencerEditorMode::editingStep:
+    //         mode = "Step";
+    //         break;
+    //     case SequencerEditorMode::selectingSeqAndStep:
+    //         mode = "Seq";
+    //         break;
+    //     default:
+    //         break; 
              
-    }
+    // }
 
-    std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}, {mode}};
+    // std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}, {mode}};
+    
+    std::vector<std::vector<std::string>> buttons = trackerController->getControlPanelAsGridOfStrings();
+
     seqControlGrid.draw(win, buttons, 1, 6, 2, 0, std::vector<std::pair<int, int>>());
 
     // wprintw(win, "[Button 1]  [Button 2]  [Button 3]");

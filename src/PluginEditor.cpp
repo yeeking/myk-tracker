@@ -13,31 +13,24 @@
 
 //==============================================================================
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p), sequencer{p.getSequencer()},  seqEditor{p.getSequenceEditor()}
+    : AudioProcessorEditor (&p), 
+    audioProcessor (p), 
+    sequencer{p.getSequencer()},  
+    seqEditor{p.getSequenceEditor()}, 
+    trackerController{p.getTrackerController()}
 {
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.
     setSize (1024, 768);
-    addAndMakeVisible(rTable);
-    startTimer(1000 / 25);
-
+    addAndMakeVisible(seqViewTable);
+    addAndMakeVisible(controlPanelTable);
+    
     // Add this editor as a key listener
     addKeyListener(this);
     setWantsKeyboardFocus(true);
 
-    // SimpleClock clock;
+    startTimer(1000 / 25);
 
-    // CommandProcessor::assignMasterClock(&clock);
-    // sequencer.decrementSeqParam(0, 1);
-    // sequencer.decrementSeqParam(0, 1);
-
-        
-//    seqEditor->enterStepData(12, Step::noteInd);    
-//     // editor.moveCursorDown();
-//     // editor.enterStepData(13, Step::noteInd);
-//    seqEditor->gotoSequenceConfigPage();
-//    seqEditor->incrementSeqConfigParam();
-//    seqEditor->setEditMode(SequencerEditorMode::selectingSeqAndStep);    
 }
 
 PluginEditor::~PluginEditor()
@@ -48,42 +41,39 @@ PluginEditor::~PluginEditor()
 //==============================================================================
 void PluginEditor::paint (juce::Graphics& g)
 {
-    // // (Our component is opaque, so we must completely fill the background with a solid colour)
-    // g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-
-    // g.setColour (juce::Colours::white);
-    // g.setFont (15.0f);
-    // g.drawFittedText ("Hello World!", getLocalBounds(), juce::Justification::centred, 1);
 }
 
 void PluginEditor::resized()
 {
     // This is generally where you'll want to lay out the positions of any
     // subcomponents in your editor..
-    rTable.setBounds(0, 0, getWidth(), getHeight());
+    int cPanelHeight = getHeight()/8;
+    controlPanelTable.setBounds(0, 0, getWidth(), cPanelHeight);
+    seqViewTable.setBounds(0, 0 + cPanelHeight, getWidth(), getHeight() - cPanelHeight);
+
 }
 
 
 void PluginEditor::timerCallback ()
 {
-
+  prepareControlPanelView();  
   // check what to draw based on the state of the 
   // editor
   switch(seqEditor->getEditMode()){
 
       case SequencerEditorMode::selectingSeqAndStep:
       {
-          drawSequenceView();
+          prepareSequenceView();
           break;
       }
       case SequencerEditorMode::editingStep:
       {
-          drawStepView();
+          prepareStepView();
           break; 
       }
       case SequencerEditorMode::configuringSequence:
       {
-          drawSeqConfigView();
+          prepareSeqConfigView();
           break;
       }
   }
@@ -228,7 +218,7 @@ bool PluginEditor::keyStateChanged(bool isKeyDown, juce::Component* originatingC
 }
 
 
-void PluginEditor::drawSequenceView()
+void PluginEditor::prepareSequenceView()
 {
   // sequencer->tick();
   std::vector<std::pair<int, int>> playHeads;
@@ -236,9 +226,9 @@ void PluginEditor::drawSequenceView()
     std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
     playHeads.push_back(std::move(colRow));
   }
-  rTable.draw(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 8, 6,seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
+  seqViewTable.updateData(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 8, 6,seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
 }
-void PluginEditor::drawStepView()
+void PluginEditor::prepareStepView()
 {
     // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
     // std::vector<std::vector<std::string>> grid = step->toStringGrid();
@@ -250,19 +240,27 @@ void PluginEditor::drawStepView()
         }
     }
     std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-    rTable.draw(grid, 
+    seqViewTable.updateData(grid, 
         8, 6, 
         seqEditor->getCurrentStepCol(), 
         seqEditor->getCurrentStepRow(), 
         playHeads);
 }
-void PluginEditor::drawSeqConfigView()
+void PluginEditor::prepareSeqConfigView()
 {
     std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
-    rTable.draw(grid, 
+    seqViewTable.updateData(grid, 
         8, 6, 
         seqEditor->getCurrentSequence(), 
         seqEditor->getCurrentSeqParam(), 
         std::vector<std::pair<int, int>>());   
 }
 
+void PluginEditor::prepareControlPanelView()
+{
+    std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
+    controlPanelTable.updateData(grid, 
+        1, 6, 
+        0, 0, // todo - pull these from the editor which keeps track of this 
+        std::vector<std::pair<int, int>>()); 
+}
