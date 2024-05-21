@@ -18,6 +18,7 @@
 /**
 */
 class PluginEditor  : public juce::AudioProcessorEditor, 
+                      // public juce::OpenGLAppComponent,
                       public juce::Timer,
                       public juce::KeyListener 
 
@@ -46,6 +47,8 @@ private:
     Sequencer* sequencer; 
     SequencerEditor* seqEditor;
     TrackerController* trackerController; 
+
+    size_t rowsInUI;
     
     void prepareControlPanelView();
     void prepareSequenceView();

@@ -2,20 +2,20 @@
 #include "StringTable.h"
 
 StringTable::StringTable()
-: rw_mutex{std::make_unique<std::shared_mutex>()}, tableData{std::vector<std::vector<std::string>>()}, rowsVisible(0), colsVisible(0), cursorPosition(0, 0), startCol{0}, endCol{0}, startRow{0}, endRow{0}, lastStartCol{0}, lastStartRow{0}
+: rw_mutex{std::make_unique<std::shared_mutex>()}, tableData{std::vector<std::vector<std::string>>()}, rowsVisible(0), colsVisible(0), cursorPosition(0, 0), startCol{0}, endCol{0}, startRow{0}, endRow{0}, lastStartCol{0}, lastStartRow{0}, showCursor{true}
 {
 }
 
-void StringTable::updateData(std::vector<std::vector<std::string>>& data, size_t rowsToDisplay, size_t colsToDisplay, size_t cursorCol, size_t cursorRow, std::vector<std::pair<int, int>> highlightCells)
+void StringTable::updateData(std::vector<std::vector<std::string>>& data, size_t rowsToDisplay, size_t colsToDisplay, size_t cursorCol, size_t cursorRow, std::vector<std::pair<int, int>> highlightCells, bool _showCursor)
 {
 
     // unique lock is used when writing 
-    std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+    // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
     // check all the requested values
     // and set up the view on the grid 
     // according to its size and the previous view for nice cursor movement 
-
+    showCursor = _showCursor;
     startRow = lastStartRow;
     startCol = lastStartCol;
     endRow = startRow + rowsToDisplay;
@@ -61,7 +61,7 @@ void StringTable::resized()
 void StringTable::paint(juce::Graphics& g)
 {
     // shared lock is ok as this function only reads data 
-    std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+    // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
 
     if (colsVisible == 0){return;}
     
@@ -88,12 +88,15 @@ void StringTable::paint(juce::Graphics& g)
 
 void StringTable::drawCell(juce::Graphics& g, int x, int y, const std::string& value, CellState state)
 {
-    juce::Rectangle<int> cellBounds(x, y, getWidth() / colsVisible, getHeight() / rowsVisible);
     juce::Colour colour = juce::Colours::white;
+    if (state == CellState::Cursor && !showCursor){
+        state = CellState::NotSelected;
+    }   
+ 
     switch (state)
     {
         case CellState::Cursor:
-            colour = juce::Colours::blue;
+            colour = juce::Colours::greenyellow;
             break;
         case CellState::Highlight:
             colour = juce::Colours::orange;
@@ -106,15 +109,18 @@ void StringTable::drawCell(juce::Graphics& g, int x, int y, const std::string& v
             break;
     }
 
-    Graphics::ScopedSaveState stateGuard(g);
+    // Graphics::ScopedSaveState stateGuard(g);
+    juce::Rectangle<int> cellBounds(x, y, getWidth() / colsVisible, getHeight() / rowsVisible);
+
     g.setColour(juce::Colours::black);
     g.fillRect(cellBounds);
     g.setColour(colour);
-    g.drawRect(cellBounds, 4);
+    if (state == CellState::Cursor && showCursor){g.drawRect(cellBounds, 8);}
+    {g.drawRect(cellBounds, 4);}
     
     g.setColour(juce::Colours::orange);
     // g.drawRect(cellBounds, 1); // Draw cell border
-    g.setFont(cellBounds.getHeight() * 0.5);
+    g.setFont(cellBounds.getWidth() * 0.25);
     g.drawText(value, cellBounds, juce::Justification::centred, true);
 }
 

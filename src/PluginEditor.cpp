@@ -17,8 +17,10 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     audioProcessor (p), 
     sequencer{p.getSequencer()},  
     seqEditor{p.getSequenceEditor()}, 
-    trackerController{p.getTrackerController()}
+    trackerController{p.getTrackerController()}, 
+    rowsInUI{9}
 {
+    // openGLContext.attachTo (*getTopLevelComponent());
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.
     setSize (1024, 768);
@@ -29,7 +31,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     addKeyListener(this);
     setWantsKeyboardFocus(true);
 
-    startTimer(1000 / 25);
+    startTimer(1000 / 10);
 
 }
 
@@ -47,10 +49,10 @@ void PluginEditor::resized()
 {
     // This is generally where you'll want to lay out the positions of any
     // subcomponents in your editor..
-    int cPanelHeight = getHeight()/8;
+    int cPanelHeight = getHeight()/rowsInUI;
     controlPanelTable.setBounds(0, 0, getWidth(), cPanelHeight);
     seqViewTable.setBounds(0, 0 + cPanelHeight, getWidth(), getHeight() - cPanelHeight);
-
+   
 }
 
 
@@ -226,7 +228,9 @@ void PluginEditor::prepareSequenceView()
     std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
     playHeads.push_back(std::move(colRow));
   }
-  seqViewTable.updateData(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 8, 6,seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
+  seqViewTable.updateData(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 
+  rowsInUI-1, 6,
+  seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
 }
 void PluginEditor::prepareStepView()
 {
@@ -241,7 +245,7 @@ void PluginEditor::prepareStepView()
     }
     std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
     seqViewTable.updateData(grid, 
-        8, 6, 
+        rowsInUI-1, 6, 
         seqEditor->getCurrentStepCol(), 
         seqEditor->getCurrentStepRow(), 
         playHeads);
@@ -250,7 +254,7 @@ void PluginEditor::prepareSeqConfigView()
 {
     std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
     seqViewTable.updateData(grid, 
-        8, 6, 
+        rowsInUI-1, 6, 
         seqEditor->getCurrentSequence(), 
         seqEditor->getCurrentSeqParam(), 
         std::vector<std::pair<int, int>>());   
@@ -260,7 +264,7 @@ void PluginEditor::prepareControlPanelView()
 {
     std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
     controlPanelTable.updateData(grid, 
-        1, 6, 
+        1, 12, 
         0, 0, // todo - pull these from the editor which keeps track of this 
-        std::vector<std::pair<int, int>>()); 
+        std::vector<std::pair<int, int>>(), false); 
 }
