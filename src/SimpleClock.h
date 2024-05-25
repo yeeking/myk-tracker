@@ -4,6 +4,8 @@
 #include <chrono>
 #include <functional>
 #include <iostream>
+#include <shared_mutex>
+
 #include "ClockAbs.h"
 
 class SimpleClock  : public ClockAbs
@@ -12,7 +14,9 @@ class SimpleClock  : public ClockAbs
     SimpleClock(int _sleepTimeMs = 5, 
                 std::function<void()>_callback = [](){
                     std::cout << "SimpleClock::default tick callback" << std::endl;
-                }) : sleepTimeMs{_sleepTimeMs}, running{false}, callback{_callback}, currentTick{0}, inTick{false}
+                }) : 
+                rw_mutex{std::make_unique<std::shared_mutex>()}, 
+                sleepTimeMs{_sleepTimeMs}, running{false}, callback{_callback}, currentTick{0}, bpm{120}
      {
        // constructor body
      }
@@ -22,22 +26,31 @@ class SimpleClock  : public ClockAbs
       stop();
       if (tickThread != nullptr) delete tickThread;
     }
-    void setBPM(unsigned int bpm) override 
+    void setBPM(double _bpm) override 
     {
-      // TODO
-      
+      unsigned long intMS = static_cast<unsigned long> (60.0/bpm*1000.0/8.0);
+      // std::cout << "clock: bpm is " << bpm << " ms is " << intMS << std::endl;
+      bpm = _bpm;
+      start(intMS);
     }
+    double getBPM() override
+    {
+      return bpm; 
+      // return 1000.0 / (intervalMs * 4);// how many (4 ticks) in 1 second 
+    }
+
     /** start with the sent interval between calls the to callback*/
     void start(int _intervalMs)
     {
-      stop();
-      inTick = false;
+      if (running){stop();}
+      std::unique_lock<std::shared_mutex> lock(*rw_mutex);
       running = true;
       tickThread = new std::thread(SimpleClock::ticker, this, _intervalMs, sleepTimeMs);
     }
 
     void stop()
     {
+      std::unique_lock<std::shared_mutex> lock(*rw_mutex);
       if (running)
       {
        //t << "SimpleClock::stop shutting down " << std::endl;
@@ -47,23 +60,14 @@ class SimpleClock  : public ClockAbs
     }
     /** set the function to be called when the click ticks */
     void setCallback(std::function<void()> c){
-
-      while(inTick) ;
-       //	std::cout << "setcallback in tick" << std::endl;// wait until not in tick
-      inTick = true;
+      std::unique_lock<std::shared_mutex> lock(*rw_mutex);
       callback = c;
-      inTick = false;
     }
     void tick()
     {
-      //while(inTick) ;
-	//	std::cout << "tick in tick" << std::endl;// wait until not in ti
-      inTick = true;// mutex stuff
+      std::unique_lock<std::shared_mutex> lock(*rw_mutex);
       currentTick ++;
-      // call the callback
-      //std::cout << "SimpleClock::tick" << std::endl; 
       callback();
-      inTick = false; 
     }
     long getCurrentTick() const override 
     {
@@ -99,16 +103,18 @@ class SimpleClock  : public ClockAbs
     }
     
   private:
+    std::unique_ptr<std::shared_mutex> rw_mutex;
+
     static long getNow()
     {
       return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     }
-    long intervalMs;
+    double bpm;
+    // long intervalMs;
     long sleepTimeMs; // lower means more precision in the timing
     bool running;     
     std::thread* tickThread {nullptr};
     std::function<void()> callback;
     long currentTick;
-    bool inTick;
 };
 

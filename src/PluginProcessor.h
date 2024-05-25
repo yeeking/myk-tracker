@@ -36,7 +36,9 @@ public:
     void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) override; 
     void sendQueuedMessages(long tick) override; 
     // the ClockAbs interface
-    void setBPM(unsigned int bpm) override; 
+    void setBPM(double bpm) override; 
+    double getBPM() override; 
+    
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -87,6 +89,7 @@ private:
     TrackerController trackerController;
     
     unsigned int samplesPerTick; 
+    double bpm; 
     juce::MidiBuffer midiToSend; 
 
     //==============================================================================

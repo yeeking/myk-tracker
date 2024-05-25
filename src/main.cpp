@@ -66,7 +66,7 @@ int main() {
 
     std::map<char, double> key_to_note = MidiUtilsAbs::getKeyboardToMidiNotes(0);
     // maintains the data and sate of the sequencer
-    Sequencer sequencer{4, 16};
+    Sequencer sequencer{16, 8};
     // maintains a stateful editor - knows the edit mode, etc. 
     SequencerEditor editor{&sequencer};  
 
@@ -86,7 +86,8 @@ int main() {
     });
 
     int intervalMs = 50;
-    seqClock.start(intervalMs);
+    // seqClock.start(intervalMs);
+    seqClock.setBPM(120);
     guiClock.start(1000 / 25);
     bool redraw = false; 
     
@@ -151,11 +152,12 @@ int main() {
                 editor.addRow();
                 break;
             case '_':
-            // delete the current sequence
+                trackerController.decrementBPM();
                 break;
             case '+':
-            // add a new sequence 
+                trackerController.incrementBPM();
                 break;
+                
             case '[':
                 editor.decrementAtCursor();
                 break;

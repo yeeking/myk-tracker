@@ -38,8 +38,14 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
             break; 
              
     }
-    std::string playMode; 
-    
+    std::string playMode = (clock->getCurrentTick() % 8) > 3 ? "+" : "-"; 
+    std::string bpm = std::to_string(static_cast<int>(clock->getBPM()));
+    if (sequencer->isPlaying()){
+        playMode = "> " + playMode + bpm;
+    }
+    else{
+        playMode = "|| " + playMode + bpm; 
+    }
 
     std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {playMode}, {viewMode}};
     
@@ -48,22 +54,36 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
 
 void TrackerController::stopPlaying()
 {
-
+    sequencer->stop();
 }
 void TrackerController::startPlaying()
 {
-
+    sequencer->play();
 }
 void TrackerController::setBPM(unsigned int bpm)
 {
-
+    clock->setBPM(bpm);    
 }
-
 void TrackerController::loadTrack(const std::string& fname)
 {
 
 }
 void TrackerController::saveTrack(const std::string& fname)
 {
+
+}
+
+void TrackerController::incrementBPM()
+{
+    double bpm = clock->getBPM();
+    bpm ++;
+    clock->setBPM(bpm);
+}
+void TrackerController::decrementBPM()
+{
+    double bpm = clock->getBPM();
+    bpm --;
+    if (bpm <= 0) bpm = 1;
+    clock->setBPM(bpm);
 
 }

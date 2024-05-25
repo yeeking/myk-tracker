@@ -20,10 +20,10 @@ PluginProcessor::PluginProcessor()
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
                        ), elapsedSamples{0}, 
-                       sequencer{8, 4}, seqEditor{&sequencer}, 
+                       sequencer{16, 8}, seqEditor{&sequencer}, 
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
-                       samplesPerTick{44100/(120/60)/4}
+                       samplesPerTick{44100/(120/60)/4}, bpm{120}
 #endif
 {
     
@@ -260,8 +260,15 @@ void PluginProcessor::sendQueuedMessages(long tick)
 ////////////// end MIDIUtils interface 
 
 
-void PluginProcessor::setBPM(unsigned int bpm)
-{
+void PluginProcessor::setBPM(double _bpm)
+{   
+    assert(_bpm > 0);
     // update tick interval in samples 
+    samplesPerTick = getSampleRate() *  (60/_bpm) /8;
+    bpm = _bpm;
 }
 
+double PluginProcessor::getBPM()
+{
+    return bpm;
+}

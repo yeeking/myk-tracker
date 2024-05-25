@@ -13,7 +13,12 @@ class TrackerController{
     std::vector<std::vector<std::string>> getControlPanelAsGridOfStrings();
     void stopPlaying();
     void startPlaying();
+    /** directly set BPM */
     void setBPM(unsigned int bpm);
+    /** add 1 to bpm*/
+    void incrementBPM();
+    /** subtract one from bpm */
+    void decrementBPM();
     
     void loadTrack(const std::string& fname);
     void saveTrack(const std::string& fname);

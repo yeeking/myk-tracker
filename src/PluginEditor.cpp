@@ -83,18 +83,77 @@ void PluginEditor::timerCallback ()
 }
 
 
+
+void PluginEditor::prepareSequenceView()
+{
+  // sequencer->tick();
+  std::vector<std::pair<int, int>> playHeads;
+  for (size_t col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
+    std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
+    playHeads.push_back(std::move(colRow));
+  }
+  seqViewTable.updateData(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 
+  rowsInUI-1, 6,
+  seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
+}
+void PluginEditor::prepareStepView()
+{
+    // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+    // std::vector<std::vector<std::string>> grid = step->toStringGrid();
+    std::vector<std::pair<int, int>> playHeads;
+    if (sequencer->getCurrentStep(seqEditor->getCurrentSequence()) == seqEditor->getCurrentStep()){
+        int cols = sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        for (int col=0;col<cols;++col){
+            playHeads.push_back(std::pair(col, 0));
+        }
+    }
+    std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+    seqViewTable.updateData(grid, 
+        rowsInUI-1, 6, 
+        seqEditor->getCurrentStepCol(), 
+        seqEditor->getCurrentStepRow(), 
+        playHeads);
+}
+void PluginEditor::prepareSeqConfigView()
+{
+    std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
+    seqViewTable.updateData(grid, 
+        rowsInUI-1, 6, 
+        seqEditor->getCurrentSequence(), 
+        seqEditor->getCurrentSeqParam(), 
+        std::vector<std::pair<int, int>>());   
+}
+
+void PluginEditor::prepareControlPanelView()
+{
+    std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
+    controlPanelTable.updateData(grid, 
+        1, 12, 
+        0, 0, // todo - pull these from the editor which keeps track of this 
+        std::vector<std::pair<int, int>>(), false); 
+}
+
 bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
 
     switch (key.getTextCharacter())
     {
+        case 'R':
+            CommandProcessor::sendAllNotesOff();
+            audioProcessor.getSequencer()->rewindToStart();
+            break;
         case ' ':
-            
-            break;
+            CommandProcessor::sendAllNotesOff();
+            if (audioProcessor.getSequencer()->isPlaying()){
+                audioProcessor.getSequencer()->stop();
+            }
+            else{
+                audioProcessor.getSequencer()->rewindToStart();
+                audioProcessor.getSequencer()->play();
+            }
         case '\t':
-           seqEditor->nextStep();
+            seqEditor->nextStep();
             break;
-
         case '-':
            seqEditor->removeRow();
             break;
@@ -104,11 +163,11 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             break;
 
         case '_':
-            // Delete the current sequence
+            trackerController->decrementBPM();
             break;
 
         case '+':
-            // Add a new sequence
+            trackerController->incrementBPM();
             break;
 
         case '[':
@@ -161,6 +220,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
                 // key_note_match = true;
                 seqEditor->enterStepData(key_note.second, Step::noteInd);
                 break;// break the for loop
+                
               }
             }
             // do the velocity controls
@@ -180,31 +240,30 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             if (key.isKeyCode(juce::KeyPress::deleteKey)) {
                 seqEditor->resetAtCursor();
                 CommandProcessor::sendAllNotesOff();
-                // return true;
+                break;
             }
             if (key.isKeyCode(juce::KeyPress::returnKey)) {
                seqEditor->enterAtCursor();
-                // return true;
+                break;
             }
             if (key.isKeyCode(juce::KeyPress::upKey)) {
                seqEditor->moveCursorUp();
-                // return true;
+                break;
             }
             if (key.isKeyCode(juce::KeyPress::downKey)) {
 
                seqEditor->moveCursorDown();
-                // return true;
+                break;
             }
             if (key.isKeyCode(juce::KeyPress::leftKey)) {
                seqEditor->moveCursorLeft();
-                // return true;
+                break;
             }
             if (key.isKeyCode(juce::KeyPress::rightKey)) {
                seqEditor->moveCursorRight();
-                // return true;
+                break;
             }
 
-            // return false; // Key was not handled
     }
     audioProcessor.getSequencer()->updateSeqStringGrid();
     return true; // Key was handled
@@ -215,52 +274,3 @@ bool PluginEditor::keyStateChanged(bool isKeyDown, juce::Component* originatingC
   return false; 
 }
 
-
-void PluginEditor::prepareSequenceView()
-{
-  // sequencer->tick();
-  std::vector<std::pair<int, int>> playHeads;
-  for (size_t col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
-    std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
-    playHeads.push_back(std::move(colRow));
-  }
-  seqViewTable.updateData(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 
-  rowsInUI-1, 6,
-  seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
-}
-void PluginEditor::prepareStepView()
-{
-    // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-    // std::vector<std::vector<std::string>> grid = step->toStringGrid();
-    std::vector<std::pair<int, int>> playHeads;
-    if (sequencer->getCurrentStep(seqEditor->getCurrentSequence()) == seqEditor->getCurrentStep()){
-        int cols = sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-        for (int col=0;col<cols;++col){
-            playHeads.push_back(std::pair(col, 0));
-        }
-    }
-    std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-    seqViewTable.updateData(grid, 
-        rowsInUI-1, 6, 
-        seqEditor->getCurrentStepCol(), 
-        seqEditor->getCurrentStepRow(), 
-        playHeads);
-}
-void PluginEditor::prepareSeqConfigView()
-{
-    std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
-    seqViewTable.updateData(grid, 
-        rowsInUI-1, 6, 
-        seqEditor->getCurrentSequence(), 
-        seqEditor->getCurrentSeqParam(), 
-        std::vector<std::pair<int, int>>());   
-}
-
-void PluginEditor::prepareControlPanelView()
-{
-    std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
-    controlPanelTable.updateData(grid, 
-        1, 12, 
-        0, 0, // todo - pull these from the editor which keeps track of this 
-        std::vector<std::pair<int, int>>(), false); 
-}

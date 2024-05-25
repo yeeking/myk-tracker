@@ -162,15 +162,34 @@ bool testSeqConf(){
 	return true; 
 }
 
-// 	// GridWidget grid(3, 3);
-int main(){
-	SimpleClock clock;
-	CommandProcessor::assignMasterClock(&clock);
-	MidiUtils midi;
-	CommandProcessor::assignMidiUtils(&midi);
+bool testBPM(){
+	SimpleClock clock2;
+	clock2.start(100);
+	clock2.stop();
+	double bpmStart = clock2.getBPM();
+	clock2.setBPM(bpmStart + 10);
+	double bpmEnd = clock2.getBPM();
+	std::cout << "bpm " << bpmStart << " end " << bpmEnd << std::endl; 
 
-	if (testSeqConf()) printf("+ testSeqConf\n");
-	else printf("X testSeqConf\n");
+	assert(bpmEnd == bpmStart + 10);
+	
+	return true; 
+}
+
+
+int main(){
+	// 	// GridWidget grid(3, 3);
+SimpleClock clock;
+CommandProcessor::assignMasterClock(&clock);
+MidiUtils midi;
+CommandProcessor::assignMidiUtils(&midi);
+
+
+	if (testBPM()) printf("+ testBPM\n");
+	else printf("X testBPM\n");
+
+	// if (testSeqConf()) printf("+ testSeqConf\n");
+	// else printf("X testSeqConf\n");
 
 
 	// if (testIncrementSeqParam()) printf("+ testIncrementSeqParam\n");
