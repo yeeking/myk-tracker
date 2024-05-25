@@ -23,12 +23,13 @@ PluginProcessor::PluginProcessor()
                        sequencer{16, 8}, seqEditor{&sequencer}, 
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
-                       samplesPerTick{44100/(120/60)/4}, bpm{120}
+                       samplesPerTick{44100/(120/60)/8}, bpm{120}
 #endif
 {
     
     CommandProcessor::assignMasterClock(this);
     CommandProcessor::assignMidiUtils(this);
+
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);

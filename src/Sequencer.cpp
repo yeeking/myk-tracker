@@ -225,7 +225,7 @@ Sequence::Sequence(Sequencer *_sequencer,
     : sequencer{_sequencer}, currentStep{0},
       midiChannel{_midiChannel}, type{SequenceType::midiNote},
       transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, nextTicksPerStep{0}, ticksElapsed{0}, tickOfFour{0}, muted{false}, 
-      rw_mutex{std::make_unique<std::shared_mutex>()}, resetAtNextTick{false}
+      rw_mutex{std::make_unique<std::shared_mutex>()}, rewindAtNextZeroTick{false}
 // , midiScaleToDrum{MidiUtils::getScaleMidiToDrumMidi()}
 {
   currentLength = seqLength;
@@ -246,15 +246,17 @@ void Sequence::tick(bool trigger)
 {
   // write lock
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  if (resetAtNextTick){
+  
+  ++ticksElapsed;
+  tickOfFour = ++tickOfFour % 4;
+  
+  // jump to the top 
+  if (rewindAtNextZeroTick && tickOfFour == 0){
     tickOfFour = 0;
     ticksElapsed = 0;
     currentStep = 0; 
-    resetAtNextTick = false; 
+    rewindAtNextZeroTick = false; 
   }
-  // std::cout << "Sequence::tick" << std::endl;
-  ++ticksElapsed;
-  tickOfFour = ++tickOfFour % 4;
   // std::cout << "elap " <<ticksElapsed << " t/4 " << tickOfFour << " tps " << ticksPerStep <<" next tps " << nextTicksPerStep << std::endl; 
   if (nextTicksPerStep  > 0 && tickOfFour == 0){// update to this tps on next zero of tickOfFour
       // std::cout << "changing tps " << nextTicksPerStep << std::endl;
@@ -526,9 +528,9 @@ void Sequence::toggleMuteState()
   muted = !muted;
 }
 
-void Sequence::rewindToStart()
+void Sequence::rewindAtNextZero()
 {
-  resetAtNextTick = true;  
+  rewindAtNextZeroTick = true;  
 }
 
 
@@ -1025,9 +1027,9 @@ bool Sequencer::isPlaying()
   return playing; 
 }
 
-void Sequencer::rewindToStart()
+void Sequencer::rewindAtNextZero()
 {
-  for (Sequence& seq : sequences){seq.rewindToStart();}
+  for (Sequence& seq : sequences){seq.rewindAtNextZero();}
 }
 
 

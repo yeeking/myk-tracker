@@ -226,7 +226,7 @@ class Sequence{
     /** change mote state to its opposite */
     void toggleMuteState();
     /** tell the sequence to reset its position counter at next tick. Useful for rewinding*/
-    void rewindToStart();
+    void rewindAtNextZero();
   private:
 
     /** provides access to the sequencer so this sequence can change things*/
@@ -248,7 +248,7 @@ class Sequence{
     std::size_t originalTicksPerStep;
     /** used to store a ticks per step update that will be applied next time tickoffour == 0*/
     std::size_t nextTicksPerStep; 
-    bool resetAtNextTick; 
+    bool rewindAtNextZeroTick; 
     
     std::size_t ticksElapsed;
     /** used to keep in sync with the '1'*/
@@ -331,7 +331,7 @@ class Sequencer  {
       void play();
       bool isPlaying();
       /** on next 0 / 4 ticks, rewind all sequences to step 0. Use in combination with enableAllTriggers to play from the top. */
-      void rewindToStart();
+      void rewindAtNextZero();
       
       /** allows a 'keep stepping but do not trigger' when tick is called*/
       void disableAllTriggers();

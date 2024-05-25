@@ -18,7 +18,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     sequencer{p.getSequencer()},  
     seqEditor{p.getSequenceEditor()}, 
     trackerController{p.getTrackerController()}, 
-    rowsInUI{9}
+    rowsInUI{9}, waitingForPaint{false}
 {
     // openGLContext.attachTo (*getTopLevelComponent());
     // Make sure that before the constructor has finished, you've set the
@@ -31,7 +31,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     addKeyListener(this);
     setWantsKeyboardFocus(true);
 
-    startTimer(1000 / 10);
+    startTimer(1000 / 25);
 
 }
 
@@ -43,6 +43,7 @@ PluginEditor::~PluginEditor()
 //==============================================================================
 void PluginEditor::paint (juce::Graphics& g)
 {
+    waitingForPaint = false; 
 }
 
 void PluginEditor::resized()
@@ -58,6 +59,7 @@ void PluginEditor::resized()
 
 void PluginEditor::timerCallback ()
 {
+    if (waitingForPaint) {return;}// already waiting for a repaint
   prepareControlPanelView();  
   // check what to draw based on the state of the 
   // editor
@@ -79,6 +81,7 @@ void PluginEditor::timerCallback ()
           break;
       }
   }
+  waitingForPaint = true; 
   repaint();
 }
 
@@ -140,7 +143,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
     {
         case 'R':
             CommandProcessor::sendAllNotesOff();
-            audioProcessor.getSequencer()->rewindToStart();
+            audioProcessor.getSequencer()->rewindAtNextZero();
             break;
         case ' ':
             CommandProcessor::sendAllNotesOff();
@@ -148,7 +151,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
                 audioProcessor.getSequencer()->stop();
             }
             else{
-                audioProcessor.getSequencer()->rewindToStart();
+                audioProcessor.getSequencer()->rewindAtNextZero();
                 audioProcessor.getSequencer()->play();
             }
         case '\t':

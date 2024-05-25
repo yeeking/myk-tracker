@@ -127,7 +127,7 @@ int main() {
         switch (ch) {
             case 'R':
                 CommandProcessor::sendAllNotesOff();
-                sequencer.rewindToStart();
+                sequencer.rewindAtNextZero();
                 break;
             case ' ':
                 CommandProcessor::sendAllNotesOff();
@@ -135,11 +135,11 @@ int main() {
                     sequencer.stop();
                 }
                 else{
-                    sequencer.rewindToStart();
+                    sequencer.rewindAtNextZero();
                     sequencer.play();
                 }
                 
-                sequencer.rewindToStart();
+                sequencer.rewindAtNextZero();
                 break;
                   
             case '\t':
