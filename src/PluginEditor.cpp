@@ -89,11 +89,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
     switch (key.getTextCharacter())
     {
         case ' ':
-           seqEditor->toggleTrigger();
-            if (!seqEditor->isTriggerActive()) {
-                // After a 'stop', reset all sequences to zero for next trigger
-                // sequencer.nextStepFromZero();
-            }
+            
             break;
         case '\t':
            seqEditor->nextStep();

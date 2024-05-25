@@ -12,23 +12,23 @@ Step::Step() : rw_mutex{std::make_unique<std::shared_mutex>()}, active{true}
   }
 }
 /** returns a copy of the data stored in this step*/
-std::vector<std::vector<double>> Step::getData()
+std::vector<std::vector<double>> Step::getData() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data;
 }
-double Step::getDataAt(std::size_t row, std::size_t col)
+double Step::getDataAt(std::size_t row, std::size_t col) const
 {
   // this lock allows multiple concorrent reads
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data[row][col];
 }
-std::size_t Step::howManyDataRows()
+std::size_t Step::howManyDataRows() const 
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data.size();
 }
-std::size_t Step::howManyDataCols()
+std::size_t Step::howManyDataCols() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data[0].size();
@@ -39,7 +39,7 @@ std::size_t Step::howManyDataCols()
 //   return &data;
 // }
 
-std::string Step::toStringFlat()
+std::string Step::toStringFlat() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   if (this->data[0][Step::noteInd] == 0){
@@ -62,7 +62,7 @@ std::string Step::toStringFlat()
   // return std::to_string((int)this->data[0][Step::noteInd]);
 }
 
-std::vector<std::vector<std::string>> Step::toStringGrid()
+std::vector<std::vector<std::string>> Step::toStringGrid() const 
 {
 
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
@@ -174,7 +174,7 @@ std::function<void(std::vector<std::vector<double>> *)> Step::getCallback()
 }
 
 /** trigger this step, causing it to pass its data to its callback*/
-void Step::trigger(std::size_t row)
+void Step::trigger(std::size_t row) 
 {
   // shared lock as reading
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
@@ -577,7 +577,7 @@ std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(std::size_t 
   return steps[step].toStringGrid();
 }
 
-bool Sequence::isMuted()
+bool Sequence::isMuted() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return muted;
@@ -591,7 +591,7 @@ void Sequence::toggleMuteState()
 
 /////////////////////// Sequencer
 
-Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength)
+Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, triggerOnTick{true}
 {
   for (auto i = 0; i < seqCount; ++i)
   {
@@ -655,11 +655,11 @@ std::size_t Sequencer::getSequenceTicksPerStep(std::size_t sequence) const
 }
 
 /** move the sequencer along by one tick */
-void Sequencer::tick(bool trigger)
+void Sequencer::tick()
 {
   for (Sequence &seq : sequences)
   {
-    seq.tick(trigger);
+    seq.tick(triggerOnTick);
   }
 }
 
@@ -773,7 +773,7 @@ std::vector<std::vector<double>> Sequencer::getStepData(std::size_t sequence, st
 //   return sequences[sequence].getStepDataDirect(step);
 // }
 
-void Sequencer::toggleActive(std::size_t sequence, std::size_t step)
+void Sequencer::toggleStepActive(std::size_t sequence, std::size_t step)
 {
   if (!assertSeqAndStep(sequence, step))
     return;
@@ -789,21 +789,6 @@ void Sequencer::addStepListener()
 {
 }
 
-/** prstd::size_t out a tracker style view of the sequence */
-std::string Sequencer::toString()
-{
-  std::string s{""};
-  for (std::size_t step = 0; step < 32; ++step)
-  {
-    s += std::to_string(step) + "\t: ";
-    for (Sequence &seq : sequences)
-    {
-      // s += seq.stepToString(step) + "\t";
-    }
-    s += "\n";
-  }
-  return s;
-}
 
 void Sequencer::resetSequence(std::size_t sequence)
 {
@@ -838,6 +823,8 @@ bool Sequencer::assertSequence(std::size_t sequence) const
 
 void Sequencer::updateSeqStringGrid()
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock 
+
   std::vector<std::vector<std::string>> gridView;
   // need to get the data in the sequences, convert it to strings and
   // store it into the sent grid view
@@ -882,6 +869,7 @@ void Sequencer::updateSeqStringGrid()
 
 std::vector<std::vector<std::string>> &Sequencer::getSequenceAsGridOfStrings()
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
   return seqAsStringGrid;
 }
 std::vector<std::vector<std::string>> Sequencer::getStepAsGridOfStrings(std::size_t seq, std::size_t step)
@@ -907,6 +895,8 @@ void Sequencer::toggleSequenceMute(std::size_t sequence)
 
 std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrings()
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
+
   // editable config items for a sequence:
 // - set channel for all steps
 // - set ticks per beat
@@ -934,7 +924,7 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
 }
 
 
-std::vector<Parameter>& Sequencer::getSeqConfigSpecs()
+std::vector<Parameter>& Sequencer::getSeqConfigSpecs()  
 {
   return seqConfigSpecs; 
 }
@@ -953,6 +943,8 @@ void Sequencer::setupSeqConfigSpecs()
 
 void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+
   assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
   Parameter p = seqConfigSpecs[paramIndex];
@@ -980,6 +972,8 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
 }
 void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+
   assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
 
@@ -1044,10 +1038,26 @@ void Sequencer::decrementStepDataAt(std::size_t sequence, std::size_t step, std:
   setStepDataAt(sequence, step, row, col, val);
 }
 
-void Sequencer::setStepDataAtDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col)
+void Sequencer::setStepDataToDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col)
 {
   double stepCmd = getStepDataAt(sequence, step, row, Step::cmdInd);
   // param dictates the step, min and max for this column
   Parameter param = CommandProcessor::getCommand(stepCmd).parameters[col-1]; // -1 as the first col is the command which has no parameter
   setStepDataAt(sequence, step, row, col, param.defaultValue);
+}
+
+
+void Sequencer::disableAllTriggers()
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+  triggerOnTick = false;   
+}
+void Sequencer::enableAllTriggers()
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+  triggerOnTick = true; 
+}
+void Sequencer::rewindToStart()
+{
+
 }

@@ -79,7 +79,7 @@ int main() {
 
     seqClock.setCallback([&sequencer, &seqClock, &editor](){
         CommandProcessor::sendQueuedMIDI(seqClock.getCurrentTick());
-        sequencer.tick(editor.isTriggerActive());
+        sequencer.tick();
     });
     guiClock.setCallback([&gui](){
         gui.draw();
@@ -125,12 +125,7 @@ int main() {
         }
         switch (ch) {
             case ' ':
-                editor.toggleTrigger();
-                if (!editor.isTriggerActive() ){
-                    // after a 'stop', reset all sequences to zero 
-                    // for next trigger
-                    // sequencer.nextStepFromZero();
-                }
+
                 break;  
             case '\t':
                 editor.nextStep();

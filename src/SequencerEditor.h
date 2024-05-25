@@ -135,14 +135,6 @@ public:
   void writeSequenceData(std::vector<std::vector<double>> data);
   /** write the sent data to a sequence - 1D data version */
   // void writeSequenceData(std::vector<std::vector<double>> data);
-  /** get current state of step triggering */
-  bool isTriggerActive();
-  /** activate step triggering */
-  void activateTrigger();
-  /** deactivate step triggering */
-  void deactivateTrigger();
-  /** alternative between true and false */
-  void toggleTrigger();
 private:
   Sequencer *sequencer;
   /** which sequence*/
@@ -155,8 +147,6 @@ private:
   int currentStepCol;
   /** which sequence param are you editing?*/
   int currentSeqParam; 
-  /** handy state to decide if trigger is active or not on the step functions */
-  bool triggerIsActive; 
 
   SequencerEditorMode editMode;
   SequencerEditorSubMode editSubMode;

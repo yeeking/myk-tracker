@@ -23,23 +23,25 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
         cursorStatus += ":" + std::to_string(seqEditor->getCurrentStepRow()) + "[" + std::to_string(rowsInStep) + "]";
     }
 
-    std::string mode;
+    std::string viewMode;
     switch(seqEditor->getEditMode()){
         case SequencerEditorMode::configuringSequence:
-            mode = "Conf";
+            viewMode = "Conf";
             break;
         case SequencerEditorMode::editingStep:
-            mode = "Step";
+            viewMode = "Step";
             break;
         case SequencerEditorMode::selectingSeqAndStep:
-            mode = "Seq";
+            viewMode = "Seq";
             break;
         default:
             break; 
              
     }
+    std::string playMode; 
+    
 
-    std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}, {mode}};
+    std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {playMode}, {viewMode}};
     
     return buttons; 
 }

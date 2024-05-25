@@ -2,7 +2,7 @@
 #include <cmath> // fmod
 #include <assert.h>
 
-SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer}, currentSequence{0}, currentStep{0}, currentStepRow{0}, currentStepCol{0}, currentSeqParam{0}, editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1}, stepIncrement{0.5f}, octave{6}, triggerIsActive{true}
+SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer}, currentSequence{0}, currentStep{0}, currentStepRow{0}, currentStepCol{0}, currentSeqParam{0}, editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1}, stepIncrement{0.5f}, octave{6}
 {
 }
 
@@ -80,13 +80,13 @@ void SequencerEditor::cycleAtCursor()
     // toggle all steps in current sequence to off
     for (auto i = 0; i < sequencer->getSequence(currentSequence)->getLength(); ++i)
     {
-      sequencer->toggleActive(currentSequence, i);
+      sequencer->toggleStepActive(currentSequence, i);
     }
     return;
   case SequencerEditorMode::editingStep:
     // std::vector<std::vector<double>> data = {0, 0, 0};
     // writeStepData(data);
-    sequencer->toggleActive(currentSequence, currentStep);
+    sequencer->toggleStepActive(currentSequence, currentStep);
     return;
   }
 }
@@ -177,7 +177,7 @@ void SequencerEditor::enterStepData(double value, int column)
     for (int col : cols){
         // same for length
         if (data[currentStepRow][col] == 0){
-          sequencer->setStepDataAtDefault(currentSequence, currentStep, currentStepRow, col);
+          sequencer->setStepDataToDefault(currentSequence, currentStep, currentStepRow, col);
         }
     }
    
@@ -870,6 +870,13 @@ void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
     sequencer->setStepData(currentSequence, currentSequence, stepData);
   }
 }
+
+void SequencerEditor::gotoSequenceConfigPage()
+{
+  setEditMode(SequencerEditorMode::configuringSequence);
+}
+
+
 /** write the sent data to a sequence - 1D data version */
 // void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
 // {
@@ -879,29 +886,3 @@ void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
 // }
 // }
 
-
-bool  SequencerEditor::isTriggerActive()
-{
-  return triggerIsActive;
-}
-/** activate step triggering */
-void  SequencerEditor::activateTrigger()
-{
-  triggerIsActive = true; 
-}
-/** deactivate step triggering */
-void  SequencerEditor::deactivateTrigger()
-{
-  triggerIsActive = false; 
-}
-
-void  SequencerEditor::toggleTrigger()
-{
-  triggerIsActive = !triggerIsActive;
-}
-
-void SequencerEditor::gotoSequenceConfigPage()
-{
-   setEditMode(SequencerEditorMode::configuringSequence);
-   
-}

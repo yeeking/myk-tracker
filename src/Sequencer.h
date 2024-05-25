@@ -56,22 +56,22 @@ class Step{
 
 
     /** returns a copy of the data stored in this step*/
-    std::vector<std::vector<double>> getData();
+    std::vector<std::vector<double>> getData() const;
     /** get the memory address of the data in this step for direct access*/
     // std::vector<std::vector<double>>* getDataDirect();
     /** returns a one line string representation of the step's data */
-    std::string toStringFlat() ;
+    std::string toStringFlat() const ;
     /** returns a grid representation of the step's data*/
-    std::vector<std::vector<std::string>> toStringGrid() ;
+    std::vector<std::vector<std::string>> toStringGrid() const;
     
     /** sets the data stored in this step to a copy of the sent data and updates stored string representations */
     void setData(const std::vector<std::vector<double>>& data);
     /** get the value of the step data at the sent row and column, where each row is a distinct event and the col is the data vector for that event  */
-    double getDataAt(std::size_t row, std::size_t col);
+    double getDataAt(std::size_t row, std::size_t col) const;
     /** how many rows of data for this step? */
-    std::size_t howManyDataRows();
+    std::size_t howManyDataRows() const;
     /** how many cols of data for this step? */
-    std::size_t howManyDataCols();
+    std::size_t howManyDataCols() const;
 
     /** update one value in the data vector for this step and updates stored string representations*/
     void setDataAt( std::size_t row, std::size_t col, double value);
@@ -220,7 +220,7 @@ class Sequence{
 
     std::vector<std::vector<std::string>> stepAsGridOfStrings(std::size_t step);
     /** returns the mute state of this sequence*/
-    bool isMuted();
+    bool isMuted() const;
     /** change mote state to its opposite */
     void toggleMuteState();
   private:
@@ -291,8 +291,10 @@ class Sequencer  {
       SequenceType getSequenceType(std::size_t sequence) const;
       std::size_t getSequenceTicksPerStep(std::size_t sequence) const;
 
-      /** go to the next step. If trigger is false, just move along without triggering. */
-      void tick(bool trigger = true);
+      /** go to the next step. if disableAllTriggers has been called, will send false trigger to 
+       * sequence objects, meaning they step without firing. 
+      */
+      void tick();
       /** trigger a step's callback right now */
       void triggerStep(std::size_t seq, std::size_t step, std::size_t row);
       /** return a pointer to the sequence with sent id*/
@@ -323,8 +325,6 @@ class Sequencer  {
       void setStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col, double value);
       /** set all values for this seq, step, row to zero */
       void resetStepRow(std::size_t sequence, std::size_t step, std::size_t row);
-      /** toggle mute state of the sent sequence */
-      void toggleSequenceMute(std::size_t sequence);
       /** retrieve a copy the data for the current step */
       std::vector<std::vector<double>> getCurrentStepData(std::size_t sequence);
       /** returns a pointer to the step object stored at the sent sequence and step position */
@@ -338,15 +338,23 @@ class Sequencer  {
       std::size_t howManyStepDataRows(std::size_t seq, std::size_t step);
       /** returns the number of columns of data at the sent step (data is a rectangle)*/
       std::size_t howManyStepDataCols(std::size_t seq, std::size_t step);
-      /** get the memory address of the data for this step for direct viewing/ editing*/
-      //std::vector<std::vector<double>>* getStepDataDirect(std::size_t sequence, std::size_t step);
-      void toggleActive(std::size_t sequence, std::size_t step);
+      /** a bit like a stop function - stops any steps from triggering on clock tick, though it will keep a' steppin*/
+      void disableAllTriggers();
+      /** a bit like a play function - re-enables triggering on all steps. */
+      void enableAllTriggers();
+      /** on next 0 / 4 ticks, rewind all sequences to step 0. Use in combination with enableAllTriggers to play from the top. */
+      void rewindToStart();
+      
+      /** toggle mute state of the sent sequence */
+      void toggleSequenceMute(std::size_t sequence);
+      /** toggle activity state of specified step in specified sequence*/
+      void toggleStepActive(std::size_t sequence, std::size_t step);
       bool isStepActive(std::size_t sequence, std::size_t step) const;
       void addStepListener();
       /** wipe the data from the sent sequence*/
       void resetSequence(std::size_t sequence);
-  /** prstd::size_t out a tracker style view of the sequence */
-      std::string toString();
+
+
   /** get a vector of vector of strings representing the sequence. this is cached - call
    * updateSeqStringGrid after making edits to the sequence as it will not automatically update
    */
@@ -361,7 +369,7 @@ class Sequencer  {
       void updateSeqStringGrid();
       
       /** returns a vector of parameter 'spec' objects for the sequencer parameters. */
-      std::vector<Parameter>& getSeqConfigSpecs();
+      std::vector<Parameter>& getSeqConfigSpecs() ;
       /** increment the parameter at the sent index. uses the param spec to dictate the step and range*/
       void incrementSeqParam(std::size_t seq, std::size_t paramIndex);
       /** decrement the parameter at the sent index. uses param spec to dictate the step and range*/
@@ -375,7 +383,7 @@ class Sequencer  {
       */
       void decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col);
       /** reads default value for this step data col from commands and sets it to that */
-      void setStepDataAtDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col);
+      void setStepDataToDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col);
        
 
     private:
@@ -385,7 +393,14 @@ class Sequencer  {
       bool assertSeqAndStep(std::size_t sequence, std::size_t step) const;
         
       bool assertSequence(std::size_t sequence) const;
-      /// class data members  
+      /// class data members 
+      /** makes reads and writes thread safe */
+      std::unique_ptr<std::shared_mutex> rw_mutex;
+
+      /** if true, send trigger to sequences. note that tick also has a trigger
+       * argument. 
+      */
+      bool triggerOnTick;
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
       std::vector<std::vector<std::string>> seqAsStringGrid;
