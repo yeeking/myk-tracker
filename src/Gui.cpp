@@ -20,7 +20,7 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
                       int rowsToDisplay, int colsToDisplay, 
                       int cursorCol, int cursorRow, 
                       // col, row/ x,y
-                      std::vector<std::pair<int, int>> highlightCells)
+                      std::vector<std::pair<int, int>> highlightCells, bool showCursor)
 {
     werase(win); // Clear the screen
     // assume we do not need to move the viewing window
@@ -70,6 +70,7 @@ void GridWidget::draw(WINDOW* win, std::vector<std::vector<std::string>>& data,
             }
             // editing supersedes playback highlighter 
             if (row == cursorRow && col == cursorCol){state = CellState::Editing;}
+            if (state == CellState::Editing && !showCursor){state = CellState::NotSelected;}
             
             // Draw the cell
             assert (data.size() >= col);
@@ -207,38 +208,9 @@ void GUI::initGUI()
 void GUI::drawControlPanel(WINDOW* win){
     // wmove(win, 1, 1);
     werase(win);
-    // std::string cursorStatus = 
-    //     std::to_string(seqEditor->getCurrentSequence()) + ":" 
-    //     + std::to_string(seqEditor->getCurrentStep()) + "["
-    //     + std::to_string(sequencer->howManySteps(seqEditor->getCurrentSequence())) + "]";
-    
-    // // add the info about the current if editing a step 
-    // if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
-    //     int rowsInStep = sequencer->howManyStepDataRows(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-    //     cursorStatus += ":" + std::to_string(seqEditor->getCurrentStepRow()) + "[" + std::to_string(rowsInStep) + "]";
-    // }
+     std::vector<std::vector<std::string>> buttons = trackerController->getControlPanelAsGridOfStrings();
 
-    // std::string mode;
-    // switch(seqEditor->getEditMode()){
-    //     case SequencerEditorMode::configuringSequence:
-    //         mode = "Conf";
-    //         break;
-    //     case SequencerEditorMode::editingStep:
-    //         mode = "Step";
-    //         break;
-    //     case SequencerEditorMode::selectingSeqAndStep:
-    //         mode = "Seq";
-    //         break;
-    //     default:
-    //         break; 
-             
-    // }
-
-    // std::vector<std::vector<std::string>> buttons = {{cursorStatus}, {"> play"},{"[] stop"}, {mode}};
-    
-    std::vector<std::vector<std::string>> buttons = trackerController->getControlPanelAsGridOfStrings();
-
-    seqControlGrid.draw(win, buttons, 1, 6, 2, 0, std::vector<std::pair<int, int>>());
+    seqControlGrid.draw(win, buttons, 1, 6, 2, 0, std::vector<std::pair<int, int>>(), false);
 
     // wprintw(win, "[Button 1]  [Button 2]  [Button 3]");
     wrefresh(win);   

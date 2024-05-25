@@ -74,7 +74,7 @@ class GridWidget{
          * note that the first dimension of data is the 'column'
          * the second dimension is the row 
         */
-        void draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int rowsToDisplay, int colsToDisplay, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells);
+        void draw(WINDOW* win, std::vector<std::vector<std::string>>& data, int rowsToDisplay, int colsToDisplay, int cursorX, int cursorY, std::vector<std::pair<int, int>> highlightCells, bool showCursor=true);
         /** register for grid moving events*/
         void addGridListener(GridListener* listener);
 
