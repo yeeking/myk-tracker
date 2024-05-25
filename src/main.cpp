@@ -124,9 +124,23 @@ int main() {
             }
         }
         switch (ch) {
-            case ' ':
+            case 'R':
+                CommandProcessor::sendAllNotesOff();
                 sequencer.rewindToStart();
-                break;  
+                break;
+            case ' ':
+                CommandProcessor::sendAllNotesOff();
+                if (sequencer.isPlaying()){
+                    sequencer.stop();
+                }
+                else{
+                    sequencer.rewindToStart();
+                    sequencer.play();
+                }
+                
+                sequencer.rewindToStart();
+                break;
+                  
             case '\t':
                 editor.nextStep();
                 break;

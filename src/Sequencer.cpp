@@ -343,6 +343,17 @@ std::size_t Sequence::getTicksPerStep() const
   return this->originalTicksPerStep;
 }
 
+std::size_t Sequence::getNextTicksPerStep() const
+{
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  if (this->nextTicksPerStep == 0){
+    return this->originalTicksPerStep;
+  }
+  else {
+    return this->nextTicksPerStep;
+  }
+}
+    
 std::size_t Sequence::getCurrentStep() const
 {
   std::shared_lock<std::shared_mutex> lock(*rw_mutex);
@@ -523,7 +534,7 @@ void Sequence::rewindToStart()
 
 /////////////////////// Sequencer
 
-Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, triggerOnTick{true}
+Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{true}, triggerOnTick{true}
 {
   for (auto i = 0; i < seqCount; ++i)
   {
@@ -586,9 +597,16 @@ std::size_t Sequencer::getSequenceTicksPerStep(std::size_t sequence) const
   return sequences[sequence].getTicksPerStep();
 }
 
+std::size_t Sequencer::getSequencerNextTicksPerStep(std::size_t sequence) const
+{
+  return sequences[sequence].getNextTicksPerStep();
+}
+
+
 /** move the sequencer along by one tick */
 void Sequencer::tick()
 {
+  if (!playing) return; 
   for (Sequence &seq : sequences)
   {
     seq.tick(triggerOnTick);
@@ -819,11 +837,6 @@ double Sequencer::getStepDataAt(std::size_t seq, std::size_t step, std::size_t r
 //   sequences[seq].setStepDataAt(step, row, col, val);
 // }
 
-void Sequencer::toggleSequenceMute(std::size_t sequence)
-{
-  sequences[sequence].toggleMuteState();
-
-}
 
 std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrings()
 {
@@ -848,11 +861,17 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
       }
       if (p.stepCol == -1){ // config is sequence level not step
         // ticks
-        confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequenceTicksPerStep(seq)));    
+        confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequencerNextTicksPerStep(seq)));    
       }
     }
   }    
   return confGrid;
+}
+
+void Sequencer::toggleSequenceMute(std::size_t sequence)
+{
+  sequences[sequence].toggleMuteState();
+
 }
 
 
@@ -989,7 +1008,26 @@ void Sequencer::enableAllTriggers()
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
   triggerOnTick = true; 
 }
+
+/** stop playing*/
+void Sequencer::stop()
+{
+  playing = false; 
+}
+/** start playing */
+void Sequencer::play()
+{
+  playing = true; 
+}
+
+bool Sequencer::isPlaying()
+{
+  return playing; 
+}
+
 void Sequencer::rewindToStart()
 {
   for (Sequence& seq : sequences){seq.rewindToStart();}
 }
+
+

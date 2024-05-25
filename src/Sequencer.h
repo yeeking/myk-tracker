@@ -180,6 +180,8 @@ class Sequence{
     void setTicksPerStepAdjustment(std::size_t ticksPerStep);
     /** return my permanent ticks per step (not the adjusted one)*/
     std::size_t getTicksPerStep() const;
+    /** returns the upcoming ticks per step, in case you want the value sent to onZeroSetTicksPerStep */
+    std::size_t getNextTicksPerStep() const;
     /** apply a transpose to the sequence, which is reset when the sequence
      * hits step 0 again
      */
@@ -273,6 +275,7 @@ class Sequencer  {
       std::size_t getCurrentStep(std::size_t sequence) const;
       SequenceType getSequenceType(std::size_t sequence) const;
       std::size_t getSequenceTicksPerStep(std::size_t sequence) const;
+      std::size_t getSequencerNextTicksPerStep(std::size_t sequence) const;
 
       /** go to the next step. if disableAllTriggers has been called, will send false trigger to 
        * sequence objects, meaning they step without firing. 
@@ -321,12 +324,19 @@ class Sequencer  {
       std::size_t howManyStepDataRows(std::size_t seq, std::size_t step);
       /** returns the number of columns of data at the sent step (data is a rectangle)*/
       std::size_t howManyStepDataCols(std::size_t seq, std::size_t step);
-      /** a bit like a stop function - stops any steps from triggering on clock tick, though it will keep a' steppin*/
-      void disableAllTriggers();
-      /** a bit like a play function - re-enables triggering on all steps. */
-      void enableAllTriggers();
+
+      /** stop playing*/
+      void stop();
+      /** start playing */
+      void play();
+      bool isPlaying();
       /** on next 0 / 4 ticks, rewind all sequences to step 0. Use in combination with enableAllTriggers to play from the top. */
       void rewindToStart();
+      
+      /** allows a 'keep stepping but do not trigger' when tick is called*/
+      void disableAllTriggers();
+      /** allows normal stepping behaviour of sending true to tick functions on sequences */
+      void enableAllTriggers();
       
       /** toggle mute state of the sent sequence */
       void toggleSequenceMute(std::size_t sequence);
@@ -337,17 +347,16 @@ class Sequencer  {
       /** wipe the data from the sent sequence*/
       void resetSequence(std::size_t sequence);
 
+      /** get a vector of vector of strings representing the sequence. this is cached - call
+       * updateSeqStringGrid after making edits to the sequence as it will not automatically update
+       */
+      std::vector<std::vector<std::string>>& getSequenceAsGridOfStrings();
+      /** get a grid of strings representing configs for all sequences. This is generated on the fly*/
+      std::vector<std::vector<std::string>> getSequenceConfigsAsGridOfStrings();
 
-  /** get a vector of vector of strings representing the sequence. this is cached - call
-   * updateSeqStringGrid after making edits to the sequence as it will not automatically update
-   */
-     std::vector<std::vector<std::string>>& getSequenceAsGridOfStrings();
-     /** get a grid of strings representing configs for all sequences. This is generated on the fly*/
-     std::vector<std::vector<std::string>> getSequenceConfigsAsGridOfStrings();
-     
-     /** vector of vector of string representation of a step. This is generated on the fly*/
-     std::vector<std::vector<std::string>> getStepAsGridOfStrings(std::size_t seq, std::size_t step);
-     
+      /** vector of vector of string representation of a step. This is generated on the fly*/
+      std::vector<std::vector<std::string>> getStepAsGridOfStrings(std::size_t seq, std::size_t step);
+
       /** regenerate the string grid representation of the sequence */
       void updateSeqStringGrid();
       
@@ -379,11 +388,11 @@ class Sequencer  {
       /// class data members 
       /** makes reads and writes thread safe */
       std::unique_ptr<std::shared_mutex> rw_mutex;
-
-      /** if true, send trigger to sequences. note that tick also has a trigger
-       * argument. 
-      */
+      /** if false, ignore ticks. If true, do not ignore ticks */
+      bool playing; 
+      /** this value is sent to the tick call on our sequences. Allows 'step without triggering' behaviour  */
       bool triggerOnTick;
+
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
       std::vector<std::vector<std::string>> seqAsStringGrid;
