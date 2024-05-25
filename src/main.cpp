@@ -125,7 +125,7 @@ int main() {
         }
         switch (ch) {
             case ' ':
-
+                sequencer.rewindToStart();
                 break;  
             case '\t':
                 editor.nextStep();

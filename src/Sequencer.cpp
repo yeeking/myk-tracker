@@ -225,7 +225,7 @@ Sequence::Sequence(Sequencer *_sequencer,
     : sequencer{_sequencer}, currentStep{0},
       midiChannel{_midiChannel}, type{SequenceType::midiNote},
       transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, nextTicksPerStep{0}, ticksElapsed{0}, tickOfFour{0}, muted{false}, 
-      rw_mutex{std::make_unique<std::shared_mutex>()}
+      rw_mutex{std::make_unique<std::shared_mutex>()}, resetAtNextTick{false}
 // , midiScaleToDrum{MidiUtils::getScaleMidiToDrumMidi()}
 {
   currentLength = seqLength;
@@ -246,6 +246,12 @@ void Sequence::tick(bool trigger)
 {
   // write lock
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (resetAtNextTick){
+    tickOfFour = 0;
+    ticksElapsed = 0;
+    currentStep = 0; 
+    resetAtNextTick = false; 
+  }
   // std::cout << "Sequence::tick" << std::endl;
   ++ticksElapsed;
   tickOfFour = ++tickOfFour % 4;
@@ -303,86 +309,6 @@ void Sequence::resetStepRow(std::size_t step, std::size_t row)
   steps[step].resetRow(row);
 }
 
-void Sequence::triggerMidiNoteType()
-{
-  // // make a local copy
-  // Step s = steps[currentStep];
-  // // apply changes to local copy if needed
-  // if(transpose > 0)
-  // {
-  //   std::vector<std::vector<double>>* data = s.getDataDirect();//  s.getData();
-  //   if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
-  //   {
-  //     data->at(0).at(Step::note1Ind) = fmod(data->at(0).at(Step::note1Ind) + transpose, 127);
-  //   }
-  // }
-  // // trigger the local, adjusted copy of the step
-  // s.trigger();
-  // steps[currentStep].trigger();
-}
-
-void Sequence::triggerMidiDrumType()
-{
-  // // make a local copy
-  // Step s = steps[currentStep];
-  // // transpose the midi note into the drum domain
-  // std::vector<std::vector<double>>* data = s.getDataDirect();//  s.getData();
-  // data->at(0).at(Step::note1Ind) = midiScaleToDrum[(int) data->at(0).at(Step::note1Ind)];
-  // // apply changes to local copy if needed
-  // if(transpose > 0)
-  // {
-  //   if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
-  //   {
-  //     data->at(0).at(Step::note1Ind) = fmod(data->at(0).at(Step::note1Ind) + transpose, 127);
-  //   }
-  // }
-  // s.trigger();
-  // steps[currentStep].trigger();
-}
-
-void Sequence::triggerMidiChordType()
-{
-}
-
-void Sequence::triggerTransposeType()
-{
-  // if (steps[currentStep].isActive() )
-  // {
-  //   std::vector<std::vector<double>>* data = steps[currentStep].getDataDirect();
-  //   if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
-  //   {
-  //     sequencer->getSequence(data->at(0).at(Step::channelInd))->setTranspose(
-  //       fmod(data->at(0).at(Step::note1Ind), 12) );
-  //   }
-  // }
-}
-
-void Sequence::triggerLengthType()
-{
-  // //return;
-  // if (steps[currentStep].isActive())
-  // {
-  //   std::vector<std::vector<double>>* data = steps[currentStep].getDataDirect();
-  //   if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
-  //   {
-  //     sequencer->getSequence(data->at(0).at(Step::channelInd))->setLengthAdjustment(
-  //       fmod(data->at(0).at(Step::note1Ind), 12) );
-  //   }
-  // }
-}
-
-void Sequence::triggerTickType()
-{
-  // if (steps[currentStep].isActive() )
-  // {
-  //   std::vector<std::vector<double>>* data = steps[currentStep].getDataDirect();
-  //   if (data->at(0).at(Step::note1Ind) > 0 ) // only transpose non-zero steps
-  //   {
-  //     sequencer->getSequence(data->at(0).at(Step::channelInd))->setTicksPerStep(
-  //       fmod(data->at(0).at(Step::note1Ind), 6) );
-  //   }
-  // }
-}
 
 void Sequence::setLengthAdjustment(std::size_t lenAdjust)
 {
@@ -588,6 +514,12 @@ void Sequence::toggleMuteState()
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   muted = !muted;
 }
+
+void Sequence::rewindToStart()
+{
+  resetAtNextTick = true;  
+}
+
 
 /////////////////////// Sequencer
 
@@ -1059,5 +991,5 @@ void Sequencer::enableAllTriggers()
 }
 void Sequencer::rewindToStart()
 {
-
+  for (Sequence& seq : sequences){seq.rewindToStart();}
 }

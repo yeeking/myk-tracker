@@ -223,29 +223,10 @@ class Sequence{
     bool isMuted() const;
     /** change mote state to its opposite */
     void toggleMuteState();
+    /** tell the sequence to reset its position counter at next tick. Useful for rewinding*/
+    void rewindToStart();
   private:
 
-    /** function called when the sequence ticks and it is SequenceType::midiNote
-     * 
-    */
-    void triggerMidiNoteType(); 
-    /** function called when the sequence ticks and it is SequenceType::midiDrum*/
-    void triggerMidiDrumType();
-    /** function called when the sequence ticks and it is SequenceType::midiChord*/
-    void triggerMidiChordType();
-     
-    /** 
-     * Called when the sequence ticks and it is a transpose type SequenceType::transposer
-    */
-    void triggerTransposeType();
-    /**
-     * Called when the sequence ticks and it is SequenceType::lengthChanger
-     */
-    void triggerLengthType();
-    /**
-     * Called when the sequence ticks and it is SequenceType::tickChanger
-     */
-    void triggerTickType();
     /** provides access to the sequencer so this sequence can change things*/
     Sequencer* sequencer;
     /** current length. This is a std::size_tas we apply length adjustments to it that might be negative*/
@@ -265,6 +246,8 @@ class Sequence{
     std::size_t originalTicksPerStep;
     /** used to store a ticks per step update that will be applied next time tickoffour == 0*/
     std::size_t nextTicksPerStep; 
+    bool resetAtNextTick; 
+    
     std::size_t ticksElapsed;
     /** used to keep in sync with the '1'*/
     std::size_t tickOfFour;
