@@ -48,7 +48,7 @@ void PluginEditor::paint (juce::Graphics& g)
 
 void PluginEditor::resized()
 {
-    // This is generally where you'll want to lay out the positions of any
+    // This is generally where you'll want topip install tf-keras lay out the positions of any
     // subcomponents in your editor..
     int cPanelHeight = getHeight()/rowsInUI;
     controlPanelTable.setBounds(0, 0, getWidth(), cPanelHeight);

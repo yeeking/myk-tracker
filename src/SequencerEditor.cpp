@@ -170,27 +170,22 @@ void SequencerEditor::enterStepData(double value, int column)
     if (editMode == SequencerEditorMode::selectingSeqAndStep){
       currentStepRow = 0;
     }
-    // if the velocity is zero, we should set it to the same as the first step in this sequence 
 
     std::vector<std::vector<double>> firstStep = sequencer->getStepData(currentSequence, 0);
+  // set the vel, len and probability values for the 
+  // new step data to defaults if they are currently at zero 
     std::vector<int> cols = {Step::velInd, Step::lengthInd, Step::probInd};
     for (int col : cols){
-        // same for length
         if (data[currentStepRow][col] == 0){
           sequencer->setStepDataToDefault(currentSequence, currentStep, currentStepRow, col);
         }
     }
-   
-
-
     // apply octave if needed
     if (column == Step::noteInd){
       value = (12 * octave) + value; 
     }
     // assert we are not out of bounds for this value perhaps? 
     // Parameter param = CommandProcessor::getCommand(data[Step::cmdInd]).parameters[(int)column]; // -1 as the first col is the command which has no parameter
-
-    // std::cout << "editor main val " << value << " col is " << column << std::endl;//" setting default on col " << col << std::endl;
 
     // always used the mutex protected function to update the data 
     sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, column, value);

@@ -14,23 +14,23 @@ Step::Step() : rw_mutex{std::make_unique<std::shared_mutex>()}, active{true}
 /** returns a copy of the data stored in this step*/
 std::vector<std::vector<double>> Step::getData() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data;
 }
 double Step::getDataAt(std::size_t row, std::size_t col) const
 {
   // this lock allows multiple concorrent reads
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data[row][col];
 }
 std::size_t Step::howManyDataRows() const 
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data.size();
 }
 std::size_t Step::howManyDataCols() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return data[0].size();
 }
 
@@ -41,7 +41,7 @@ std::size_t Step::howManyDataCols() const
 
 std::string Step::toStringFlat() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   if (this->data[0][Step::noteInd] == 0){
     return "----";
   }
@@ -65,7 +65,7 @@ std::string Step::toStringFlat() const
 std::vector<std::vector<std::string>> Step::toStringGrid() const 
 {
 
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
 
   // each data sub vector should be on its own row
   //
@@ -105,12 +105,12 @@ std::vector<std::vector<std::string>> Step::toStringGrid() const
 
 void Step::activate()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   active = true;
 }
 void Step::deactivate()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   active = false;
 }
 
@@ -118,13 +118,13 @@ void Step::deactivate()
 void Step::setData(const std::vector<std::vector<double>> &_data)
 {
   // uni lock as writing data
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   this->data = std::move(_data); // copy it over
 }
 
 void Step::resetRow(std::size_t row)
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   assert(row < data.size());
   for (std::size_t col = 0; col < data[row].size(); ++col)
   {
@@ -136,7 +136,7 @@ void Step::resetRow(std::size_t row)
 void Step::setDataAt(std::size_t row, std::size_t col, double value)
 {
   // uni lock as writing data
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   assert(row < data.size());
   assert(col < data[row].size());
 
@@ -177,7 +177,7 @@ std::function<void(std::vector<std::vector<double>> *)> Step::getCallback()
 void Step::trigger(std::size_t row) 
 {
   // shared lock as reading
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   // std::cout << "Step::trigger" << std::endl;
   if (active)
   {
@@ -245,7 +245,7 @@ Sequence::Sequence(Sequencer *_sequencer,
 void Sequence::tick(bool trigger)
 {
   // write lock
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   
   ++ticksElapsed;
   tickOfFour = ++tickOfFour % 4;
@@ -321,14 +321,14 @@ void Sequence::setLengthAdjustment(std::size_t lenAdjust)
 
 void Sequence::setTicksPerStep(std::size_t tps)
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   this->originalTicksPerStep = tps;
   this->ticksElapsed = 0;
 }
 
 void Sequence::onZeroSetTicksPerStep(std::size_t _nextTicksPerStep)
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   this->nextTicksPerStep = _nextTicksPerStep;
 }
 
@@ -341,13 +341,13 @@ void Sequence::setTicksPerStepAdjustment(std::size_t tps)
 
 std::size_t Sequence::getTicksPerStep() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return this->originalTicksPerStep;
 }
 
 std::size_t Sequence::getNextTicksPerStep() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   if (this->nextTicksPerStep == 0){
     return this->originalTicksPerStep;
   }
@@ -358,7 +358,7 @@ std::size_t Sequence::getNextTicksPerStep() const
     
 std::size_t Sequence::getCurrentStep() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return currentStep;
 }
 bool Sequence::assertStep(std::size_t step) const
@@ -392,13 +392,13 @@ std::vector<std::vector<double>> Sequence::getCurrentStepData()
 }
 std::size_t Sequence::getLength() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return currentLength;
 }
 
 void Sequence::ensureEnoughStepsForLength(std::size_t length)
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   if (length > steps.size()) // bad need more steps
   {
     std::size_t toAdd = length - steps.size();
@@ -416,7 +416,7 @@ void Sequence::ensureEnoughStepsForLength(std::size_t length)
 }
 void Sequence::setLength(std::size_t length)
 {
-std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+// std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   if (length < 1)
     return;
   if (length > steps.size())
@@ -451,7 +451,7 @@ std::string Sequence::stepToString(std::size_t step)
 
 std::size_t Sequence::howManySteps() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   // return steps.size();
   //  case where length adjust is too high
   // if (currentLength + lengthAdjustment >= steps.size()) return currentLength;
@@ -499,7 +499,7 @@ std::string Sequence::stepToStringFlat(std::size_t step)
 
 void Sequence::reset()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
   for (Step &step : steps)
   {
@@ -518,13 +518,13 @@ std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(std::size_t 
 
 bool Sequence::isMuted() const
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return muted;
 }
 /** change mote state to its opposite */
 void Sequence::toggleMuteState()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   muted = !muted;
 }
 
@@ -556,6 +556,8 @@ Sequencer::~Sequencer()
 
 void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   // ignore if diff sizes
   assert(otherSeq->sequences.size() == this->sequences.size());
   // if (otherSeq->sequences.size() != this->sequences.size()) return;
@@ -608,6 +610,8 @@ std::size_t Sequencer::getSequencerNextTicksPerStep(std::size_t sequence) const
 /** move the sequencer along by one tick */
 void Sequencer::tick()
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   if (!playing) return; 
   for (Sequence &seq : sequences)
   {
@@ -617,6 +621,8 @@ void Sequencer::tick()
 
 void Sequencer::triggerStep(std::size_t seq, std::size_t step, std::size_t row)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   sequences[seq].triggerStep(step, row);
 }
 
@@ -627,50 +633,37 @@ Sequence *Sequencer::getSequence(std::size_t sequence)
 
 void Sequencer::setSequenceType(std::size_t sequence, SequenceType type)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   sequences[sequence].setType(type);
 }
 
 void Sequencer::setSequenceLength(std::size_t sequence, std::size_t length)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   sequences[sequence].setLength(length);
 }
 
 void Sequencer::shrinkSequence(std::size_t sequence)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   sequences[sequence].setLength(sequences[sequence].getLength() - 1);
 }
 void Sequencer::extendSequence(std::size_t sequence)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   sequences[sequence].ensureEnoughStepsForLength(sequences[sequence].getLength() + 1);
   sequences[sequence].setLength(sequences[sequence].getLength() + 1);
-}
-
-void Sequencer::setAllCallbacks(std::function<void(std::vector<std::vector<double>> *)> callback)
-{
-  for (std::size_t seq = 0; seq < sequences.size(); ++seq)
-  {
-    setSequenceCallback(seq, callback);
-  }
-}
-
-/** set a callback for all steps in a sequence*/
-void Sequencer::setSequenceCallback(std::size_t sequence, std::function<void(std::vector<std::vector<double>> *)> callback)
-{
-  for (std::size_t step = 0; step < sequences[sequence].howManySteps(); ++step)
-  {
-    sequences[sequence].setStepCallback(step, callback);
-  }
-}
-
-/** set a lambda to call when a particular step in a particular sequence happens */
-void Sequencer::setStepCallback(std::size_t sequence, std::size_t step, std::function<void(std::vector<std::vector<double>> *)> callback)
-{
-  sequences[sequence].setStepCallback(step, callback);
 }
 
 /** update the data stored at a step in the sequencer */
 void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   if (!assertSeqAndStep(sequence, step))
     return;
   sequences[sequence].setStepData(step, data);
@@ -679,39 +672,28 @@ void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<
  * stored at a step in the sequencer */
 void Sequencer::setStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col, double value)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
   if (!assertSeqAndStep(sequence, step))
     return;
   sequences[sequence].setStepDataAt(step, row, col, value);
 }
 
-/** retrieve the data for the current step */
-std::vector<std::vector<double>> Sequencer::getCurrentStepData(std::size_t sequence)
-{
-  if (sequence >= sequences.size() || sequence < 0)
-    return std::vector<std::vector<double>>{};
-
-  return sequences[sequence].getCurrentStepData();
-}
-
 std::size_t Sequencer::howManyStepDataRows(std::size_t seq, std::size_t step)
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return sequences[seq].howManyStepDataRows(step);
 }
 std::size_t Sequencer::howManyStepDataCols(std::size_t seq, std::size_t step)
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   return sequences[seq].howManyStepDataCols(step);
 }
 
-// Step* Sequencer::getStep(std::size_t seq, std::size_t step)
-// {
-//   if (!assertSeqAndStep(seq, step)) assert(false); // hard crash for that, sorry
-
-//   return sequences[seq].getStep(step);
-// }
-
-/** retrieve the data for a specific step */
+/** retrieve a copy of the data for a specific step */
 std::vector<std::vector<double>> Sequencer::getStepData(std::size_t sequence, std::size_t step)
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
   if (!assertSeqAndStep(sequence, step))
     return std::vector<std::vector<double>>{};
   return sequences[sequence].getStepData(step);
@@ -727,14 +709,17 @@ std::vector<std::vector<double>> Sequencer::getStepData(std::size_t sequence, st
 
 void Sequencer::toggleStepActive(std::size_t sequence, std::size_t step)
 {
-  if (!assertSeqAndStep(sequence, step))
-    return;
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
+  // if (!assertSeqAndStep(sequence, step))
+    // return;
   sequences[sequence].toggleActive(step);
 }
 bool Sequencer::isStepActive(std::size_t sequence, std::size_t step) const
 {
-  if (!assertSeqAndStep(sequence, step))
-    return false;
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  // if (!assertSeqAndStep(sequence, step))
+    // return false;
   return sequences[sequence].isStepActive(step);
 }
 void Sequencer::addStepListener()
@@ -744,8 +729,7 @@ void Sequencer::addStepListener()
 
 void Sequencer::resetSequence(std::size_t sequence)
 {
-  if (!assertSequence(sequence))
-    return;
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   sequences[sequence].reset();
 }
 
@@ -757,6 +741,7 @@ void Sequencer::resetStepRow(std::size_t sequence, std::size_t step, std::size_t
 
 bool Sequencer::assertSeqAndStep(std::size_t sequence, std::size_t step) const
 {
+
   if (!assertSequence(sequence))
     return false;
   if (!sequences[sequence].assertStep(step))
@@ -766,6 +751,8 @@ bool Sequencer::assertSeqAndStep(std::size_t sequence, std::size_t step) const
 
 bool Sequencer::assertSequence(std::size_t sequence) const
 {
+// std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+
   if (sequence >= sequences.size() || sequence < 0)
   {
     return false;
@@ -775,7 +762,7 @@ bool Sequencer::assertSequence(std::size_t sequence) const
 
 void Sequencer::updateSeqStringGrid()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock 
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
   std::vector<std::vector<std::string>> gridView;
   // need to get the data in the sequences, convert it to strings and
@@ -826,23 +813,19 @@ std::vector<std::vector<std::string>> &Sequencer::getSequenceAsGridOfStrings()
 }
 std::vector<std::vector<std::string>> Sequencer::getStepAsGridOfStrings(std::size_t seq, std::size_t step)
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
   return sequences[seq].stepAsGridOfStrings(step);
 }
 
 double Sequencer::getStepDataAt(std::size_t seq, std::size_t step, std::size_t row, std::size_t col)
 {
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
   return sequences[seq].getStepDataAt(step, row, col);
 }
 
-// void Sequencer::setStepDataAt(std::size_t seq, std::size_t step, std::size_t row, std::size_t col, double val)
-// {
-//   sequences[seq].setStepDataAt(step, row, col, val);
-// }
-
-
 std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrings()
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
+  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
 
   // editable config items for a sequence:
 // - set channel for all steps
@@ -872,8 +855,8 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
 
 void Sequencer::toggleSequenceMute(std::size_t sequence)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   sequences[sequence].toggleMuteState();
-
 }
 
 
@@ -896,7 +879,7 @@ void Sequencer::setupSeqConfigSpecs()
 
 void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
 
   assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
@@ -925,7 +908,7 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
 }
 void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
 
   assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
@@ -1002,12 +985,12 @@ void Sequencer::setStepDataToDefault(std::size_t sequence, std::size_t step, std
 
 void Sequencer::disableAllTriggers()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
   triggerOnTick = false;   
 }
 void Sequencer::enableAllTriggers()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
   triggerOnTick = true; 
 }
 

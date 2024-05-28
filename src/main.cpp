@@ -118,6 +118,7 @@ int main() {
                 break; 
             }
         }
+        // do the length keys
         for (int i=0;i<lenKeys.size();++i){
             if (lenKeys[i] == ch){
                 editor.enterStepData(i+1, Step::lengthInd);
