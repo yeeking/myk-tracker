@@ -203,12 +203,21 @@ void SequencerEditor::enterStepData(double value, int column)
 /** Increase the octave offset applied when entering notes  */
 void SequencerEditor::incrementOctave()
 {
-  if (octave < 9) octave ++;  
+  if (octave < 9) octave ++;
+  double note = sequencer->getStepDataAt(currentSequence, currentStep, 0, Step::noteInd);
+  // this will automatically apply the octave shift  to the note 
+  std::cout << "dec octave sending note " << note << std::endl;
+  enterStepData(note, Step::noteInd);
+
 }
 /** decrease the octave offset applied when entering notes  */
 void SequencerEditor::decrementOctave()
 {
-  if (octave > 1) octave --;    
+  if (octave > 1) octave --;   
+  // this will automatically apply the octave shift  to the note 
+  double note = sequencer->getStepDataAt(currentSequence, currentStep, 0, Step::noteInd);
+  std::cout << "dec octave sending note " << note << std::endl;
+  enterStepData(note, Step::noteInd); 
 }
 
 /**
@@ -222,8 +231,8 @@ void SequencerEditor::enterDataAtCursor(double note)
       editMode == SequencerEditorMode::selectingSeqAndStep)
   {
     // work out which data row we are editing
-    int dataRow = 0;// default to first row in sequencer view
-    int dataCol = Step::noteInd;// default to note in sequencer view
+    size_t dataRow = 0;// default to first row in sequencer view
+    size_t dataCol = Step::noteInd;// default to note in sequencer view
     if (editMode == SequencerEditorMode::editingStep){
       // can be different in step view
       dataRow = currentStepRow;

@@ -138,15 +138,15 @@ public:
 private:
   Sequencer *sequencer;
   /** which sequence*/
-  int currentSequence;
+  size_t currentSequence;
   /** which step */
-  int currentStep;
+  size_t currentStep;
   /** which row in a step */
-  int currentStepRow;
+  size_t currentStepRow;
   /** which data point inside a step*/
-  int currentStepCol;
+  size_t currentStepCol;
   /** which sequence param are you editing?*/
-  int currentSeqParam; 
+  size_t currentSeqParam; 
 
   SequencerEditorMode editMode;
   SequencerEditorSubMode editSubMode;

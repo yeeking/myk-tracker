@@ -154,6 +154,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
                 audioProcessor.getSequencer()->rewindAtNextZero();
                 audioProcessor.getSequencer()->play();
             }
+            break;
         case '\t':
             seqEditor->nextStep();
             break;
@@ -183,7 +184,8 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
 
         case ',':
            seqEditor->decrementOctave();
-            break;
+           
+           break;
 
         case '.':
            seqEditor->incrementOctave();
@@ -240,7 +242,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             //   }
             // }
             // Handle arrow and other non character keys
-            if (key.isKeyCode(juce::KeyPress::deleteKey)) {
+            if (key.isKeyCode(juce::KeyPress::backspaceKey)) {
                 seqEditor->resetAtCursor();
                 CommandProcessor::sendAllNotesOff();
                 break;
