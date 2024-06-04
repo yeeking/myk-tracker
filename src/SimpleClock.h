@@ -103,18 +103,21 @@ class SimpleClock  : public ClockAbs
     }
     
   private:
-    std::unique_ptr<std::shared_mutex> rw_mutex;
 
     static long getNow()
     {
       return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     }
-    double bpm;
+    std::unique_ptr<std::shared_mutex> rw_mutex;
+
     // long intervalMs;
     long sleepTimeMs; // lower means more precision in the timing
     bool running;     
-    std::thread* tickThread {nullptr};
     std::function<void()> callback;
     long currentTick;
+    double bpm;
+
+    std::thread* tickThread {nullptr};
+
 };
 

@@ -297,12 +297,7 @@ class Sequencer  {
       void shrinkSequence(std::size_t sequence);
       /** increase the length of the sequence by 1, adding new steps in memory if needed, as per setSequenceLength*/
       void extendSequence(std::size_t sequence);
-      /** set all callbacks on all sequences to the sent lambda*/
-      void setAllCallbacks(std::function<void (std::vector<std::vector<double>>*)> callback);
-      /** set a callback lambda for all steps in a sequence*/
-      void setSequenceCallback(std::size_t sequence, std::function<void (std::vector<std::vector<double>>*)> callback);
-      /** set a lambda to call when a particular step in a particular sequence happens */
-      void setStepCallback(std::size_t sequence, std::size_t step, std::function<void (std::vector<std::vector<double>>*)> callback);
+      // void setStepCallback(std::size_t sequence, std::size_t step, std::function<void (std::vector<std::vector<double>>*)> callback);
       /** update the data stored at a step in the sequencer */
       void setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data);
       /** return the sent seq, sent step, sent row, sent col's value */
@@ -311,10 +306,6 @@ class Sequencer  {
       void setStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col, double value);
       /** set all values for this seq, step, row to zero */
       void resetStepRow(std::size_t sequence, std::size_t step, std::size_t row);
-      /** retrieve a copy the data for the current step */
-      std::vector<std::vector<double>> getCurrentStepData(std::size_t sequence);
-      /** returns a pointer to the step object stored at the sent sequence and step position */
-      // Step* getStep(std::size_t seq, std::size_t step);
       /** retrieve a copy of the data for a specific step */
       std::vector<std::vector<double>> getStepData(std::size_t sequence, std::size_t step);
       /** set the sent seq, sent step, sent row, sent col's value */
