@@ -201,8 +201,9 @@ void SequencerEditor::incrementOctave()
   if (octave < 9) octave ++;
   double note = sequencer->getStepDataAt(currentSequence, currentStep, 0, Step::noteInd);
   // this will automatically apply the octave shift  to the note 
-  std::cout << "dec octave sending note " << note << std::endl;
-  enterStepData(note, Step::noteInd);
+  std::cout << "TODO: inc octave needs to pull note down an octave sending note " << note << std::endl;
+  // 
+  // enterStepData(note, Step::noteInd);
 
 }
 /** decrease the octave offset applied when entering notes  */
@@ -211,8 +212,8 @@ void SequencerEditor::decrementOctave()
   if (octave > 1) octave --;   
   // this will automatically apply the octave shift  to the note 
   double note = sequencer->getStepDataAt(currentSequence, currentStep, 0, Step::noteInd);
-  std::cout << "dec octave sending note " << note << std::endl;
-  enterStepData(note, Step::noteInd); 
+  std::cout << "TODO: dec octave sending note " << note << std::endl;
+  // enterStepData(note, Step::noteInd); 
 }
 
 /**
