@@ -50,7 +50,7 @@ void PluginEditor::resized()
 {
     // This is generally where you'll want topip install tf-keras lay out the positions of any
     // subcomponents in your editor..
-    int cPanelHeight = getHeight()/rowsInUI;
+    int cPanelHeight = getHeight() / static_cast<int>(rowsInUI);
     controlPanelTable.setBounds(0, 0, getWidth(), cPanelHeight);
     seqViewTable.setBounds(0, 0 + cPanelHeight, getWidth(), getHeight() - cPanelHeight);
    
@@ -105,7 +105,7 @@ void PluginEditor::prepareStepView()
     // std::vector<std::vector<std::string>> grid = step->toStringGrid();
     std::vector<std::pair<int, int>> playHeads;
     if (sequencer->getCurrentStep(seqEditor->getCurrentSequence()) == seqEditor->getCurrentStep()){
-        int cols = sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        int cols = static_cast<int>(sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep()));
         for (int col=0;col<cols;++col){
             playHeads.push_back(std::pair(col, 0));
         }
@@ -153,6 +153,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             else{
                 audioProcessor.getSequencer()->rewindAtNextZero();
                 audioProcessor.getSequencer()->play();
+
             }
             break;
         case '\t':
@@ -217,9 +218,9 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             break;
 
         default:
-            char ch = key.getTextCharacter();
+            char ch = static_cast<char>(key.getTextCharacter()); // sketch as converting wchar unicode to char... 
             std::map<char, double> key_to_note = MidiUtilsAbs::getKeyboardToMidiNotes(0);
-            for (const std::pair<char, double>& key_note : key_to_note)
+            for (const std::pair<const char, double>& key_note : key_to_note)
             {
               if (ch == key_note.first){ 
                 // key_note_match = true;

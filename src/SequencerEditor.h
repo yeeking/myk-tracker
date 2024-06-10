@@ -9,7 +9,7 @@
 enum class SequencerEditorMode
 {
   selectingSeqAndStep,
-  settingSeqLength,
+  // settingSeqLength,// deprecate as set length happens in selectedSeqAndStep mode now
   configuringSequence,
   editingStep
 };
@@ -46,7 +46,7 @@ public:
     // -> enterNumberData
     // -> enterLengthData 
 
-  void enterStepData(double value, int column);
+  void enterStepData(double value, int column, bool applyOctave = true);
 
   /** cycle through the edit modes in the sequence:
    * settingSeqLength (start mode)
@@ -116,15 +116,15 @@ public:
   void decrementTicksPerStep();
   static void nextSequenceType(Sequencer *seqr, unsigned int sequence);
   /** returns the index of the sequence that the editor is currently focused on*/
-  int getCurrentSequence() const;
+  size_t getCurrentSequence() const;
   /** returns the index of the step that the editor is currently focused on*/
-  int getCurrentStep() const;
+  size_t getCurrentStep() const;
   /** which data point in a step are we editing */
-  int getCurrentStepRow() const;
+  size_t getCurrentStepRow() const;
   /** which data point in a step are we editing */
-  int getCurrentStepCol() const;
+  size_t getCurrentStepCol() const;
   /** which seq param index are we editing? */
-  int getCurrentSeqParam() const; 
+  size_t getCurrentSeqParam() const; 
   /** move the cursor to a specific sequence*/
   void setCurrentSequence(int seq);
   /** move the cursor to a specific step*/

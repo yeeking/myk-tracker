@@ -19,10 +19,11 @@ PluginProcessor::PluginProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       ), elapsedSamples{0}, 
+                       ), 
                        sequencer{16, 8}, seqEditor{&sequencer}, 
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
+                       elapsedSamples{0},maxHorizon{44100 * 3600}, 
                        samplesPerTick{44100/(120/60)/8}, bpm{120}
 #endif
 {
@@ -147,13 +148,16 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    unsigned long blockStartSample = elapsedSamples;
-    unsigned long blockEndSample = elapsedSamples + (unsigned long) getBlockSize();
+    int blockStartSample = elapsedSamples;
+    int blockEndSample = (elapsedSamples + getBlockSize()) % maxHorizon;
     for (int i=0;i<getBlockSize(); ++i){
-        elapsedSamples ++;
+        // weird but since juce midi sample offsets are int not unsigned long, 
+        // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
+        // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
+        elapsedSamples = (++elapsedSamples) % maxHorizon;
         if (elapsedSamples % samplesPerTick == 0){
-            // tick is from the clockabs interface and it keeps track of the absolute tick 
-            this->tick(); // 
+            // tick is from the clockabs class and it keeps track of the absolute tick 
+            this->tick(); 
             // this will cause any pending messages to be added to 'midiToSend'
             sequencer.tick();
         }
@@ -163,27 +167,37 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // to midiMessages, but with an offset value within this block
     
     juce::MidiBuffer futureMidi;    // store messages from midiToSend from the future here. 
-    juce::MidiBuffer::Iterator iterator(midiToSend);
     juce::MidiMessage message;
-    int samplePosition;
-    while (iterator.getNextEvent(message, samplePosition)) {
-        // std::cout << "msg samplepos " << samplePosition << " block end " << blockEndSample << std::endl;
-        if ((unsigned long)samplePosition <= blockEndSample) {
-            // fix it to be an offset within the current block
-            // 
-            // std::cout << "play now" << std::endl;
-            midiMessages.addEvent(message, (unsigned long) samplePosition - blockStartSample);
+    // int samplePosition;
+    for (const MidiMessageMetadata metadata : midiToSend){
+        if (blockEndSample < blockStartSample){// we wrapped block end back around 
+            DBG("processBlock wrapped events");
+
+            // after block start or before block end (as block end is before block start due to wrap around)
+            if ( metadata.samplePosition >= blockStartSample ||  
+                metadata.samplePosition < blockEndSample) {
+                midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
+            }
+            else{// it is in the future            
+                futureMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
+            }
         }
-        else{// it is in the future 
-            // std::cout << "adding future event at " << message.getTimeStamp() << ":--- " << message.getDescription() << std::endl;
-            futureMidi.addEvent(message, samplePosition);
+        if (blockStartSample < blockEndSample){
+            // normal case where block start is before block end as no wrap has occurred. 
+            if ( metadata.samplePosition >= blockStartSample && 
+                metadata.samplePosition < blockEndSample) {
+                DBG("Event this block " << metadata.samplePosition - blockStartSample);
+
+                midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
+            }
+            else{// it is in the future            
+
+                futureMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
+            }
         }
     }
-    // std::cout << "future " << futureMidi.getNumEvents() << " present " << midiMessages.getNumEvents() << std::endl;
-    // now put the future midi temp buffer into midiToSend for future sending!
     midiToSend.clear();
     midiToSend.swapWith(futureMidi);
-
 }
 
 //==============================================================================
@@ -238,17 +252,20 @@ TrackerController* PluginProcessor::getTrackerController()
 void PluginProcessor::allNotesOff()
 {
     for (int chan = 1; chan < 17; ++chan){
-        midiToSend.addEvent(MidiMessage::allNotesOff(chan), elapsedSamples);
+        midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
 }
 void PluginProcessor::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick)
 {
     channel ++; // channels come in 0-15 but we want 1-16
-    long offSample =  samplesPerTick * offTick;
-    // std::cout << "playSingleNote " << channel << "," << note << "," << velocity << " on " << elapsedSamples << " offtick " << offTick << " off sample " << offSample <<  std::endl;  
-
+    // offtick is an absolute tick from the start of time 
+    // but we have a max horizon which is how far in the future we can set things 
+    int offSample =  (samplesPerTick * static_cast<int>(offTick)) % maxHorizon;
+    DBG("playSingleNote note start/ end " << elapsedSamples << " -> " << offSample);
     // generate a note on and a note off 
+    // note on is right now 
     midiToSend.addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);
+    // note off is now + length 
     midiToSend.addEvent(MidiMessage::noteOff((int)channel, (int)note, (uint8)velocity), offSample);
     
 }
@@ -272,4 +289,10 @@ void PluginProcessor::setBPM(double _bpm)
 double PluginProcessor::getBPM()
 {
     return bpm;
+}
+
+
+void PluginProcessor::clearPendingEvents()
+{
+    midiToSend.clear();
 }

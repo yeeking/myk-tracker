@@ -72,14 +72,15 @@ public:
     //==============================================================================
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
-
+    /** wipes midiToSend  */
+    void clearPendingEvents();
 
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
     TrackerController* getTrackerController();
     
 private:
-    unsigned long elapsedSamples;
+ 
     Sequencer sequencer;
   /** keep the seq editor in the processor as the plugineditor
      * can be deleted but the processor persists and we want to retain state on the seqeditor
@@ -87,10 +88,15 @@ private:
     SequencerEditor seqEditor; 
     /** as for the seqeditor, this is here for easy statefulness*/
     TrackerController trackerController;
-    
+    juce::MidiBuffer midiToSend; 
+
+
+    // unsigned long elapsedSamples;
+    /** position between 0 and maxHorizon */
+    int elapsedSamples;
+    int maxHorizon;   
     unsigned int samplesPerTick; 
     double bpm; 
-    juce::MidiBuffer midiToSend; 
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
