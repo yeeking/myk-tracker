@@ -186,8 +186,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             // normal case where block start is before block end as no wrap has occurred. 
             if ( metadata.samplePosition >= blockStartSample && 
                 metadata.samplePosition < blockEndSample) {
-                DBG("Event this block " << metadata.samplePosition - blockStartSample);
-
+                // DBG("Event this block " << metadata.samplePosition - blockStartSample);
                 midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
             }
             else{// it is in the future            
@@ -251,6 +250,7 @@ TrackerController* PluginProcessor::getTrackerController()
 
 void PluginProcessor::allNotesOff()
 {
+    midiToSend.clear();// remove anything that's hanging around. 
     for (int chan = 1; chan < 17; ++chan){
         midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }

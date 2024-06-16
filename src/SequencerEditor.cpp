@@ -327,6 +327,8 @@ void SequencerEditor::moveCursorLeft()
 
   case SequencerEditorMode::selectingSeqAndStep:
   {
+    if (currentSequence == 0) return; 
+
     currentSequence -= 1;
     if (currentSequence < 0)
       currentSequence = 0;
@@ -340,6 +342,7 @@ void SequencerEditor::moveCursorLeft()
     // decrementStepData(data, sequencer->getSequenceType(currentSequence));
     // writeStepData(data);
     // move left to previous column in the step data
+    if (currentStepCol == 0) return; 
     currentStepCol --;
     if (currentStepCol < 0) currentStepCol = 0;
     break;
@@ -349,6 +352,7 @@ void SequencerEditor::moveCursorLeft()
     // increment the value of the currently selected
     // parameter (channel, sequence type,ticks per second)
     // incrementSeqConfigParam();
+    if (currentSequence == 0) return; 
     currentSequence -= 1;
     if (currentSequence < 0)
       currentSequence = 0;
