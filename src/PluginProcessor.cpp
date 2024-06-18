@@ -172,7 +172,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // int samplePosition;
     for (const MidiMessageMetadata metadata : midiToSend){
         if (blockEndSample < blockStartSample){// we wrapped block end back around 
-            DBG("processBlock wrapped events");
+            // DBG("processBlock wrapped events");
 
             // after block start or before block end (as block end is before block start due to wrap around)
             if ( metadata.samplePosition >= blockStartSample ||  
@@ -188,7 +188,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             // normal case where block start is before block end as no wrap has occurred. 
             if ( metadata.samplePosition >= blockStartSample && 
                 metadata.samplePosition < blockEndSample) {
-                DBG("Event this block " << metadata.samplePosition - blockStartSample);
+                // DBG("Event this block " << metadata.samplePosition - blockStartSample);
                 midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
             }
             else{// it is in the future            
@@ -265,7 +265,7 @@ void PluginProcessor::playSingleNote(unsigned short channel, unsigned short note
     // offtick is an absolute tick from the start of time 
     // but we have a max horizon which is how far in the future we can set things 
     int offSample =  elapsedSamples +  (samplesPerTick * static_cast<int>(durInTicks)) % maxHorizon;
-    DBG("playSingleNote note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
+    // DBG("playSingleNote note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
     // generate a note on and a note off 
     // note on is right now 
     midiToSend.addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);
