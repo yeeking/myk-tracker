@@ -24,7 +24,8 @@ PluginProcessor::PluginProcessor()
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
                        elapsedSamples{0},maxHorizon{44100 * 3600}, 
-                       samplesPerTick{44100/(120/60)/8}, bpm{120}
+                       samplesPerTick{44100/(120/60)/8}, bpm{120}, 
+                       outstandingNoteOffs{0}
 #endif
 {
     
@@ -181,18 +182,21 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             else{// it is in the future            
                 futureMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
             }
+            if (metadata.getMessage().isNoteOff()) outstandingNoteOffs --;
         }
         if (blockStartSample < blockEndSample){
             // normal case where block start is before block end as no wrap has occurred. 
             if ( metadata.samplePosition >= blockStartSample && 
                 metadata.samplePosition < blockEndSample) {
-                // DBG("Event this block " << metadata.samplePosition - blockStartSample);
+                DBG("Event this block " << metadata.samplePosition - blockStartSample);
                 midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
             }
             else{// it is in the future            
 
                 futureMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
             }
+            if (metadata.getMessage().isNoteOff()) outstandingNoteOffs --;
+
         }
     }
     midiToSend.clear();
@@ -255,19 +259,20 @@ void PluginProcessor::allNotesOff()
         midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
 }
-void PluginProcessor::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick)
+void PluginProcessor::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks)
 {
     channel ++; // channels come in 0-15 but we want 1-16
     // offtick is an absolute tick from the start of time 
     // but we have a max horizon which is how far in the future we can set things 
-    int offSample =  (samplesPerTick * static_cast<int>(offTick)) % maxHorizon;
-    DBG("playSingleNote note start/ end " << elapsedSamples << " -> " << offSample);
+    int offSample =  elapsedSamples +  (samplesPerTick * static_cast<int>(durInTicks)) % maxHorizon;
+    DBG("playSingleNote note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
     // generate a note on and a note off 
     // note on is right now 
     midiToSend.addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);
     // note off is now + length 
     midiToSend.addEvent(MidiMessage::noteOff((int)channel, (int)note, (uint8)velocity), offSample);
-    
+    // assert()
+    outstandingNoteOffs ++ ;
 }
 void PluginProcessor::sendQueuedMessages(long tick)
 {

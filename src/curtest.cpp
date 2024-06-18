@@ -181,7 +181,7 @@ int main(){
 	// 	// GridWidget grid(3, 3);
 SimpleClock clock;
 CommandProcessor::assignMasterClock(&clock);
-MidiUtils midi;
+MidiUtils midi{&clock};
 CommandProcessor::assignMidiUtils(&midi);
 
 

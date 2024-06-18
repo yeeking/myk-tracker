@@ -56,7 +56,7 @@ void handle_sigint(int sig) {
 int main() {
     SimpleClock seqClock;
     SimpleClock guiClock;
-    MidiUtils midiUtils;
+    MidiUtils midiUtils{&seqClock};
     midiUtils.interactiveInitMidi();
 
     CommandProcessor::assignMasterClock(&seqClock);

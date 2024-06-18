@@ -63,7 +63,7 @@ void MidiQueue::clearAllMessages()
 // start of MidiUtils
 //////////////////////
 
-MidiUtils::MidiUtils() : portReady{false}, panicMode{false}
+MidiUtils::MidiUtils(SimpleClock* _clock) : clock{_clock}, portReady{false}, panicMode{false}
 {
     try{
         midiout = new RtMidiOut();
@@ -157,7 +157,7 @@ void MidiUtils::allNotesOff()
     panicMode = false;
 }
 
-void MidiUtils::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) 
+void MidiUtils::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) 
 {
     if (panicMode) return;
     if (!portReady) return;
@@ -171,6 +171,7 @@ void MidiUtils::playSingleNote(unsigned short channel, unsigned short note, unsi
     // std::cout << "playSingleNote " << message[1] << "off "<< offTick << std::endl;
 
     midiout->sendMessage(&message);
+    long offTick = clock->getCurrentTick() + durInTicks;
     queueNoteOff(channel, note, offTick);
 }
 

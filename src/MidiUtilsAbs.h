@@ -10,7 +10,7 @@ class MidiUtilsAbs{
         /** play a note - would generally trigger a note on now
          * and schedule a note off for later
          */
-        virtual void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) = 0;
+        virtual void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
         /**
          * send any queued notes, e.g. note offs 
          * q'd by playSingleNote

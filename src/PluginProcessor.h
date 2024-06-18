@@ -33,7 +33,7 @@ public:
 
     // the MidiUtils interface 
     void allNotesOff() override;
-    void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) override; 
+    void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
     void sendQueuedMessages(long tick) override; 
     // the ClockAbs interface
     void setBPM(double bpm) override; 
@@ -80,7 +80,6 @@ public:
     TrackerController* getTrackerController();
     
 private:
- 
     Sequencer sequencer;
   /** keep the seq editor in the processor as the plugineditor
      * can be deleted but the processor persists and we want to retain state on the seqeditor
@@ -97,6 +96,7 @@ private:
     int maxHorizon;   
     unsigned int samplesPerTick; 
     double bpm; 
+    int outstandingNoteOffs;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)

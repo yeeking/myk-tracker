@@ -95,8 +95,13 @@ void CommandProcessor::initialiseCommands() {
                     if (random_number < (*stepData)[Step::probInd]){ 
                         double now = CommandData::masterClock->getCurrentTick();
                         // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
-                        CommandData::midiUtils->playSingleNote((int) (*stepData)[Step::chanInd],(int) (*stepData)[Step::noteInd], (int) (*stepData)[Step::velInd], 
-                        (long) ((*stepData)[Step::lengthInd]+now));
+                        CommandData::midiUtils->playSingleNote(
+                            static_cast<unsigned short> ((*stepData)[Step::chanInd]),
+                            static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
+                            static_cast<unsigned short> ((*stepData)[Step::velInd]), 
+                            // (long) ((*stepData)[Step::lengthInd]+now)
+                            static_cast<unsigned short> ((*stepData)[Step::lengthInd])
+                        );
                     }
                 }
                 

@@ -22,6 +22,7 @@
 #include <thread> // std::this_thread::sleep_for
 #include <chrono> // std::chrono::seconds
 #include "MidiUtilsAbs.h"
+#include "SimpleClock.h"
 
 typedef std::vector<unsigned char> MidiMessage;
 typedef std::vector<MidiMessage> MidiMessageVector;
@@ -55,7 +56,7 @@ private:
 class MidiUtils : public MidiUtilsAbs
 {
 public:
-  MidiUtils();
+  MidiUtils(SimpleClock* clock);
   ~MidiUtils();
   /** stores the midi out port */
   RtMidiOut *midiout;
@@ -74,7 +75,7 @@ public:
   void allNotesOff() override;
 
   /** play a note */
-  void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, long offTick) override; 
+  void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
 
   /** send any messages that are due to be sent at the sent tick
    * generally this means note offs.
@@ -82,6 +83,7 @@ public:
   void sendQueuedMessages(long tick) override;
   bool portIsReady() const;
 private:
+  SimpleClock* clock;
   bool portReady;
   MidiQueue midiQ;
   bool panicMode;
