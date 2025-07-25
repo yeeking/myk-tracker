@@ -2,7 +2,7 @@
 #include "StringTable.h"
 
 StringTable::StringTable()
-: rw_mutex{std::make_unique<std::shared_mutex>()}, tableData{std::vector<std::vector<std::string>>()}, rowsVisible(0), colsVisible(0), cursorPosition(0, 0), startCol{0}, endCol{0}, startRow{0}, endRow{0}, lastStartCol{0}, lastStartRow{0}, showCursor{true}, armedSeq{4096}
+: rw_mutex{std::make_unique<std::shared_mutex>()}, tableData{std::vector<std::vector<std::string>>()}, rowsVisible(0), colsVisible(0), cursorPosition(0, 0), startCol{0}, endCol{0}, startRow{0}, endRow{0}, lastStartCol{0}, lastStartRow{0}, showCursor{true}, armedSeq{Sequencer::notArmed}
 {
 }
 
@@ -130,18 +130,23 @@ void StringTable::drawCell(juce::Graphics& g, int x, int y, const std::string& v
 
 StringTable::CellState StringTable::getCellState(int x, int y)
 {
+    CellState state = CellState::NotSelected; 
+
     // cursor has highest priority 
     if (x == cursorPosition.first && y == cursorPosition.second)
         return CellState::Cursor;
     // armed is next
-    if (x == this->armedSeq) return CellState::Armed; 
+    if (x == this->armedSeq) state = CellState::Armed; 
     
     for (const auto& cell : highlightedCells)
     {
-        if (cell.first == x && cell.second == y)
-            return CellState::Highlight;
+        // override state and break 
+        if (cell.first == x && cell.second == y){
+            state = CellState::Highlight;
+            break; 
+        }
     }
     
+    return state;   
 
-    return CellState::NotSelected;
 }

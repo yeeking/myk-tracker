@@ -150,27 +150,25 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 {
     juce::ScopedNoDenormals noDenormals;
     bool receivedMidi = false; 
-    for (const MidiMessageMetadata metadata : midiMessages){
-        if (metadata.getMessage().isNoteOn()) {
-            // add a note to the current sequence 
-            // and move it on a step 
-            size_t armedSequence = seqEditor.getArmedSequence();
-            DBG("Got a note " << metadata.getMessage().getNoteNumber() << " armed " << armedSequence);
+    size_t armedSequence = seqEditor.getArmedSequence();
 
-            // std::vector<std::vector<double>> data(1, std::vector<double>(Step::maxInd));
-            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
-            // data[0][Step::chanInd] = metadata.getMessage().getNoteNumber();
-            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
-            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
-            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
-            
+    if (armedSequence != Sequencer::notArmed){// can write MIDI to the sequence
+        for (const MidiMessageMetadata metadata : midiMessages){
 
-            // seqEditor.enterStepData(metadata.getMessage().getNoteNumber(), Step::noteInd);
-            receivedMidi = true; 
+            if (metadata.getMessage().isNoteOn()) {
+                // add a note to the currently armed sequence 
+                // void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note, int velocity)
+
+                seqEditor.insertNoteAtTickPos(armedSequence, 
+                                            metadata.getMessage().getChannel(), 
+                                            metadata.getMessage().getNoteNumber(), 
+                                            metadata.getMessage().getVelocity());                
+                receivedMidi = true; 
+            }
         }
     }
     if (receivedMidi) {
-        // tell the 
+        // update the string rep maybe? or leave that to the GUI to figure out probably 
     }
 
     int blockStartSample = elapsedSamples;

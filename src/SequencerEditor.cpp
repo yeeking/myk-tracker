@@ -12,7 +12,7 @@ currentSeqParam{0},
 editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1}, 
 stepIncrement{0.5f},
  octave{6}, 
- armedSequence{4096}// default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
+ armedSequence{Sequencer::notArmed}// default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
 {
 }
 
@@ -315,6 +315,24 @@ void SequencerEditor::enterDataAtCursor(double note)
     }
   }
 }
+
+void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note, int velocity)
+{
+  // std::vector<std::vector<double>> data(1, std::vector<double>(Step::maxInd));
+  std::vector<std::vector<double>> data = sequencer->getStepData(sequence,  sequencer->getCurrentStep(sequence));
+
+  data[0][Step::noteInd] = static_cast<double>(note);
+  data[0][Step::velInd] = static_cast<double>(velocity);
+  data[0][Step::chanInd] = static_cast<double>(channel);
+  data[0][Step::lengthInd] = 1.0; 
+  data[0][Step::probInd] = 1.0; 
+  
+  sequencer->setStepData(sequence,  
+                        sequencer->getCurrentStep(sequence),
+                        data);
+
+}
+
 
 
 /** add one to current step */
@@ -913,7 +931,7 @@ void SequencerEditor::gotoSequenceConfigPage()
   {
     if (this->armedSequence == sequence) {
       // switch it off
-      this->armedSequence = 4096;
+      this->armedSequence = Sequencer::notArmed;
     }
     else {
       this->armedSequence = sequence;
@@ -926,11 +944,11 @@ void SequencerEditor::gotoSequenceConfigPage()
 
   void SequencerEditor::unarmSequence()
   {
-    this->armedSequence = 4096;
+    this->armedSequence = Sequencer::notArmed;
   }
   
   bool SequencerEditor::isArmedForLiveMIDI()
   {
-    if (this->armedSequence == 4096) return false; 
+    if (this->armedSequence == Sequencer::notArmed) return false; 
     return true; 
   }

@@ -42,6 +42,7 @@ class Step{
     const static std::size_t probInd{5};
     /** when populating an empty step, use this */
     const static std::size_t maxInd{5};
+
     
     
     Step();
@@ -264,6 +265,10 @@ class Sequence{
 /** represents a sequencer which is used to store a grid of data and to step through it */
 class Sequencer  {
     public:
+    /** armed (MIDI recording) channel will be set to this if nothing is armed */
+    const static std::size_t notArmed{4096};
+    
+    
     /** create a sequencer: channels,stepsPerChannel*/
       Sequencer(std::size_t seqCount = 4, std::size_t seqLength = 16);
       ~Sequencer();

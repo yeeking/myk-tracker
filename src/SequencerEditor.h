@@ -64,6 +64,9 @@ public:
   /** Tell the editor the user entered note data. The incoming note
    *  value is assumed to be in the range 0-127 */
   void enterDataAtCursor(double value);
+  /** whack a note into the sent sequence at its current step  */
+  void insertNoteAtTickPos(size_t sequence, int channel, int note, int velocity);      
+
   /** moves the editor cursor up.
    * If in selectingSeqAndStep mode, steps through the sequenbces, wrapping at the top
    * if in editingStep mode, edits the*/
