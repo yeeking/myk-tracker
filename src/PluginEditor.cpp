@@ -101,7 +101,7 @@ void PluginEditor::prepareSequenceView()
   }
   seqViewTable.updateData(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(), 
   rowsInUI-1, 6,
-  seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads);
+  seqEditor->getCurrentSequence(), seqEditor->getCurrentStep(), playHeads, true, seqEditor->getArmedSequence());
 }
 void PluginEditor::prepareStepView()
 {
@@ -145,7 +145,10 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
 
     switch (key.getTextCharacter())
     {
-        case 'R':
+        case 'A':// arm a sequence for live MIDI input 
+            seqEditor->setArmedSequence(seqEditor->getCurrentSequence());
+            break; 
+        case 'R':// re-e-wind
             CommandProcessor::sendAllNotesOff();
             audioProcessor.getSequencer()->rewindAtNextZero();
             break;

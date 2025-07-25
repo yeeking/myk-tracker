@@ -10,14 +10,15 @@ public:
     enum class CellState {
         NotSelected,
         Cursor,
-        Highlight
+        Highlight, 
+        Armed
     };
 
     StringTable();
     void paint(juce::Graphics& g) override;
     void resized() override;
 
-    void updateData(std::vector<std::vector<std::string>>& data, size_t rowsToDisplay, size_t colsToDisplay, size_t cursorX, size_t cursorY, std::vector<std::pair<int, int>> highlightCells, bool showCursor=true);
+    void updateData(std::vector<std::vector<std::string>>& data, size_t rowsToDisplay, size_t colsToDisplay, size_t cursorX, size_t cursorY, std::vector<std::pair<int, int>> highlightCells, bool showCursor=true, size_t armedSeq=4096);
     
 private:
     std::unique_ptr<std::shared_mutex> rw_mutex;
@@ -26,6 +27,7 @@ private:
     size_t colsVisible;
     std::pair<int, int> cursorPosition;
     std::vector<std::pair<int, int>> highlightedCells;
+    size_t armedSeq;
     bool showCursor; 
     
     void drawCell(juce::Graphics& g, int x, int y, const std::string& value, CellState state);

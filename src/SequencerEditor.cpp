@@ -2,7 +2,17 @@
 #include <cmath> // fmod
 #include <assert.h>
 
-SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer}, currentSequence{0}, currentStep{0}, currentStepRow{0}, currentStepCol{0}, currentSeqParam{0}, editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1}, stepIncrement{0.5f}, octave{6}
+SequencerEditor::SequencerEditor(Sequencer *sequencer) : 
+sequencer{sequencer}, 
+currentSequence{0}, 
+currentStep{0}, 
+currentStepRow{0}, 
+currentStepCol{0}, 
+currentSeqParam{0}, 
+editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1}, 
+stepIncrement{0.5f},
+ octave{6}, 
+ armedSequence{4096}// default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
 {
 }
 
@@ -897,3 +907,30 @@ void SequencerEditor::gotoSequenceConfigPage()
 // }
 // }
 
+
+
+  void SequencerEditor::setArmedSequence(const size_t sequence)
+  {
+    if (this->armedSequence == sequence) {
+      // switch it off
+      this->armedSequence = 4096;
+    }
+    else {
+      this->armedSequence = sequence;
+    }
+  }
+  size_t SequencerEditor::getArmedSequence()
+  {
+    return this->armedSequence;
+  }
+
+  void SequencerEditor::unarmSequence()
+  {
+    this->armedSequence = 4096;
+  }
+  
+  bool SequencerEditor::isArmedForLiveMIDI()
+  {
+    if (this->armedSequence == 4096) return false; 
+    return true; 
+  }

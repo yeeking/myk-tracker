@@ -135,6 +135,15 @@ public:
   void writeSequenceData(std::vector<std::vector<double>> data);
   /** write the sent data to a sequence - 1D data version */
   // void writeSequenceData(std::vector<std::vector<double>> data);
+  /** arm a sequence for live midi recording */
+  void setArmedSequence(const size_t sequence);
+  /** un-arm a sequence  */
+  void unarmSequence();
+  /** which sequence is armed?  */
+  size_t getArmedSequence();
+  /** return true if you have armed a sequence  */
+  bool isArmedForLiveMIDI();
+  
 private:
   Sequencer *sequencer;
   /** which sequence*/
@@ -147,6 +156,8 @@ private:
   size_t currentStepCol;
   /** which sequence param are you editing?*/
   size_t currentSeqParam; 
+  /** one sequence can be armed for live MIDI recording */
+  size_t armedSequence;
 
   SequencerEditorMode editMode;
   SequencerEditorSubMode editSubMode;

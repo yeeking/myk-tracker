@@ -152,11 +152,18 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     bool receivedMidi = false; 
     for (const MidiMessageMetadata metadata : midiMessages){
         if (metadata.getMessage().isNoteOn()) {
-            DBG("Got a note " << metadata.getMessage().getNoteNumber());
             // add a note to the current sequence 
             // and move it on a step 
+            size_t armedSequence = seqEditor.getArmedSequence();
+            DBG("Got a note " << metadata.getMessage().getNoteNumber() << " armed " << armedSequence);
 
-            // get the armed sequence 
+            // std::vector<std::vector<double>> data(1, std::vector<double>(Step::maxInd));
+            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
+            // data[0][Step::chanInd] = metadata.getMessage().getNoteNumber();
+            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
+            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
+            // data[0][Step::noteInd] = metadata.getMessage().getNoteNumber();
+            
 
             // seqEditor.enterStepData(metadata.getMessage().getNoteNumber(), Step::noteInd);
             receivedMidi = true; 
@@ -168,8 +175,8 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     int blockStartSample = elapsedSamples;
     int blockEndSample = (elapsedSamples + getBlockSize()) % maxHorizon;
-    // int blockSize = getBlockSize();
-    for (int i=0;i<blockSize; ++i){
+    int bufferSize = getBlockSize();
+    for (int i=0;i<bufferSize; ++i){
         // weird but since juce midi sample offsets are int not unsigned long, 
         // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
         // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)

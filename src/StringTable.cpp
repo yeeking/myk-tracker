@@ -2,13 +2,13 @@
 #include "StringTable.h"
 
 StringTable::StringTable()
-: rw_mutex{std::make_unique<std::shared_mutex>()}, tableData{std::vector<std::vector<std::string>>()}, rowsVisible(0), colsVisible(0), cursorPosition(0, 0), startCol{0}, endCol{0}, startRow{0}, endRow{0}, lastStartCol{0}, lastStartRow{0}, showCursor{true}
+: rw_mutex{std::make_unique<std::shared_mutex>()}, tableData{std::vector<std::vector<std::string>>()}, rowsVisible(0), colsVisible(0), cursorPosition(0, 0), startCol{0}, endCol{0}, startRow{0}, endRow{0}, lastStartCol{0}, lastStartRow{0}, showCursor{true}, armedSeq{4096}
 {
 }
 
-void StringTable::updateData(std::vector<std::vector<std::string>>& data, size_t rowsToDisplay, size_t colsToDisplay, size_t cursorCol, size_t cursorRow, std::vector<std::pair<int, int>> highlightCells, bool _showCursor)
+void StringTable::updateData(std::vector<std::vector<std::string>>& data, size_t rowsToDisplay, size_t colsToDisplay, size_t cursorCol, size_t cursorRow, std::vector<std::pair<int, int>> highlightCells, bool _showCursor, size_t _armedSeq)
 {
-
+    // std::cout << "StringTable::updateData armed " << _armedY << std::endl;
     // unique lock is used when writing 
     // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
@@ -50,6 +50,7 @@ void StringTable::updateData(std::vector<std::vector<std::string>>& data, size_t
     colsVisible = colsToDisplay;
     cursorPosition = { cursorCol, cursorRow };
     highlightedCells = highlightCells;
+    this->armedSeq = _armedSeq; 
     // repaint();
 }
 
@@ -98,6 +99,9 @@ void StringTable::drawCell(juce::Graphics& g, int x, int y, const std::string& v
         case CellState::Cursor:
             colour = juce::Colours::greenyellow;
             break;
+        case CellState::Armed:
+            colour = juce::Colours::red;
+            break;
         case CellState::Highlight:
             colour = juce::Colours::orange;
             break;
@@ -126,14 +130,18 @@ void StringTable::drawCell(juce::Graphics& g, int x, int y, const std::string& v
 
 StringTable::CellState StringTable::getCellState(int x, int y)
 {
+    // cursor has highest priority 
     if (x == cursorPosition.first && y == cursorPosition.second)
         return CellState::Cursor;
-
+    // armed is next
+    if (x == this->armedSeq) return CellState::Armed; 
+    
     for (const auto& cell : highlightedCells)
     {
         if (cell.first == x && cell.second == y)
             return CellState::Highlight;
     }
+    
 
     return CellState::NotSelected;
 }
