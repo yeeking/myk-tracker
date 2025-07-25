@@ -18,7 +18,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     sequencer{p.getSequencer()},  
     seqEditor{p.getSequenceEditor()}, 
     trackerController{p.getTrackerController()}, 
-    rowsInUI{9}, waitingForPaint{false}
+    rowsInUI{9}, waitingForPaint{false}, updateSeqStrOnNextDraw{false}
 {
     // openGLContext.attachTo (*getTopLevelComponent());
     // Make sure that before the constructor has finished, you've set the
@@ -82,6 +82,10 @@ void PluginEditor::timerCallback ()
       }
   }
   waitingForPaint = true; 
+  if (updateSeqStrOnNextDraw){
+    sequencer->updateSeqStringGrid();
+    updateSeqStrOnNextDraw = false; 
+  }
   repaint();
 }
 

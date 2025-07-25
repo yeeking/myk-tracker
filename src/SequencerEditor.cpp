@@ -77,8 +77,6 @@ void SequencerEditor::cycleAtCursor()
     }
     return;
   case SequencerEditorMode::editingStep:
-    // std::vector<std::vector<double>> data = {0, 0, 0};
-    // writeStepData(data);
     sequencer->toggleStepActive(currentSequence, currentStep);
     return;
   }
@@ -177,7 +175,7 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     // always used the mutex protected function to update the data 
     sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, column, value);
     // move to the next step down 
-    // moveCursorDown();
+    moveCursorDown();
   }
 }
 
@@ -293,7 +291,7 @@ void SequencerEditor::enterDataAtCursor(double note)
   // move to the next note
   if (editMode == SequencerEditorMode::selectingSeqAndStep)
   {
-    moveCursorDown();
+    // moveCursorDown();
   }
 
   if (editMode == SequencerEditorMode::configuringSequence)

@@ -38,7 +38,8 @@ public:
     bool keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent) override;
     using juce::Component::keyStateChanged;
     bool keyStateChanged(bool isKeyDown, juce::Component* originatingComponent) override;
-
+    /** next time we draw, call update on the sequencer's string representation */
+    void updateStringOnNextDraw();
 
 private:
 
@@ -57,6 +58,7 @@ private:
     void prepareStepView();
     void prepareSeqConfigView();
     bool waitingForPaint;
+    bool updateSeqStrOnNextDraw;
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
 

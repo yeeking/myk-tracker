@@ -149,9 +149,27 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+    bool receivedMidi = false; 
+    for (const MidiMessageMetadata metadata : midiMessages){
+        if (metadata.getMessage().isNoteOn()) {
+            DBG("Got a note " << metadata.getMessage().getNoteNumber());
+            // add a note to the current sequence 
+            // and move it on a step 
+
+            // get the armed sequence 
+
+            // seqEditor.enterStepData(metadata.getMessage().getNoteNumber(), Step::noteInd);
+            receivedMidi = true; 
+        }
+    }
+    if (receivedMidi) {
+        // tell the 
+    }
+
     int blockStartSample = elapsedSamples;
     int blockEndSample = (elapsedSamples + getBlockSize()) % maxHorizon;
-    for (int i=0;i<getBlockSize(); ++i){
+    // int blockSize = getBlockSize();
+    for (int i=0;i<blockSize; ++i){
         // weird but since juce midi sample offsets are int not unsigned long, 
         // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
         // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
@@ -164,7 +182,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
     }
     // to get sample-accurate midi as opposed to block-accurate midi (!)
-    // now add any midi that should have occured within this block
+    // now add any midi that should have occurred within this block
     // to midiMessages, but with an offset value within this block
     
     juce::MidiBuffer futureMidi;    // store messages from midiToSend from the future here. 
