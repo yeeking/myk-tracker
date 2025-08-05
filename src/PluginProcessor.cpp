@@ -166,9 +166,9 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         // tell the 
     }
 
+    int blockSize = getBlockSize();
     int blockStartSample = elapsedSamples;
-    int blockEndSample = (elapsedSamples + getBlockSize()) % maxHorizon;
-    // int blockSize = getBlockSize();
+    int blockEndSample = (elapsedSamples + blockSize) % maxHorizon;
     for (int i=0;i<blockSize; ++i){
         // weird but since juce midi sample offsets are int not unsigned long, 
         // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
