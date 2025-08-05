@@ -39,8 +39,8 @@ public:
     using juce::Component::keyStateChanged;
     bool keyStateChanged(bool isKeyDown, juce::Component* originatingComponent) override;
     /** next time we draw, call update on the sequencer's string representation */
-    void updateStringOnNextDraw();
-
+    // void updateStringOnNextDraw();
+    long framesDrawn; 
 private:
 
     PluginProcessor& audioProcessor;

@@ -228,6 +228,8 @@ class Sequence{
     void toggleMuteState();
     /** tell the sequence to reset its position counter at next tick. Useful for rewinding*/
     void rewindAtNextZero();
+    /**  when creating new notes, set the channel to this one*/
+    // void setDefaulyChannel();
   private:
 
     /** provides access to the sequencer so this sequence can change things*/
@@ -372,7 +374,10 @@ class Sequencer  {
       void decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col);
       /** reads default value for this step data col from commands and sets it to that */
       void setStepDataToDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col);
-       
+      /** request that the sequence updates its string on next tick  */
+      void requestStrUpdate();
+      /** Configures the sequence with tracks->channels 1,1,2,2,3,3 */
+      void setDefaultMIDIChannels();
 
     private:
 
@@ -388,6 +393,8 @@ class Sequencer  {
       bool playing; 
       /** this value is sent to the tick call on our sequences. Allows 'step without triggering' behaviour  */
       bool triggerOnTick;
+      /** if this is true, update my display string on next tick  */
+      bool stringUpdateRequested;
 
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */

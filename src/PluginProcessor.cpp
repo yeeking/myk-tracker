@@ -32,6 +32,7 @@ PluginProcessor::PluginProcessor()
     CommandProcessor::assignMasterClock(this);
     CommandProcessor::assignMidiUtils(this);
 
+    sequencer.setDefaultMIDIChannels();
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
@@ -160,16 +161,18 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 // void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note, int velocity)
 
                 seqEditor.insertNoteAtTickPos(armedSequence, 
-                                            metadata.getMessage().getChannel(), 
+                                            0, 
                                             metadata.getMessage().getNoteNumber(), 
                                             metadata.getMessage().getVelocity());                
                 receivedMidi = true; 
             }
         }
     }
-    if (receivedMidi) {
+    if (receivedMidi || sequencer.isPlaying()) {
         // update the string rep maybe? or leave that to the GUI to figure out probably 
+        midiMessages.clear();
     }
+
 
     int blockStartSample = elapsedSamples;
     int blockEndSample = (elapsedSamples + getBlockSize()) % maxHorizon;

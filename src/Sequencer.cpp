@@ -128,7 +128,9 @@ void Step::resetRow(std::size_t row)
   assert(row < data.size());
   for (std::size_t col = 0; col < data[row].size(); ++col)
   {
-    data[row][col] = 0;
+    if (col != Step::chanInd){// do not reset channel
+      data[row][col] = 0;
+    }
   }
 }
 
@@ -290,6 +292,7 @@ void Sequence::tick(bool trigger)
     if (currentStep == 0)
       deactivateProcessors();
   }
+
 }
 
 void Sequence::triggerStep(std::size_t step, std::size_t row)
@@ -536,12 +539,14 @@ void Sequence::rewindAtNextZero()
 
 /////////////////////// Sequencer
 
-Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{true}, triggerOnTick{true}
+Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{true}, triggerOnTick{true}, stringUpdateRequested{false}
 {
-  for (auto i = 0; i < seqCount; ++i)
+  for (std::size_t i = 0; i < seqCount; ++i)
   {
     sequences.push_back(Sequence{this, seqLength});
   }
+
+  
   updateSeqStringGrid();
   setupSeqConfigSpecs();
   // std::vector<Parameter> paramSpecs;
@@ -549,6 +554,21 @@ Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std
   // paramSpecs.push_back(Parameter("Channel", "ch", 0, 15, 1, 1, Step::));
   // paramSpecs.push_back(Parameter("Ticks per step", "tps", 0, 15, 1, 1));
 }
+
+void Sequencer::setDefaultMIDIChannels()
+{
+  // set MIDI channels on steps to something useful
+  std::size_t seqCount = sequences.size();
+  for (std::size_t seq = 0; seq < seqCount; ++seq)
+  {
+    double ch = floor(seq / 2);
+    std::size_t seqLength = sequences[seq].getLength();
+    for (std::size_t step = 0; step < seqLength; ++step){
+      setStepDataAt(seq, step, 0, Step::chanInd, ch);
+    }
+  }
+}
+
 
 Sequencer::~Sequencer()
 {
@@ -616,6 +636,10 @@ void Sequencer::tick()
   for (Sequence &seq : sequences)
   {
     seq.tick(triggerOnTick);
+  }
+  if (this->stringUpdateRequested){
+    this->updateSeqStringGrid();
+    stringUpdateRequested = false; 
   }
 }
 
@@ -877,6 +901,7 @@ void Sequencer::setupSeqConfigSpecs()
   
 }
 
+
 void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
@@ -897,6 +922,12 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
       }
     }
   }
+  // extra behaviour - if they are setting the sequence's channel, 
+  // remember it for use for new notes
+  if (paramIndex == Sequence::chanConfig){
+    
+  }
+
 
   if (paramIndex == Sequence::tpsConfig){
     std::size_t tps = sequences[seq].getTicksPerStep();
@@ -1016,3 +1047,7 @@ void Sequencer::rewindAtNextZero()
 }
 
 
+void Sequencer::requestStrUpdate()
+{
+  this->stringUpdateRequested = true; 
+}
