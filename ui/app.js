@@ -1,6 +1,7 @@
 const ui = {
   state: null,
   fetching: false,
+  table: { cols: 0, rows: 0, cells: [], body: null, head: null },
 };
 
 const API = {
@@ -49,7 +50,8 @@ function pad(num) {
 function render(state) {
   if (!state) return;
   updateMeta(state);
-  renderGrid(state);
+  ensureTable(state);
+  updateTableCells(state);
   renderInspector(state);
   renderConfig(state);
   updateStatus(state);
@@ -74,67 +76,92 @@ function updateMeta(state) {
   }
 }
 
-function renderGrid(state) {
-  const head = document.querySelector("[data-grid-head]");
-  const body = document.querySelector("[data-grid-body]");
-  if (!head || !body || !state.sequenceGrid) return;
+function getTableDims(state) {
+  const cols = state.sequenceGrid ? state.sequenceGrid.length : 0;
+  let rows = 0;
+  if (state.sequenceLengths && state.sequenceLengths.length) {
+    rows = Math.max(...state.sequenceLengths);
+  } else if (state.sequenceGrid && state.sequenceGrid.length) {
+    rows = Math.max(...state.sequenceGrid.map((c) => c.length));
+  }
+  return { cols, rows };
+}
 
-  const columns = state.sequenceGrid;
-  if (!columns.length) return;
+function ensureTable(state) {
+  const table = document.querySelector("[data-seq-table]");
+  if (!table) return;
+  const head = table.querySelector("thead");
+  const body = table.querySelector("tbody");
+  const { cols, rows } = getTableDims(state);
+  if (cols === ui.table.cols && rows === ui.table.rows && ui.table.cells.length) {
+    return;
+  }
+
   head.innerHTML = "";
   body.innerHTML = "";
+  ui.table.cells = [];
 
-  const seqLengths = state.sequenceLengths || [];
+  const headRow = document.createElement("tr");
+  headRow.appendChild(document.createElement("th")); // corner cell
+  for (let c = 0; c < cols; c++) {
+    const th = document.createElement("th");
+    th.textContent = `Seq ${pad(c + 1)}`;
+    headRow.appendChild(th);
+  }
+  head.appendChild(headRow);
 
-  columns.forEach((col, seqIdx) => {
-    const seqCol = document.createElement("div");
-    seqCol.className = "sequence-column";
+  for (let r = 0; r < rows; r++) {
+    const tr = document.createElement("tr");
+    const rowLabel = document.createElement("th");
+    rowLabel.className = "row-label";
+    rowLabel.textContent = pad(r + 1);
+    tr.appendChild(rowLabel);
 
-    const header = document.createElement("div");
-    header.className = "seq-header";
-    header.textContent = `Seq ${pad(seqIdx + 1)}`;
-    const tag = document.createElement("span");
-    tag.className = "tag";
-    const len = seqLengths[seqIdx] || col.length;
-    tag.textContent = `${len} steps`;
-    header.appendChild(tag);
-    seqCol.appendChild(header);
-
-    const maxRows = len;
-    for (let row = 0; row < maxRows; row++) {
-      const stepEl = document.createElement("div");
-      stepEl.className = "seq-step";
-      if (seqIdx === state.currentSequence && row === state.currentStep) {
-        stepEl.classList.add("cursor");
-      }
-      if (seqIdx === state.armedSequence) {
-        stepEl.classList.add("armed");
-      }
-      const playing = (state.playHeads || []).some(
-        (p) => p.sequence === seqIdx && p.step === row
-      );
-      if (playing) stepEl.classList.add("playing");
-
-      const idxLabel = document.createElement("div");
-      idxLabel.className = "step-index";
-      idxLabel.textContent = pad(row + 1);
-
-      const value = document.createElement("div");
-      value.className = "step-value";
-      value.textContent = col[row] || "";
-
-      stepEl.appendChild(idxLabel);
-      stepEl.appendChild(value);
-
-      stepEl.addEventListener("click", () => {
-        API.sendCommand("setCursor", { sequence: seqIdx, step: row });
+    const rowCells = [];
+    for (let c = 0; c < cols; c++) {
+      const td = document.createElement("td");
+      td.className = "seq-cell";
+      td.dataset.seq = c;
+      td.dataset.step = r;
+      td.addEventListener("click", () => {
+        API.sendCommand("setCursor", { sequence: c, step: r });
       });
-
-      seqCol.appendChild(stepEl);
+      tr.appendChild(td);
+      rowCells.push(td);
     }
+    ui.table.cells.push(rowCells);
+    body.appendChild(tr);
+  }
 
-    body.appendChild(seqCol);
-  });
+  ui.table.cols = cols;
+  ui.table.rows = rows;
+  ui.table.body = body;
+  ui.table.head = head;
+}
+
+function updateTableCells(state) {
+  const { cols, rows } = getTableDims(state);
+  if (cols !== ui.table.cols || rows !== ui.table.rows || !ui.table.cells.length) {
+    ensureTable(state);
+  }
+  const grid = state.sequenceGrid || [];
+  const playHeads = state.playHeads || [];
+
+  for (let r = 0; r < ui.table.rows; r++) {
+    for (let c = 0; c < ui.table.cols; c++) {
+      const cell = ui.table.cells[r][c];
+      const val = grid[c] && grid[c][r] ? grid[c][r] : "";
+      cell.textContent = val;
+
+      cell.className = "seq-cell";
+      const playing = playHeads.some((p) => p.sequence === c && p.step === r);
+      if (playing) cell.classList.add("active-step");
+      if (state.armedSequence === c) cell.classList.add("armed-step");
+      if (state.currentSequence === c && state.currentStep === r) {
+        cell.classList.add("cursor-step");
+      }
+    }
+  }
 }
 
 function renderInspector(state) {
@@ -264,7 +291,7 @@ function handleAction(action) {
 function boot() {
   bindActions();
   API.fetchState();
-  setInterval(() => API.fetchState(), 100);
+  setInterval(() => API.fetchState(), 500);
 }
 
 window.addEventListener("DOMContentLoaded", boot);
