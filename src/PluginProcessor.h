@@ -9,11 +9,14 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <memory>
 #include "MidiUtilsAbs.h"
 #include "ClockAbs.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "TrackerController.h"
+
+class HttpServerThread;
 
 
 //==============================================================================
@@ -78,8 +81,17 @@ public:
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
     TrackerController* getTrackerController();
+    /** serialises the sequencer/editor state for the web UI */
+    juce::var getUiState();
+    /** handle a command sent from the HTTP API */
+    bool handleCommand(const juce::var& body, juce::String& error);
     
 private:
+    bool handleKeyCommand(const juce::var& payload, juce::String& error);
+    juce::var stringGridToVar(const std::vector<std::vector<std::string>>& grid);
+    juce::var numberGridToVar(const std::vector<std::vector<double>>& grid);
+    void syncSequenceStrings();
+
     Sequencer sequencer;
   /** keep the seq editor in the processor as the plugineditor
      * can be deleted but the processor persists and we want to retain state on the seqeditor
@@ -97,6 +109,8 @@ private:
     unsigned int samplesPerTick; 
     double bpm; 
     int outstandingNoteOffs;
+
+    std::unique_ptr<HttpServerThread> apiServer;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)

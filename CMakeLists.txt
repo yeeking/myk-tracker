@@ -48,7 +48,9 @@ juce_add_plugin(myk-tracker-plug
     IS_MIDI_EFFECT TRUE                 # Is this plugin a MIDI effect?
     NEEDS_MIDI_OUTPUT TRUE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE    # Does the editor need keyboard focus?
-    COPY_PLUGIN_AFTER_BUILD TRUE        # Should the plugin be installed to a default location after building?
+    NEEDS_WEB_BROWSER TRUE
+    NEEDS_CURL TRUE
+    COPY_PLUGIN_AFTER_BUILD FALSE        # Should the plugin be installed to a default location after building?
     PLUGIN_MANUFACTURER_CODE Yeek               # A four-character manufacturer id with at least one upper-case ``
     PLUGIN_CODE MykT                            # A unique four-character plugin id with exactly one upper-case character
                                                 # GarageBand 10.3 requires the first letter to be upper-case, and the remaining letters to be lower-case
@@ -58,12 +60,21 @@ juce_add_plugin(myk-tracker-plug
 
 juce_generate_juce_header(myk-tracker-plug)
 
+juce_add_binary_data(WebUIData
+    SOURCES
+        ui/index.html
+        ui/styles.css
+        ui/palette-amber-teal.css
+        ui/palette-neon-purple.css
+        ui/app.js)
+
 target_sources(myk-tracker-plug
     PRIVATE
     src/PluginEditor.cpp
     src/PluginProcessor.cpp
     src/StringTable.cpp
-src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp
+    src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp
+    src/HTTPServer.cpp src/HTTPServer.h src/Utils.h
 )
 
     
@@ -77,9 +88,8 @@ target_compile_definitions(myk-tracker-plug
         #JUCE_PLUGINHOST_VST3=1
         JUCE_USE_OGGVORBIS=1
         #JUCE_VST3_HOST_CROSS_PLATFORM_UID=1
-        # JUCE_WEB_BROWSER and JUCE_USE_CURL would be on by default, but you might not need them.
-        JUCE_WEB_BROWSER=0  # If you remove this, add `NEEDS_WEB_BROWSER TRUE` to the `juce_add_plugin` call
-        JUCE_USE_CURL=0     # If you remove this, add `NEEDS_CURL TRUE` to the `juce_add_plugin` call
+        JUCE_WEB_BROWSER=1
+        JUCE_USE_CURL=1
         JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(myk-tracker-plug
@@ -87,10 +97,16 @@ target_link_libraries(myk-tracker-plug
 #        seq-lib
         # AudioPluginData           # If we'd created a binary data target, we'd link to it here
         juce::juce_audio_utils
+        juce::juce_gui_extra
         juce::juce_opengl
+        WebUIData
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-
+target_include_directories(myk-tracker-plug
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/libs
+        ${CMAKE_CURRENT_SOURCE_DIR}/webui-juce-cmake-example/libs)

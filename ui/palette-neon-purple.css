@@ -1,0 +1,68 @@
+:root {
+  --text: #e9e6ff;
+  --muted: #a89ad6;
+  --muted-bright: #c0b6ff;
+  --ghost: #dcd6ff;
+
+  --accent: #ffc857;
+  --accent-glow: rgba(255, 200, 87, 0.35);
+  --title-glow: rgba(255, 200, 87, 0.35);
+
+  --value-primary: #67f3ff;
+  --value-primary-glow: rgba(103, 243, 255, 0.35);
+
+  --grid-line: rgba(123, 109, 191, 0.35);
+
+  --page-bg: radial-gradient(circle at 20% 20%, #1a1230 0%, #0b0816 45%, #06040f 100%);
+  --frame-bg: linear-gradient(145deg, #322d5a 0%, #241f45 40%, #1a1736 75%);
+  --frame-outline: #3f3972;
+  --frame-deboss: #171331;
+  --frame-border-dark: #0a071c;
+  --frame-border-light: rgba(123, 109, 191, 0.5);
+
+  --screen-bg: radial-gradient(circle at 70% 20%, rgba(103, 243, 255, 0.1), rgba(30, 22, 61, 0.85) 52%), #131029;
+  --screen-border-1: #1f1a3d;
+  --screen-border-2: #2c2457;
+  --screen-outline: rgba(103, 243, 255, 0.12);
+
+  --pill-bg: linear-gradient(145deg, #2b2552, #1b1638);
+  --pill-border: #433e7c;
+
+  --led-text: #67f3ff;
+  --led-fill: linear-gradient(135deg, #7fffff, #40bfff);
+  --led-glow: rgba(127, 255, 255, 0.6);
+  --meter-fill: linear-gradient(120deg, #266a7f, #4de0ff);
+
+  --stat-bg: linear-gradient(145deg, #1c1740, #16132f);
+  --stat-border: #363069;
+
+  --grid-bg: linear-gradient(180deg, rgba(22, 18, 44, 0.95), rgba(16, 12, 32, 0.95));
+  --grid-border: #2b2453;
+  --row-bg: rgba(51, 39, 94, 0.45);
+  --row-alt-bg: rgba(34, 26, 68, 0.45);
+  --row-border: rgba(110, 88, 170, 0.35);
+
+  --controls-bg: linear-gradient(180deg, #2a234d, #1a1536);
+  --control-border: #433e7c;
+  --btn-primary: linear-gradient(145deg, #ff9f45, #ff5f87);
+  --btn-secondary: linear-gradient(145deg, #3d99ff, #6c4bff);
+  --btn-secondary-text: #f5f3ff;
+
+  --highlight-bg: rgba(103, 243, 255, 0.2);
+  --highlight-border: rgba(103, 243, 255, 0.45);
+  --highlight-glow: rgba(103, 243, 255, 0.2);
+
+  --chart-bg: linear-gradient(180deg, #1a1438, #120e29);
+  --chart-border: #352c68;
+  --bar-primary: linear-gradient(145deg, #ffd166, #ff7a5a);
+  --bar-secondary: linear-gradient(145deg, #72f6ff, #3c9fff);
+
+  --controls-panel-bg: linear-gradient(180deg, #191433, #100d24);
+  --controls-panel-border: #352f62;
+  --knob-bg: radial-gradient(circle at 30% 30%, rgba(255, 154, 69, 0.45), rgba(25, 18, 48, 0.85) 55%), #141029;
+  --knob-border: #433e7c;
+
+  --dot-fill: linear-gradient(135deg, #2d8cff, #67f3ff);
+  --dot-glow: rgba(103, 243, 255, 0.35);
+  --dot-border: #1a1433;
+}

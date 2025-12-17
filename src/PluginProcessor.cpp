@@ -1,4 +1,3 @@
-
 /*
   ==============================================================================
 
@@ -9,6 +8,8 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "HTTPServer.h"
+#include "SequencerCommands.h"
 
 //==============================================================================
 PluginProcessor::PluginProcessor()
@@ -39,11 +40,14 @@ PluginProcessor::PluginProcessor()
     // sequencer.decrementSeqParam(0, 1);
 
     // put some test notes into the sequencer to see if they flow through
-  
+    apiServer = std::make_unique<HttpServerThread>(*this);
+    apiServer->startThread();
 }
 
 PluginProcessor::~PluginProcessor()
 {
+    if (apiServer)
+        apiServer->stopServer();
 }
 
 
@@ -255,6 +259,460 @@ void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
     // whose contents will have been created by the getStateInformation() call.
 }
 
+void PluginProcessor::syncSequenceStrings()
+{
+    sequencer.updateSeqStringGrid();
+}
+
+juce::var PluginProcessor::stringGridToVar(const std::vector<std::vector<std::string>>& grid)
+{
+    juce::Array<juce::var> cols;
+    for (const auto& col : grid)
+    {
+        juce::Array<juce::var> rows;
+        for (const auto& cell : col)
+            rows.add(juce::String(cell));
+        cols.add(rows);
+    }
+    return cols;
+}
+
+juce::var PluginProcessor::numberGridToVar(const std::vector<std::vector<double>>& grid)
+{
+    juce::Array<juce::var> cols;
+    for (const auto& col : grid)
+    {
+        juce::Array<juce::var> rows;
+        for (const auto& cell : col)
+            rows.add(cell);
+        cols.add(rows);
+    }
+    return cols;
+}
+
+juce::var PluginProcessor::getUiState()
+{
+    syncSequenceStrings();
+
+    juce::DynamicObject::Ptr state = new juce::DynamicObject();
+    state->setProperty("bpm", getBPM());
+    state->setProperty("isPlaying", sequencer.isPlaying());
+
+    juce::String modeStr = "sequence";
+    switch (seqEditor.getEditMode())
+    {
+        case SequencerEditorMode::selectingSeqAndStep:
+            modeStr = "sequence";
+            break;
+        case SequencerEditorMode::editingStep:
+            modeStr = "step";
+            break;
+        case SequencerEditorMode::configuringSequence:
+            modeStr = "config";
+            break;
+    }
+    state->setProperty("mode", modeStr);
+
+    state->setProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence()));
+    state->setProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep()));
+    state->setProperty("currentStepRow", static_cast<int>(seqEditor.getCurrentStepRow()));
+    state->setProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol()));
+    state->setProperty("armedSequence", static_cast<int>(seqEditor.getArmedSequence()));
+
+    state->setProperty("sequenceGrid", stringGridToVar(sequencer.getSequenceAsGridOfStrings()));
+    state->setProperty("stepGrid", stringGridToVar(sequencer.getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
+    state->setProperty("sequenceConfigs", stringGridToVar(sequencer.getSequenceConfigsAsGridOfStrings()));
+    state->setProperty("stepData", numberGridToVar(sequencer.getStepData(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
+
+    juce::Array<juce::var> playHeads;
+    for (std::size_t col = 0; col < sequencer.howManySequences(); ++col)
+    {
+        juce::DynamicObject::Ptr ph = new juce::DynamicObject();
+        ph->setProperty("sequence", static_cast<int>(col));
+        ph->setProperty("step", static_cast<int>(sequencer.getCurrentStep(col)));
+        playHeads.add(juce::var(ph));
+    }
+    state->setProperty("playHeads", playHeads);
+
+    juce::Array<juce::var> seqLengths;
+    for (std::size_t col = 0; col < sequencer.howManySequences(); ++col)
+        seqLengths.add(static_cast<int>(sequencer.howManySteps(col)));
+    state->setProperty("sequenceLengths", seqLengths);
+
+    double channel = sequencer.getStepDataAt(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep(), 0, Step::chanInd);
+    state->setProperty("channel", channel);
+
+    state->setProperty("ticksPerStep", static_cast<int>(sequencer.getSequence(seqEditor.getCurrentSequence())->getTicksPerStep()));
+
+    return state.get();
+}
+
+bool PluginProcessor::handleKeyCommand(const juce::var& payload, juce::String& error)
+{
+    juce::String key = payload.getProperty("key", "").toString();
+    juce::String code = payload.getProperty("code", "").toString();
+    bool shift = static_cast<bool>(payload.getProperty("shift", false));
+
+    juce::ignoreUnused(shift);
+
+    if (key.isEmpty() && code.isEmpty())
+    {
+        error = "No key provided";
+        return false;
+    }
+
+    auto updateState = [this]() {
+        syncSequenceStrings();
+        return true;
+    };
+
+    if (key == " " || key == "Spacebar")
+    {
+        CommandProcessor::sendAllNotesOff();
+        if (sequencer.isPlaying())
+            sequencer.stop();
+        else
+        {
+            sequencer.rewindAtNextZero();
+            sequencer.play();
+        }
+        return updateState();
+    }
+
+    if (key == "Tab")
+    {
+        seqEditor.nextStep();
+        return updateState();
+    }
+    if (key == "Backspace")
+    {
+        seqEditor.resetAtCursor();
+        CommandProcessor::sendAllNotesOff();
+        return updateState();
+    }
+    if (key == "Enter" || key == "\n" || code == "Enter")
+    {
+        seqEditor.enterAtCursor();
+        return updateState();
+    }
+    if (key == "ArrowUp")
+    {
+        seqEditor.moveCursorUp();
+        return updateState();
+    }
+    if (key == "ArrowDown")
+    {
+        seqEditor.moveCursorDown();
+        return updateState();
+    }
+    if (key == "ArrowLeft")
+    {
+        seqEditor.moveCursorLeft();
+        return updateState();
+    }
+    if (key == "ArrowRight")
+    {
+        seqEditor.moveCursorRight();
+        return updateState();
+    }
+
+    // character-driven controls
+    juce::String lowered = key.toLowerCase();
+    juce::juce_wchar ch = lowered.isNotEmpty() ? lowered[0] : 0;
+
+    switch (ch)
+    {
+        case 'a':
+            seqEditor.setArmedSequence(seqEditor.getCurrentSequence());
+            return updateState();
+        case 'r':
+            CommandProcessor::sendAllNotesOff();
+            sequencer.rewindAtNextZero();
+            return updateState();
+        case 'm':
+            sequencer.toggleSequenceMute(seqEditor.getCurrentSequence());
+            return updateState();
+        case 's':
+            seqEditor.gotoSequenceConfigPage();
+            return updateState();
+        default:
+            break;
+    }
+
+    if (key == "_" || ch == '_')
+    {
+        trackerController.decrementBPM();
+        return updateState();
+    }
+    if (key == "+" || ch == '+')
+    {
+        trackerController.incrementBPM();
+        return updateState();
+    }
+    if (ch == '-' || key == "-")
+    {
+        seqEditor.removeRow();
+        return updateState();
+    }
+    if (ch == '=' || key == "=")
+    {
+        seqEditor.addRow();
+        return updateState();
+    }
+    if (key == "[" || ch == '[')
+    {
+        seqEditor.decrementAtCursor();
+        return updateState();
+    }
+    if (key == "]" || ch == ']')
+    {
+        seqEditor.incrementAtCursor();
+        return updateState();
+    }
+    if (ch == ',')
+    {
+        seqEditor.decrementOctave();
+        return updateState();
+    }
+    if (ch == '.')
+    {
+        seqEditor.incrementOctave();
+        return updateState();
+    }
+
+    // numeric velocity shortcuts
+    if (juce::CharacterFunctions::isDigit(ch))
+    {
+        int num = static_cast<int>(ch - '0');
+        if (num > 0 && num < 5)
+        {
+            seqEditor.enterStepData(num * (128 / 4), Step::velInd);
+            return updateState();
+        }
+    }
+
+    // piano-key style note entry
+    auto keyToNote = MidiUtilsAbs::getKeyboardToMidiNotes(0);
+    auto it = keyToNote.find(static_cast<char>(ch));
+    if (it != keyToNote.end())
+    {
+        seqEditor.enterStepData(it->second, Step::noteInd);
+        return updateState();
+    }
+
+    error = "Unhandled key";
+    return false;
+}
+
+bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
+{
+    if (!body.isObject())
+    {
+        error = "Command must be an object";
+        return false;
+    }
+
+    juce::String action = body.getProperty("action", "").toString();
+    juce::var payload = body.getProperty("payload", juce::var());
+    if (action.isEmpty())
+    {
+        error = "Missing action";
+        return false;
+    }
+
+    auto updateState = [this]() {
+        syncSequenceStrings();
+        return true;
+    };
+
+    juce::String normalized = action.toLowerCase();
+    if (normalized == "key" || normalized == "keypress")
+        return handleKeyCommand(payload, error);
+
+    if (normalized == "toggleplay")
+    {
+        CommandProcessor::sendAllNotesOff();
+        if (sequencer.isPlaying())
+            sequencer.stop();
+        else
+        {
+            sequencer.rewindAtNextZero();
+            sequencer.play();
+        }
+        return updateState();
+    }
+
+    if (normalized == "rewind")
+    {
+        CommandProcessor::sendAllNotesOff();
+        sequencer.rewindAtNextZero();
+        return updateState();
+    }
+
+    if (normalized == "move")
+    {
+        juce::String dir = payload.getProperty("direction", "").toString().toLowerCase();
+        if (dir == "up")
+            seqEditor.moveCursorUp();
+        else if (dir == "down")
+            seqEditor.moveCursorDown();
+        else if (dir == "left")
+            seqEditor.moveCursorLeft();
+        else if (dir == "right")
+            seqEditor.moveCursorRight();
+        else
+            error = "Unknown move direction";
+        return updateState();
+    }
+
+    if (normalized == "nextstep")
+    {
+        seqEditor.nextStep();
+        return updateState();
+    }
+
+    if (normalized == "addrow")
+    {
+        seqEditor.addRow();
+        return updateState();
+    }
+
+    if (normalized == "removerow")
+    {
+        seqEditor.removeRow();
+        return updateState();
+    }
+
+    if (normalized == "increment")
+    {
+        seqEditor.incrementAtCursor();
+        return updateState();
+    }
+
+    if (normalized == "decrement")
+    {
+        seqEditor.decrementAtCursor();
+        return updateState();
+    }
+
+    if (normalized == "incrementoctave")
+    {
+        seqEditor.incrementOctave();
+        return updateState();
+    }
+
+    if (normalized == "decrementoctave")
+    {
+        seqEditor.decrementOctave();
+        return updateState();
+    }
+
+    if (normalized == "enter")
+    {
+        seqEditor.enterAtCursor();
+        return updateState();
+    }
+
+    if (normalized == "reset")
+    {
+        seqEditor.resetAtCursor();
+        CommandProcessor::sendAllNotesOff();
+        return updateState();
+    }
+
+    if (normalized == "setmode")
+    {
+        juce::String mode = payload.getProperty("mode", "").toString().toLowerCase();
+        if (mode == "sequence")
+            seqEditor.setEditMode(SequencerEditorMode::selectingSeqAndStep);
+        else if (mode == "step")
+            seqEditor.setEditMode(SequencerEditorMode::editingStep);
+        else if (mode == "config")
+            seqEditor.setEditMode(SequencerEditorMode::configuringSequence);
+        return updateState();
+    }
+
+    if (normalized == "setcursor")
+    {
+        int seq = static_cast<int>(payload.getProperty("sequence", static_cast<int>(seqEditor.getCurrentSequence())));
+        int step = static_cast<int>(payload.getProperty("step", static_cast<int>(seqEditor.getCurrentStep())));
+        seqEditor.setCurrentSequence(seq);
+        seqEditor.setCurrentStep(step);
+        return updateState();
+    }
+
+    if (normalized == "armsequence")
+    {
+        std::size_t seq = static_cast<std::size_t>(static_cast<int>(payload.getProperty("sequence", static_cast<int>(seqEditor.getCurrentSequence()))));
+        seqEditor.setArmedSequence(seq);
+        return updateState();
+    }
+
+    if (normalized == "togglemute")
+    {
+        std::size_t seq = static_cast<std::size_t>(static_cast<int>(payload.getProperty("sequence", static_cast<int>(seqEditor.getCurrentSequence()))));
+        sequencer.toggleSequenceMute(seq);
+        return updateState();
+    }
+
+    if (normalized == "incrementbpm")
+    {
+        trackerController.incrementBPM();
+        return updateState();
+    }
+
+    if (normalized == "decrementbpm")
+    {
+        trackerController.decrementBPM();
+        return updateState();
+    }
+
+    if (normalized == "setbpm")
+    {
+        double newBpm = static_cast<double>(payload.getProperty("bpm", getBPM()));
+        if (newBpm > 0)
+            trackerController.setBPM(static_cast<unsigned int>(newBpm));
+        return updateState();
+    }
+
+    if (normalized == "setstepvalue")
+    {
+        juce::String field = payload.getProperty("field", "").toString().toLowerCase();
+        double value = static_cast<double>(payload.getProperty("value", 0.0));
+        std::size_t seq = static_cast<std::size_t>(static_cast<int>(payload.getProperty("sequence", static_cast<int>(seqEditor.getCurrentSequence()))));
+        std::size_t step = static_cast<std::size_t>(static_cast<int>(payload.getProperty("step", static_cast<int>(seqEditor.getCurrentStep()))));
+        std::size_t row = static_cast<std::size_t>(static_cast<int>(payload.getProperty("row", 0)));
+
+        int col = -1;
+        if (field == "note")
+            col = Step::noteInd;
+        else if (field == "velocity" || field == "vel")
+            col = Step::velInd;
+        else if (field == "length")
+            col = Step::lengthInd;
+        else if (field == "probability" || field == "prob")
+            col = Step::probInd;
+        else if (field == "channel" || field == "chan")
+            col = Step::chanInd;
+
+        if (col >= 0)
+            sequencer.setStepDataAt(seq, step, row, static_cast<std::size_t>(col), value);
+        return updateState();
+    }
+
+    if (normalized == "enterstepdata")
+    {
+        double value = static_cast<double>(payload.getProperty("value", 0.0));
+        int column = static_cast<int>(payload.getProperty("column", static_cast<int>(Step::noteInd)));
+        bool applyOctave = static_cast<bool>(payload.getProperty("applyOctave", true));
+        seqEditor.enterStepData(value, column, applyOctave);
+        return updateState();
+    }
+
+    error = "Unknown action";
+    return false;
+}
+
 //==============================================================================
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
@@ -328,326 +786,3 @@ void PluginProcessor::clearPendingEvents()
 {
     midiToSend.clear();
 }
-=======
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
-#include "PluginProcessor.h"
-#include "PluginEditor.h"
-
-//==============================================================================
-PluginProcessor::PluginProcessor()
-#ifndef JucePlugin_PreferredChannelConfigurations
-     : AudioProcessor (BusesProperties()
-                     #if ! JucePlugin_IsMidiEffect
-                      #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      #endif
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                     #endif
-                       ), 
-                       sequencer{16, 8}, seqEditor{&sequencer}, 
-                       // seq, clock, editor
-                       trackerController{&sequencer, this, &seqEditor},
-                       elapsedSamples{0},maxHorizon{44100 * 3600}, 
-                       samplesPerTick{44100/(120/60)/8}, bpm{120}, 
-                       outstandingNoteOffs{0}
-#endif
-{
-    
-    CommandProcessor::assignMasterClock(this);
-    CommandProcessor::assignMidiUtils(this);
-
-
-    // sequencer.decrementSeqParam(0, 1);
-    // sequencer.decrementSeqParam(0, 1);
-
-    // put some test notes into the sequencer to see if they flow through
-  
-}
-
-PluginProcessor::~PluginProcessor()
-{
-}
-
-
-//==============================================================================
-const juce::String PluginProcessor::getName() const
-{
-    return JucePlugin_Name;
-}
-
-bool PluginProcessor::acceptsMidi() const
-{
-   #if JucePlugin_WantsMidiInput
-    return true;
-   #else
-    return false;
-   #endif
-}
-
-bool PluginProcessor::producesMidi() const
-{
-   #if JucePlugin_ProducesMidiOutput
-    return true;
-   #else
-    return false;
-   #endif
-}
-
-bool PluginProcessor::isMidiEffect() const
-{
-   #if JucePlugin_IsMidiEffect
-    return true;
-   #else
-    return false;
-   #endif
-}
-
-double PluginProcessor::getTailLengthSeconds() const
-{
-    return 0.0;
-}
-
-int PluginProcessor::getNumPrograms()
-{
-    return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
-                // so this should be at least 1, even if you're not really implementing programs.
-}
-
-int PluginProcessor::getCurrentProgram()
-{
-    return 0;
-}
-
-void PluginProcessor::setCurrentProgram (int index)
-{
-}
-
-const juce::String PluginProcessor::getProgramName (int index)
-{
-    return {};
-}
-
-void PluginProcessor::changeProgramName (int index, const juce::String& newName)
-{
-}
-
-//==============================================================================
-void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
-{
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
-}
-
-void PluginProcessor::releaseResources()
-{
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
-}
-
-#ifndef JucePlugin_PreferredChannelConfigurations
-bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
-{
-  #if JucePlugin_IsMidiEffect
-    juce::ignoreUnused (layouts);
-    return true;
-  #else
-    // This is the place where you check if the layout is supported.
-    // In this template code we only support mono or stereo.
-    // Some plugin hosts, such as certain GarageBand versions, will only
-    // load plugins that support stereo bus layouts.
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
-        return false;
-
-    // This checks if the input layout matches the output layout
-   #if ! JucePlugin_IsSynth
-    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
-        return false;
-   #endif
-
-    return true;
-  #endif
-}
-#endif
-
-void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
-{
-    juce::ScopedNoDenormals noDenormals;
-    bool receivedMidi = false; 
-    for (const MidiMessageMetadata metadata : midiMessages){
-        if (metadata.getMessage().isNoteOn()) {
-            DBG("Got a note " << metadata.getMessage().getNoteNumber());
-            // add a note to the current sequence 
-            // and move it on a step 
-
-            // get the armed sequence 
-
-            // seqEditor.enterStepData(metadata.getMessage().getNoteNumber(), Step::noteInd);
-            receivedMidi = true; 
-        }
-    }
-    if (receivedMidi) {
-        // tell the 
-    }
-
-    int blockSize = getBlockSize();
-    int blockStartSample = elapsedSamples;
-    int blockEndSample = (elapsedSamples + blockSize) % maxHorizon;
-    for (int i=0;i<blockSize; ++i){
-        // weird but since juce midi sample offsets are int not unsigned long, 
-        // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
-        // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
-        elapsedSamples = (++elapsedSamples) % maxHorizon;
-        if (elapsedSamples % samplesPerTick == 0){
-            // tick is from the clockabs class and it keeps track of the absolute tick 
-            this->tick(); 
-            // this will cause any pending messages to be added to 'midiToSend'
-            sequencer.tick();
-        }
-    }
-    // to get sample-accurate midi as opposed to block-accurate midi (!)
-    // now add any midi that should have occurred within this block
-    // to midiMessages, but with an offset value within this block
-    
-    juce::MidiBuffer futureMidi;    // store messages from midiToSend from the future here. 
-    juce::MidiMessage message;
-    // int samplePosition;
-    for (const MidiMessageMetadata metadata : midiToSend){
-        if (blockEndSample < blockStartSample){// we wrapped block end back around 
-            // DBG("processBlock wrapped events");
-
-            // after block start or before block end (as block end is before block start due to wrap around)
-            if ( metadata.samplePosition >= blockStartSample ||  
-                metadata.samplePosition < blockEndSample) {
-                midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
-            }
-            else{// it is in the future            
-                futureMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
-            }
-            if (metadata.getMessage().isNoteOff()) outstandingNoteOffs --;
-        }
-        if (blockStartSample < blockEndSample){
-            // normal case where block start is before block end as no wrap has occurred. 
-            if ( metadata.samplePosition >= blockStartSample && 
-                metadata.samplePosition < blockEndSample) {
-                // DBG("Event this block " << metadata.samplePosition - blockStartSample);
-                midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
-            }
-            else{// it is in the future            
-
-                futureMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
-            }
-            if (metadata.getMessage().isNoteOff()) outstandingNoteOffs --;
-
-        }
-    }
-    midiToSend.clear();
-    midiToSend.swapWith(futureMidi);
-}
-
-//==============================================================================
-bool PluginProcessor::hasEditor() const
-{
-    return true; // (change this to false if you choose to not supply an editor)
-}
-
-juce::AudioProcessorEditor* PluginProcessor::createEditor()
-{
-    return new PluginEditor (*this);
-}
-
-//==============================================================================
-void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
-{
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
-}
-
-void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
-{
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
-}
-
-//==============================================================================
-// This creates new instances of the plugin..
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new PluginProcessor();
-}
-
-Sequencer* PluginProcessor::getSequencer()
-{
-    return &sequencer;
-}
-
-SequencerEditor* PluginProcessor::getSequenceEditor()
-{
-    return &seqEditor;
-}
-
-TrackerController* PluginProcessor::getTrackerController()
-{
-    return &trackerController;
-}
-
-////////////// MIDIUtils interface 
-
-void PluginProcessor::allNotesOff()
-{
-    midiToSend.clear();// remove anything that's hanging around. 
-    for (int chan = 1; chan < 17; ++chan){
-        midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
-    }
-}
-void PluginProcessor::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks)
-{
-    channel ++; // channels come in 0-15 but we want 1-16
-    // offtick is an absolute tick from the start of time 
-    // but we have a max horizon which is how far in the future we can set things 
-    int offSample =  elapsedSamples +  (samplesPerTick * static_cast<int>(durInTicks)) % maxHorizon;
-    // DBG("playSingleNote note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
-    // generate a note on and a note off 
-    // note on is right now 
-    midiToSend.addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);
-    // note off is now + length 
-    midiToSend.addEvent(MidiMessage::noteOff((int)channel, (int)note, (uint8)velocity), offSample);
-    // assert()
-    outstandingNoteOffs ++ ;
-}
-void PluginProcessor::sendQueuedMessages(long tick)
-{
-    // this is blank as midi gets sent by moving it from midiToSend to the processBlock's midi buffer
-
-}
-
-////////////// end MIDIUtils interface 
-
-
-void PluginProcessor::setBPM(double _bpm)
-{   
-    assert(_bpm > 0);
-    // update tick interval in samples 
-    samplesPerTick = getSampleRate() *  (60/_bpm) /8;
-    bpm = _bpm;
-}
-
-double PluginProcessor::getBPM()
-{
-    return bpm;
-}
-
-
-void PluginProcessor::clearPendingEvents()
-{
-    midiToSend.clear();
-}
-

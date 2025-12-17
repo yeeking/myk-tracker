@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Retro Tracker Mock</title>
+  <!-- <link rel="stylesheet" href="palette-amber-teal.css" title="Amber Teal" /> -->
+  <link rel="stylesheet" href="palette-neon-purple.css" title="Neon Purple" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="tracker">
+    <section class="screen">
+      <header class="top-bar">
+        <div class="title">Tracker</div>
+        <div class="pill" data-mode>Pattern</div>
+        <div class="status">
+          <span class="led" data-led>Offline</span>
+          <div class="meter" data-meter>
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+      </header>
+
+      <div class="meta">
+        <div class="stat">
+          <span class="label">BPM</span>
+          <span class="value" data-bpm>--</span>
+          <div class="stat-actions">
+            <button class="btn mini" data-action="bpmDown">-</button>
+            <button class="btn mini" data-action="bpmUp">+</button>
+          </div>
+        </div>
+        <div class="stat alt">
+          <span class="label">Pattern</span>
+          <span class="value" data-pattern>--</span>
+        </div>
+        <div class="stat">
+          <span class="label">Step</span>
+          <span class="value" data-step>--</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="controls">
+          <button class="btn" data-action="play">Play/Pause</button>
+          <button class="btn" data-action="rewind">Rewind</button>
+          <button class="btn alt" data-action="arm">Arm</button>
+          <button class="btn" data-action="addRow">+ Row</button>
+          <button class="btn" data-action="removeRow">- Row</button>
+          <button class="btn alt" data-action="config">Config</button>
+          <button class="btn alt" data-action="editStep">Step Edit</button>
+        </div>
+
+        <div class="grid-table">
+          <div class="table-head" data-grid-head></div>
+          <div class="table-body" data-grid-body></div>
+        </div>
+      </div>
+
+      <footer class="footer">
+        <div class="controls-panel">
+          <div class="knobs">
+            <div class="knob"></div>
+            <div class="knob"></div>
+          </div>
+          <div class="dots" data-status-text>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+        </div>
+      </footer>
+    </section>
+  </main>
+  <div class="modal-backdrop" data-modal="step">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div class="modal-title">Step Edit</div>
+        <button class="close" data-action="closeModal">×</button>
+      </div>
+      <div class="inspector-grid">
+        <label>Note <input type="number" data-step-field="note" min="0" max="127" /></label>
+        <label>Velocity <input type="number" data-step-field="velocity" min="0" max="127" /></label>
+        <label>Length <input type="number" data-step-field="length" min="0" max="64" /></label>
+        <label>Probability <input type="number" data-step-field="probability" step="0.01" min="0" max="1" /></label>
+        <label>Channel <input type="number" data-step-field="channel" min="0" max="15" /></label>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" data-modal="config">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div class="modal-title">Sequence Config</div>
+        <button class="close" data-action="closeModal">×</button>
+      </div>
+      <div class="inspector-list" data-config-list></div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
