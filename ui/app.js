@@ -4,6 +4,21 @@ const ui = {
   table: { cols: 0, rows: 0, cells: [], body: null, head: null },
 };
 
+const dom = {
+  bpm: null,
+  pattern: null,
+  step: null,
+  mode: null,
+  led: null,
+  meterSpans: [],
+  dots: [],
+  configList: null,
+  stepInputs: [],
+  stepModal: null,
+  configModal: null,
+  seqTable: null,
+};
+
 const API = {
   async request(path, options = {}) {
     const res = await fetch(path, options);
@@ -50,8 +65,9 @@ function pad(num) {
 function render(state) {
   if (!state) return;
   updateMeta(state);
-  ensureTable(state);
-  updateTableCells(state);
+  const dims = getTableDims(state);
+  ensureTable(state, dims);
+  updateTableCells(state, dims);
   renderInspector(state);
   renderConfig(state);
   updateStatus(state);
@@ -59,20 +75,15 @@ function render(state) {
 }
 
 function updateMeta(state) {
-  const setText = (selector, text) => {
-    const el = document.querySelector(selector);
-    if (el) el.textContent = text;
-  };
-  setText("[data-bpm]", Math.round(state.bpm || 0));
+  if (dom.bpm) dom.bpm.textContent = Math.round(state.bpm || 0);
   const seqIdx = state.currentSequence != null ? state.currentSequence : 0;
   const stepIdx = state.currentStep != null ? state.currentStep : 0;
-  setText("[data-pattern]", pad(seqIdx + 1));
-  setText("[data-step]", pad(stepIdx + 1));
-  setText("[data-mode]", state.mode || "sequence");
-  const led = document.querySelector("[data-led]");
-  if (led) {
-    led.textContent = state.isPlaying ? "Play" : "Stop";
-    led.classList.toggle("active", !!state.isPlaying);
+  if (dom.pattern) dom.pattern.textContent = pad(seqIdx + 1);
+  if (dom.step) dom.step.textContent = pad(stepIdx + 1);
+  if (dom.mode) dom.mode.textContent = state.mode || "sequence";
+  if (dom.led) {
+    dom.led.textContent = state.isPlaying ? "Play" : "Stop";
+    dom.led.classList.toggle("active", !!state.isPlaying);
   }
 }
 
@@ -87,12 +98,12 @@ function getTableDims(state) {
   return { cols, rows };
 }
 
-function ensureTable(state) {
-  const table = document.querySelector("[data-seq-table]");
+function ensureTable(state, dims) {
+  const table = dom.seqTable;
   if (!table) return;
   const head = table.querySelector("thead");
   const body = table.querySelector("tbody");
-  const { cols, rows } = getTableDims(state);
+  const { cols, rows } = dims;
   if (cols === ui.table.cols && rows === ui.table.rows && ui.table.cells.length) {
     return;
   }
@@ -102,7 +113,7 @@ function ensureTable(state) {
   ui.table.cells = [];
 
   const headRow = document.createElement("tr");
-  headRow.appendChild(document.createElement("th")); // corner cell
+  headRow.appendChild(document.createElement("th"));
   for (let c = 0; c < cols; c++) {
     const th = document.createElement("th");
     th.textContent = `Seq ${pad(c + 1)}`;
@@ -139,19 +150,22 @@ function ensureTable(state) {
   ui.table.head = head;
 }
 
-function updateTableCells(state) {
-  const { cols, rows } = getTableDims(state);
+function updateTableCells(state, dims) {
+  const { cols, rows } = dims;
   if (cols !== ui.table.cols || rows !== ui.table.rows || !ui.table.cells.length) {
-    ensureTable(state);
+    ensureTable(state, dims);
   }
   const grid = state.sequenceGrid || [];
   const playHeads = state.playHeads || [];
 
   for (let r = 0; r < ui.table.rows; r++) {
+    const rowCells = ui.table.cells[r];
+    if (!rowCells) continue;
     for (let c = 0; c < ui.table.cols; c++) {
-      const cell = ui.table.cells[r][c];
-      const val = grid[c] && grid[c][r] ? grid[c][r] : "";
-      cell.textContent = val;
+      const cell = rowCells[c];
+      const col = grid[c];
+      const val = col && col[r] ? col[r] : "";
+      if (cell.textContent !== val) cell.textContent = val;
 
       cell.className = "seq-cell";
       const playing = playHeads.some((p) => p.sequence === c && p.step === r);
@@ -174,19 +188,17 @@ function renderInspector(state) {
     channel: row[1] ?? "",
   };
 
-  document
-    .querySelectorAll("[data-step-field]")
-    .forEach((input) => {
-      const key = input.dataset.stepField;
-      const val = fieldMap[key];
-      if (val !== undefined) {
-        input.value = val;
-      }
-    });
+  dom.stepInputs.forEach((input) => {
+    const key = input.dataset.stepField;
+    const val = fieldMap[key];
+    if (val !== undefined) {
+      input.value = val;
+    }
+  });
 }
 
 function renderConfig(state) {
-  const list = document.querySelector("[data-config-list]");
+  const list = dom.configList;
   if (!list) return;
   const seqIdx = state.currentSequence != null ? state.currentSequence : 0;
   const configCols = state.sequenceConfigs || [];
@@ -201,25 +213,21 @@ function renderConfig(state) {
 }
 
 function updateStatus(state) {
-  const dots = document.querySelectorAll("[data-status-text] .dot");
-  if (!dots.length) return;
-  dots.forEach((dot, idx) => {
+  if (!dom.dots.length) return;
+  dom.dots.forEach((dot, idx) => {
     dot.classList.toggle("active", state.isPlaying && idx % 2 === 0);
   });
-  const meter = document.querySelectorAll("[data-meter] span");
-  meter.forEach((m, idx) => {
+  dom.meterSpans.forEach((m, idx) => {
     m.classList.toggle("lit", state.isPlaying && idx < 4);
   });
 }
 
 function toggleModals(state) {
-  const stepModal = document.querySelector('[data-modal="step"]');
-  const configModal = document.querySelector('[data-modal="config"]');
-  if (stepModal) {
-    stepModal.classList.toggle("active", state.mode === "step");
+  if (dom.stepModal) {
+    dom.stepModal.classList.toggle("active", state.mode === "step");
   }
-  if (configModal) {
-    configModal.classList.toggle("active", state.mode === "config");
+  if (dom.configModal) {
+    dom.configModal.classList.toggle("active", state.mode === "config");
   }
 }
 
@@ -231,7 +239,7 @@ function bindActions() {
     });
   });
 
-  document.querySelectorAll("[data-step-field]").forEach((input) => {
+  dom.stepInputs.forEach((input) => {
     input.addEventListener("change", (e) => {
       const field = e.currentTarget.dataset.stepField;
       const value = Number(e.currentTarget.value);
@@ -289,9 +297,21 @@ function handleAction(action) {
 }
 
 function boot() {
+  dom.bpm = document.querySelector("[data-bpm]");
+  dom.pattern = document.querySelector("[data-pattern]");
+  dom.step = document.querySelector("[data-step]");
+  dom.mode = document.querySelector("[data-mode]");
+  dom.led = document.querySelector("[data-led]");
+  dom.meterSpans = Array.from(document.querySelectorAll("[data-meter] span"));
+  dom.dots = Array.from(document.querySelectorAll("[data-status-text] .dot"));
+  dom.configList = document.querySelector("[data-config-list]");
+  dom.stepInputs = Array.from(document.querySelectorAll("[data-step-field]"));
+  dom.stepModal = document.querySelector('[data-modal="step"]');
+  dom.configModal = document.querySelector('[data-modal="config"]');
+  dom.seqTable = document.querySelector("[data-seq-table]");
   bindActions();
   API.fetchState();
-  setInterval(() => API.fetchState(), 500);
+  setInterval(() => API.fetchState(), 100);
 }
 
 window.addEventListener("DOMContentLoaded", boot);
