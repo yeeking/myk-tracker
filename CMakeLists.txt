@@ -5,6 +5,9 @@ project(myk-tracker VERSION 0.0.4)
 set(CMAKE_CXX_STANDARD 17)
 set (CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # mac - target macos 11
 set (CMAKE_OSX_ARCHITECTURES arm64;x86_64) # mac - build universal binary
+if (NOT DEFINED JUCE_VST3_COPY_DIR)
+    set(JUCE_VST3_COPY_DIR "${CMAKE_BINARY_DIR}/vst3" CACHE PATH "Where to copy built VST3s" FORCE)
+endif()
 
 
 ########## CLI version cmake config 
@@ -37,7 +40,19 @@ target_link_libraries(HttpFetchPerf PRIVATE)
 ########## END/ CLI version cmake config 
 
 ########## JUCE version cmake config 
-add_subdirectory(./libs/JUCE ./JUCE)               
+if (NOT TARGET juce::juce_audio_utils)
+    # Prefer vendored JUCE if present, otherwise fall back to the repository root copy.
+    set(myk_tracker_juce_dir "${CMAKE_CURRENT_LIST_DIR}/libs/JUCE")
+    if (NOT EXISTS "${myk_tracker_juce_dir}/CMakeLists.txt")
+        set(myk_tracker_juce_dir "${CMAKE_CURRENT_LIST_DIR}/../../JUCE")
+    endif()
+
+    if (EXISTS "${myk_tracker_juce_dir}/CMakeLists.txt")
+        add_subdirectory(${myk_tracker_juce_dir} ${CMAKE_CURRENT_BINARY_DIR}/JUCE)
+    else()
+        message(FATAL_ERROR "Could not find JUCE; expected at ${myk_tracker_juce_dir}")
+    endif()
+endif()
 
 juce_add_plugin(myk-tracker-plug
     # VERSION ...                               # Set this if the plugin version is different to the project version
@@ -52,7 +67,7 @@ juce_add_plugin(myk-tracker-plug
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE    # Does the editor need keyboard focus?
     NEEDS_WEB_BROWSER TRUE
     NEEDS_CURL TRUE
-    COPY_PLUGIN_AFTER_BUILD FALSE        # Should the plugin be installed to a default location after building?
+    COPY_PLUGIN_AFTER_BUILD TRUE        # Should the plugin be installed to a default location after building?
     PLUGIN_MANUFACTURER_CODE Yeek               # A four-character manufacturer id with at least one upper-case ``
     PLUGIN_CODE MykT                            # A unique four-character plugin id with exactly one upper-case character
                                                 # GarageBand 10.3 requires the first letter to be upper-case, and the remaining letters to be lower-case
