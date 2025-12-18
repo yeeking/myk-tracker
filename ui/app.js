@@ -21,19 +21,47 @@ const dom = {
 
 const API = {
   async request(path, options = {}) {
+    const start = performance.now();
     const res = await fetch(path, options);
+    const fetchDuration = performance.now() - start;
     if (!res.ok) {
       throw new Error(`Request failed: ${res.status}`);
     }
-    return res.json();
+    const jsonStart = performance.now();
+    const json = await res.json();
+    const jsonDuration = performance.now() - jsonStart;
+    // console.log("API.request timings", {
+    //   path,
+    //   fetchMs: fetchDuration.toFixed(2),
+    //   jsonMs: jsonDuration.toFixed(2),
+    //   totalMs: (performance.now() - start).toFixed(2),
+    // });
+    return json;
   },
   async fetchState() {
     if (ui.fetching) return;
     ui.fetching = true;
+    const fetchStart = performance.now();
+    const timings = [];
     try {
+      const requestStart = performance.now();
       const data = await this.request("/state");
+      timings.push({ label: "request", duration: performance.now() - requestStart });
+
+      const setStart = performance.now();
       ui.state = data;
+      timings.push({ label: "state set", duration: performance.now() - setStart });
+
+      const renderStart = performance.now();
       render(data);
+      const renderDuration = performance.now() - renderStart;
+      timings.push({ label: "render call", duration: renderDuration });
+
+      const total = performance.now() - fetchStart;
+      // console.log("fetchState timings", {
+      //   totalMs: total.toFixed(2),
+      //   steps: timings.map((t) => ({ label: t.label, ms: t.duration.toFixed(2) })),
+      // });
     } catch (err) {
       console.error(err);
     } finally {
@@ -62,8 +90,21 @@ function pad(num) {
   return String(num).padStart(2, "0");
 }
 
-function render(state) {
-  if (!state) return;
+function handleNativeState(state) {
+  // console.log("app.js calling handleNativeState");
+  ui.state = state;
+  render(state);
+
+}
+
+function renderNo(state) {
+  console.log("Render");
+}
+function render(state){
+  // for (let i=0;i<1000000;i++){
+  //   var str = "" + i;
+  // }
+  // return;
   updateMeta(state);
   const dims = getTableDims(state);
   ensureTable(state, dims);
@@ -72,6 +113,35 @@ function render(state) {
   renderConfig(state);
   updateStatus(state);
   toggleModals(state);
+}
+
+function renderLog(state) {
+  // console.log("RENDER");
+  if (!state) return;
+  const timings = [];
+  const timed = (label, fn) => {
+    const start = performance.now();
+    const result = fn();
+    timings.push({ label, duration: performance.now() - start });
+    return result;
+  };
+
+  timed("updateMeta", () => updateMeta(state));
+  const dims = timed("getTableDims", () => getTableDims(state));
+  timed("ensureTable", () => ensureTable(state, dims));
+  timed("updateTableCells", () => updateTableCells(state, dims));
+  timed("renderInspector", () => renderInspector(state));
+  timed("renderConfig", () => renderConfig(state));
+  timed("updateStatus", () => updateStatus(state));
+  timed("toggleModals", () => toggleModals(state));
+
+  const total = timings.reduce((sum, t) => sum + t.duration, 0);
+  const fps = total > 0 ? 1000 / total : 0;
+  // console.log("render timings", {
+  //   totalMs: total.toFixed(2),
+  //   estimatedFps: fps.toFixed(2),
+  //   steps: timings.map((t) => ({ label: t.label, ms: t.duration.toFixed(2) })),
+  // });
 }
 
 function updateMeta(state) {
@@ -310,8 +380,6 @@ function boot() {
   dom.configModal = document.querySelector('[data-modal="config"]');
   dom.seqTable = document.querySelector("[data-seq-table]");
   bindActions();
-  API.fetchState();
-  setInterval(() => API.fetchState(), 100);
 }
 
 window.addEventListener("DOMContentLoaded", boot);

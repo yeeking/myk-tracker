@@ -27,10 +27,12 @@ add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerComma
 
 add_executable(MykTracker src/Gui.cpp src/MidiUtils.cpp src/main.cpp)
 add_executable(CurTest src/Gui.cpp src/MidiUtils.cpp src/curtest.cpp)
+add_executable(HttpFetchPerf src/HttpFetchPerf.cpp)
 
 # Link the ncurses library with your executable
 target_link_libraries(MykTracker PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
 target_link_libraries(CurTest PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
+target_link_libraries(HttpFetchPerf PRIVATE)
 
 ########## END/ CLI version cmake config 
 

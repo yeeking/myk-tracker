@@ -22,7 +22,7 @@ PluginProcessor::PluginProcessor()
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
                        ), 
-                       sequencer{16, 8}, seqEditor{&sequencer}, 
+                       sequencer{2, 4}, seqEditor{&sequencer}, 
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
                        elapsedSamples{0},maxHorizon{44100 * 3600}, 
@@ -118,6 +118,8 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
+    juce::ignoreUnused(sampleRate, samplesPerBlock);
+    msSinceLastStateUpdate = stateUpdateIntervalMs;
 }
 
 void PluginProcessor::releaseResources()
@@ -232,6 +234,9 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     }
     midiToSend.clear();
     midiToSend.swapWith(futureMidi);
+    const double sr = getSampleRate();
+    const double blockMs = sr > 0.0 ? (static_cast<double>(buffer.getNumSamples()) * 1000.0 / sr) : 0.0;
+    maybeUpdateUiState(blockMs);
 }
 
 //==============================================================================
@@ -288,6 +293,45 @@ juce::var PluginProcessor::numberGridToVar(const std::vector<std::vector<double>
         cols.add(rows);
     }
     return cols;
+}
+
+void PluginProcessor::maybeUpdateUiState(double blockDurationMs)
+{
+    msSinceLastStateUpdate += blockDurationMs;
+    if (msSinceLastStateUpdate < stateUpdateIntervalMs)
+        return;
+
+    msSinceLastStateUpdate = 0.0;
+
+    const auto state = getUiState();
+    const auto json = juce::JSON::toString(state);
+
+    {
+        const juce::SpinLock::ScopedLockType lock(stateLock);
+        latestStateJson = json;
+        stateDirty.store(true, std::memory_order_release);
+    }
+
+    sendChangeMessage();
+}
+
+bool PluginProcessor::tryGetLatestSerializedUiState(juce::String& outJson)
+{
+    juce::SpinLock::ScopedTryLockType lock(stateLock);
+    if (!lock.isLocked())
+        return false;
+
+    if (!stateDirty.load(std::memory_order_acquire))
+        return false;
+
+    outJson = latestStateJson;
+    stateDirty.store(false, std::memory_order_release);
+    return true;
+}
+
+void PluginProcessor::setStateUpdateIntervalMs(double ms)
+{
+    stateUpdateIntervalMs = juce::jmax(1.0, ms);
 }
 
 juce::var PluginProcessor::getUiState()

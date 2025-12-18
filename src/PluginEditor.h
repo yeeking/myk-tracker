@@ -10,10 +10,9 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-#include <JuceHeader.h>
-#include "PluginProcessor.h"
 
-class PluginEditor  : public juce::AudioProcessorEditor
+class PluginEditor  : public juce::AudioProcessorEditor,
+                      public juce::ChangeListener
 {
 public:
     explicit PluginEditor (PluginProcessor&);
@@ -21,10 +20,18 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void pushStateToWebView(const juce::String& stateJson);
+    void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
 private:
+    class StateWebView;
+    void handlePageFinishedLoading(const juce::String& url);
+    void initialiseWebBridge();
+
     PluginProcessor& audioProcessor;
-    juce::WebBrowserComponent webView;
+    std::unique_ptr<StateWebView> webView;
+    bool pageReady { false };
+    juce::String pendingStateJson;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };

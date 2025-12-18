@@ -5,6 +5,16 @@
 
 #include "PluginProcessor.h"
 
+namespace
+{
+void logRequestTiming(const httplib::Request& req, const httplib::Response& res, double startMs)
+{
+    const auto elapsed = juce::Time::getMillisecondCounterHiRes() - startMs;
+    DBG("HttpServer timing " << req.method << " " << req.path << " -> " << res.status << " in "
+                             << juce::String(elapsed, 2) << "ms");
+}
+} // namespace
+
 HttpServerThread::HttpServerThread(PluginProcessor& processor)
     : juce::Thread("HTTP Server Thread"), pluginProc(processor)
 {
@@ -19,12 +29,15 @@ void HttpServerThread::initAPI()
 
     registerStaticRoutes();
 
-    svr.Get("/state", [this](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/state", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto start = juce::Time::getMillisecondCounterHiRes();
         auto state = pluginProc.getUiState();
         res.set_content(juce::JSON::toString(state).toStdString(), "application/json");
+        logRequestTiming(req, res, start);
     });
 
     svr.Post("/command", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto start = juce::Time::getMillisecondCounterHiRes();
         juce::DynamicObject::Ptr resp = new juce::DynamicObject();
         auto parsed = juce::JSON::parse(req.body);
 
@@ -45,6 +58,7 @@ void HttpServerThread::initAPI()
 
         resp->setProperty("state", pluginProc.getUiState());
         res.set_content(juce::JSON::toString(juce::var(resp)).toStdString(), "application/json");
+        logRequestTiming(req, res, start);
     });
 }
 
