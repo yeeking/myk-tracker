@@ -114,11 +114,19 @@ function renderNo(state) {
 }
 function render(state){
   updateMeta(state);
-  const dims = getTableDims(state);
-  ensureTable(state, dims);
-  updateTableCells(state, dims);
-  renderStepInspector(state);
-  renderConfig(state);
+
+  if (state.mode == "sequence") {
+    const dims = getTableDims(state);
+    ensureTable(state, dims);
+    updateTableCells(state, dims);
+  }
+  if (state.mode == "step") {
+    renderStepInspector(state);
+  }
+  if (state.mode == "config") {
+    renderConfig(state);
+  }
+  
   updateStatus(state);
   toggleModals(state);
 }
@@ -260,7 +268,7 @@ function updateTableCells(state, dims) {
           ui.lastCursor = { seq: c, step: r };
           const container = dom.gridMain;
           if (container) {
-            console.log("Scrolling into view...");
+            // console.log("Scrolling into view...");
             cell.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
           }
         }
@@ -326,6 +334,7 @@ function renderStepInspector(state) {
 }
 
 function renderConfig(state) {
+
   // console.log("renderConfig");
   
   const table = dom.configTable;
@@ -365,7 +374,6 @@ function renderConfig(state) {
           ui.lastConfigCursor = { seq: c, row: r };
           if (dom.gridConfig) {
               td_to_scrollto = td; 
-            // td.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
           }
         }
       }
