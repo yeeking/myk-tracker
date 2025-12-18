@@ -2,6 +2,7 @@ const ui = {
   state: null,
   fetching: false,
   table: { cols: 0, rows: 0, cells: [], body: null, head: null },
+  lastCursor: { seq: null, step: null },
 };
 let pendingState = null;
 let rafId = null;
@@ -10,15 +11,17 @@ const dom = {
   bpm: null,
   pattern: null,
   step: null,
+  seqRange: null,
   mode: null,
   led: null,
   meterSpans: [],
   dots: [],
-  configList: null,
-  stepInputs: [],
+  configTable: null,
+  stepTable: null,
   stepModal: null,
   configModal: null,
   seqTable: null,
+  gridContainer: null,
 };
 
 const API = {
@@ -153,6 +156,8 @@ function updateMeta(state) {
   const stepIdx = state.currentStep != null ? state.currentStep : 0;
   if (dom.pattern) dom.pattern.textContent = pad(seqIdx + 1);
   if (dom.step) dom.step.textContent = pad(stepIdx + 1);
+  const totalSeqs = state.sequenceGrid ? state.sequenceGrid.length : 0;
+  if (dom.seqRange) dom.seqRange.textContent = `${pad(seqIdx + 1)}/${pad(totalSeqs)}`;
   if (dom.mode) dom.mode.textContent = state.mode || "sequence";
   if (dom.led) {
     dom.led.textContent = state.isPlaying ? "Play" : "Stop";
@@ -186,21 +191,15 @@ function ensureTable(state, dims) {
   ui.table.cells = [];
 
   const headRow = document.createElement("tr");
-  headRow.appendChild(document.createElement("th"));
   for (let c = 0; c < cols; c++) {
     const th = document.createElement("th");
-    th.textContent = `Seq ${pad(c + 1)}`;
+    th.textContent = `S${c + 1}`;
     headRow.appendChild(th);
   }
   head.appendChild(headRow);
 
   for (let r = 0; r < rows; r++) {
     const tr = document.createElement("tr");
-    const rowLabel = document.createElement("th");
-    rowLabel.className = "row-label";
-    rowLabel.textContent = pad(r + 1);
-    tr.appendChild(rowLabel);
-
     const rowCells = [];
     for (let c = 0; c < cols; c++) {
       const td = document.createElement("td");
@@ -246,45 +245,92 @@ function updateTableCells(state, dims) {
       const playing = activeMap.has(`${c}:${r}`);
       if (playing) cell.classList.add("active-step");
       if (state.armedSequence === c) cell.classList.add("armed-step");
-      if (state.currentSequence === c && state.currentStep === r) {
+      const isCursor = state.currentSequence === c && state.currentStep === r;
+      if (isCursor) {
         cell.classList.add("cursor-step");
+        if (
+          ui.lastCursor.seq !== c ||
+          ui.lastCursor.step !== r
+        ) {
+          ui.lastCursor = { seq: c, step: r };
+          if (dom.gridContainer) {
+            cell.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+          }
+        }
       }
     }
   }
 }
 
 function renderInspector(state) {
-  const row = state.stepData && state.stepData[0] ? state.stepData[0] : [];
-  const fieldMap = {
-    note: row[2] ?? "",
-    velocity: row[3] ?? "",
-    length: row[4] ?? "",
-    probability: row[5] ?? "",
-    channel: row[1] ?? "",
-  };
+  const table = dom.stepTable;
+  if (!table) return;
+  const thead = table.querySelector("thead");
+  const tbody = table.querySelector("tbody");
+  thead.innerHTML = "";
+  tbody.innerHTML = "";
 
-  dom.stepInputs.forEach((input) => {
-    const key = input.dataset.stepField;
-    const val = fieldMap[key];
-    if (val !== undefined) {
-      input.value = val;
+  const data = state.stepData || [];
+  const rows = Array.isArray(data) ? data : [];
+  const maxCols = rows.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0);
+
+  if (maxCols === 0) return;
+
+  const headRow = document.createElement("tr");
+  const emptyTh = document.createElement("th");
+  headRow.appendChild(emptyTh);
+  for (let c = 0; c < maxCols; c++) {
+    const th = document.createElement("th");
+    th.textContent = `C${c + 1}`;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+
+  rows.forEach((row, rIdx) => {
+    const tr = document.createElement("tr");
+    const label = document.createElement("th");
+    label.textContent = pad(rIdx + 1);
+    tr.appendChild(label);
+    for (let c = 0; c < maxCols; c++) {
+      const td = document.createElement("td");
+      td.textContent = row && row[c] != null ? row[c] : "";
+      tr.appendChild(td);
     }
+    tbody.appendChild(tr);
   });
 }
 
 function renderConfig(state) {
-  const list = dom.configList;
-  if (!list) return;
-  const seqIdx = state.currentSequence != null ? state.currentSequence : 0;
+  const table = dom.configTable;
+  if (!table) return;
+  const thead = table.querySelector("thead");
+  const tbody = table.querySelector("tbody");
+  thead.innerHTML = "";
+  tbody.innerHTML = "";
+
   const configCols = state.sequenceConfigs || [];
-  const values = configCols[seqIdx] || [];
-  list.innerHTML = "";
-  values.forEach((val) => {
-    const item = document.createElement("div");
-    item.className = "config-item";
-    item.textContent = val;
-    list.appendChild(item);
-  });
+  const cols = configCols.length;
+  const rows = cols ? Math.max(...configCols.map((c) => (Array.isArray(c) ? c.length : 0))) : 0;
+  if (!cols) return;
+
+  const headRow = document.createElement("tr");
+  for (let c = 0; c < cols; c++) {
+    const th = document.createElement("th");
+    th.textContent = `Seq ${pad(c + 1)}`;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+
+  for (let r = 0; r < rows; r++) {
+    const tr = document.createElement("tr");
+    for (let c = 0; c < cols; c++) {
+      const td = document.createElement("td");
+      const col = configCols[c] || [];
+      td.textContent = col[r] != null ? col[r] : "";
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
 }
 
 function updateStatus(state) {
@@ -311,14 +357,6 @@ function bindActions() {
     btn.addEventListener("click", (e) => {
       const action = e.currentTarget.dataset.action;
       handleAction(action);
-    });
-  });
-
-  dom.stepInputs.forEach((input) => {
-    input.addEventListener("change", (e) => {
-      const field = e.currentTarget.dataset.stepField;
-      const value = Number(e.currentTarget.value);
-      API.sendCommand("setStepValue", { field, value });
     });
   });
 
@@ -375,15 +413,17 @@ function boot() {
   dom.bpm = document.querySelector("[data-bpm]");
   dom.pattern = document.querySelector("[data-pattern]");
   dom.step = document.querySelector("[data-step]");
+  dom.seqRange = document.querySelector("[data-seq-range]");
   dom.mode = document.querySelector("[data-mode]");
   dom.led = document.querySelector("[data-led]");
   dom.meterSpans = Array.from(document.querySelectorAll("[data-meter] span"));
   dom.dots = Array.from(document.querySelectorAll("[data-status-text] .dot"));
-  dom.configList = document.querySelector("[data-config-list]");
-  dom.stepInputs = Array.from(document.querySelectorAll("[data-step-field]"));
+  dom.configTable = document.querySelector("[data-config-table]");
+  dom.stepTable = document.querySelector("[data-step-table]");
   dom.stepModal = document.querySelector('[data-modal="step"]');
   dom.configModal = document.querySelector('[data-modal="config"]');
   dom.seqTable = document.querySelector("[data-seq-table]");
+  dom.gridContainer = document.querySelector(".grid-table");
   bindActions();
 }
 

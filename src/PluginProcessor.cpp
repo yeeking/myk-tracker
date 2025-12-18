@@ -22,7 +22,7 @@ PluginProcessor::PluginProcessor()
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
                        ), 
-                       sequencer{2, 4}, seqEditor{&sequencer}, 
+                       sequencer{8, 16}, seqEditor{&sequencer}, 
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
                        elapsedSamples{0},maxHorizon{44100 * 3600}, 
@@ -302,8 +302,9 @@ juce::var PluginProcessor::numberGridToVar(const std::vector<std::vector<double>
 void PluginProcessor::maybeUpdateUiState(double blockDurationMs)
 {
     msSinceLastStateUpdate += blockDurationMs;
-    if (msSinceLastStateUpdate < stateUpdateIntervalMs)
-        return;
+    // commented it out so it always updates 
+    // if (msSinceLastStateUpdate < stateUpdateIntervalMs)
+        // return;
 
     msSinceLastStateUpdate = 0.0;
 
