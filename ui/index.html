@@ -33,8 +33,22 @@
         </div>
       </header>
 
-      <div class="grid-table">
+      <div class="grid-table" data-view="main-grid">
         <table class="seq-table" data-seq-table>
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="grid-table" data-view="step-grid" hidden>
+        <table class="seq-table" data-step-table>
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="grid-table" data-view="config-grid" hidden>
+        <table class="seq-table" data-config-table>
           <thead></thead>
           <tbody></tbody>
         </table>
@@ -53,34 +67,6 @@
       </div>
     </section>
   </main>
-  <div class="modal-backdrop" data-modal="step">
-    <div class="modal-panel">
-      <div class="modal-header">
-        <div class="modal-title">Step Edit</div>
-        <button class="close" data-action="closeModal">×</button>
-      </div>
-      <div class="modal-table">
-        <table data-step-table>
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  <div class="modal-backdrop" data-modal="config">
-    <div class="modal-panel">
-      <div class="modal-header">
-        <div class="modal-title">Sequence Config</div>
-        <button class="close" data-action="closeModal">×</button>
-      </div>
-      <div class="modal-table">
-        <table data-config-table>
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
   <script src="app.js"></script>
 </body>
 </html>

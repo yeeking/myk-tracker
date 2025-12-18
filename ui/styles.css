@@ -139,6 +139,9 @@ body {
   background: var(--grid-bg);
   border: 1px solid var(--grid-border);
 }
+.grid-table[hidden] {
+  display: none !important;
+}
 
 .seq-table {
   width: 100%;
@@ -181,6 +184,10 @@ body {
 }
 
 .seq-table .seq-cell.cursor-step {
+  outline: 3px solid #c0c0c0;
+  outline-offset: -3px;
+}
+.cursor-step {
   outline: 3px solid #c0c0c0;
   outline-offset: -3px;
 }

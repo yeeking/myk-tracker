@@ -3,6 +3,8 @@ const ui = {
   fetching: false,
   table: { cols: 0, rows: 0, cells: [], body: null, head: null },
   lastCursor: { seq: null, step: null },
+  lastStepCursor: { row: null, col: null },
+  lastConfigCursor: { seq: null, row: null },
 };
 let pendingState = null;
 let rafId = null;
@@ -18,10 +20,10 @@ const dom = {
   dots: [],
   configTable: null,
   stepTable: null,
-  stepModal: null,
-  configModal: null,
   seqTable: null,
-  gridContainer: null,
+  gridMain: null,
+  gridStep: null,
+  gridConfig: null,
 };
 
 const API = {
@@ -115,7 +117,7 @@ function render(state){
   const dims = getTableDims(state);
   ensureTable(state, dims);
   updateTableCells(state, dims);
-  renderInspector(state);
+  renderStepInspector(state);
   renderConfig(state);
   updateStatus(state);
   toggleModals(state);
@@ -136,7 +138,7 @@ function renderLog(state) {
   const dims = timed("getTableDims", () => getTableDims(state));
   timed("ensureTable", () => ensureTable(state, dims));
   timed("updateTableCells", () => updateTableCells(state, dims));
-  timed("renderInspector", () => renderInspector(state));
+  timed("renderInspector", () => renderStepInspector(state));
   timed("renderConfig", () => renderConfig(state));
   timed("updateStatus", () => updateStatus(state));
   timed("toggleModals", () => toggleModals(state));
@@ -194,6 +196,9 @@ function ensureTable(state, dims) {
   for (let c = 0; c < cols; c++) {
     const th = document.createElement("th");
     th.textContent = `S${c + 1}`;
+    th.addEventListener("click", () => {
+      API.sendCommand("setMode", { mode: "config", sequence: c });
+    });
     headRow.appendChild(th);
   }
   head.appendChild(headRow);
@@ -253,7 +258,9 @@ function updateTableCells(state, dims) {
           ui.lastCursor.step !== r
         ) {
           ui.lastCursor = { seq: c, step: r };
-          if (dom.gridContainer) {
+          const container = dom.gridMain;
+          if (container) {
+            console.log("Scrolling into view...");
             cell.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
           }
         }
@@ -262,7 +269,8 @@ function updateTableCells(state, dims) {
   }
 }
 
-function renderInspector(state) {
+function renderStepInspector(state) {
+  // console.log("renderInspector");
   const table = dom.stepTable;
   if (!table) return;
   const thead = table.querySelector("thead");
@@ -286,6 +294,8 @@ function renderInspector(state) {
   }
   thead.appendChild(headRow);
 
+  let td_to_scrollto;
+
   rows.forEach((row, rIdx) => {
     const tr = document.createElement("tr");
     const label = document.createElement("th");
@@ -294,13 +304,30 @@ function renderInspector(state) {
     for (let c = 0; c < maxCols; c++) {
       const td = document.createElement("td");
       td.textContent = row && row[c] != null ? row[c] : "";
+      if (state.currentStepRow === rIdx && state.currentStepCol === c) {
+        td.classList.add("cursor-step");
+        // td.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+        // console.log("renderStepInspector scrolling col " + c + " into view");
+        // td.scrollIntoView();
+        if (ui.lastStepCursor.row !== rIdx || ui.lastStepCursor.col !== c) {
+          ui.lastStepCursor = { row: rIdx, col: c };
+          if (dom.gridStep) {
+            td_to_scrollto = td; 
+          }
+        }
+      }
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
+    if (td_to_scrollto != undefined){
+      td_to_scrollto.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+    }
   });
 }
 
 function renderConfig(state) {
+  // console.log("renderConfig");
+  
   const table = dom.configTable;
   if (!table) return;
   const thead = table.querySelector("thead");
@@ -317,19 +344,37 @@ function renderConfig(state) {
   for (let c = 0; c < cols; c++) {
     const th = document.createElement("th");
     th.textContent = `Seq ${pad(c + 1)}`;
+    if (state.currentSequence === c && state.mode === "config") {
+      th.classList.add("cursor-step");
+    }
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);
 
+  let td_to_scrollto;
+  // console.log("renderConfig:: state.currentStepRow at " + state.currentStepRow);
   for (let r = 0; r < rows; r++) {
     const tr = document.createElement("tr");
     for (let c = 0; c < cols; c++) {
       const td = document.createElement("td");
       const col = configCols[c] || [];
       td.textContent = col[r] != null ? col[r] : "";
+      if (state.currentSequence === c && state.mode === "config" && r === state.currentSeqParam) {
+        td.classList.add("cursor-step");
+        if (ui.lastConfigCursor.seq !== c || ui.lastConfigCursor.row !== r) {
+          ui.lastConfigCursor = { seq: c, row: r };
+          if (dom.gridConfig) {
+              td_to_scrollto = td; 
+            // td.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+          }
+        }
+      }
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
+      if (td_to_scrollto != undefined){
+      td_to_scrollto.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+    }
   }
 }
 
@@ -344,12 +389,11 @@ function updateStatus(state) {
 }
 
 function toggleModals(state) {
-  if (dom.stepModal) {
-    dom.stepModal.classList.toggle("active", state.mode === "step");
-  }
-  if (dom.configModal) {
-    dom.configModal.classList.toggle("active", state.mode === "config");
-  }
+  if (!dom.gridMain || !dom.gridStep || !dom.gridConfig) return;
+  const mode = state.mode || "sequence";
+  dom.gridMain.hidden = mode !== "sequence";
+  dom.gridStep.hidden = mode !== "step";
+  dom.gridConfig.hidden = mode !== "config";
 }
 
 function bindActions() {
@@ -420,10 +464,10 @@ function boot() {
   dom.dots = Array.from(document.querySelectorAll("[data-status-text] .dot"));
   dom.configTable = document.querySelector("[data-config-table]");
   dom.stepTable = document.querySelector("[data-step-table]");
-  dom.stepModal = document.querySelector('[data-modal="step"]');
-  dom.configModal = document.querySelector('[data-modal="config"]');
   dom.seqTable = document.querySelector("[data-seq-table]");
-  dom.gridContainer = document.querySelector(".grid-table");
+  dom.gridMain = document.querySelector('[data-view="main-grid"]');
+  dom.gridStep = document.querySelector('[data-view="step-grid"]');
+  dom.gridConfig = document.querySelector('[data-view="config-grid"]');
   bindActions();
 }
 

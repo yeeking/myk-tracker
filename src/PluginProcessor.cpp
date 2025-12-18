@@ -367,6 +367,7 @@ juce::var PluginProcessor::getUiState()
     state->setProperty("currentStepRow", static_cast<int>(seqEditor.getCurrentStepRow()));
     state->setProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol()));
     state->setProperty("armedSequence", static_cast<int>(seqEditor.getArmedSequence()));
+    state->setProperty("currentSeqParam", static_cast<int>(seqEditor.getCurrentSeqParam()));
 
     state->setProperty("sequenceGrid", stringGridToVar(sequencer.getSequenceAsGridOfStrings()));
     state->setProperty("stepGrid", stringGridToVar(sequencer.getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
@@ -574,11 +575,11 @@ bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
         return true;
     };
 
-    juce::String normalized = action.toLowerCase();
-    if (normalized == "key" || normalized == "keypress")
+    juce::String command = action.toLowerCase();
+    if (command == "key" || command == "keypress")
         return handleKeyCommand(payload, error);
 
-    if (normalized == "toggleplay")
+    if (command == "toggleplay")
     {
         CommandProcessor::sendAllNotesOff();
         if (sequencer.isPlaying())
@@ -591,14 +592,14 @@ bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
         return updateState();
     }
 
-    if (normalized == "rewind")
+    if (command == "rewind")
     {
         CommandProcessor::sendAllNotesOff();
         sequencer.rewindAtNextZero();
         return updateState();
     }
 
-    if (normalized == "move")
+    if (command == "move")
     {
         juce::String dir = payload.getProperty("direction", "").toString().toLowerCase();
         if (dir == "up")
@@ -614,62 +615,62 @@ bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
         return updateState();
     }
 
-    if (normalized == "nextstep")
+    if (command == "nextstep")
     {
         seqEditor.nextStep();
         return updateState();
     }
 
-    if (normalized == "addrow")
+    if (command == "addrow")
     {
         seqEditor.addRow();
         return updateState();
     }
 
-    if (normalized == "removerow")
+    if (command == "removerow")
     {
         seqEditor.removeRow();
         return updateState();
     }
 
-    if (normalized == "increment")
+    if (command == "increment")
     {
         seqEditor.incrementAtCursor();
         return updateState();
     }
 
-    if (normalized == "decrement")
+    if (command == "decrement")
     {
         seqEditor.decrementAtCursor();
         return updateState();
     }
 
-    if (normalized == "incrementoctave")
+    if (command == "incrementoctave")
     {
         seqEditor.incrementOctave();
         return updateState();
     }
 
-    if (normalized == "decrementoctave")
+    if (command == "decrementoctave")
     {
         seqEditor.decrementOctave();
         return updateState();
     }
 
-    if (normalized == "enter")
+    if (command == "enter")
     {
         seqEditor.enterAtCursor();
         return updateState();
     }
 
-    if (normalized == "reset")
+    if (command == "reset")
     {
         seqEditor.resetAtCursor();
         CommandProcessor::sendAllNotesOff();
         return updateState();
     }
 
-    if (normalized == "setmode")
+    if (command == "setmode")
     {
         juce::String mode = payload.getProperty("mode", "").toString().toLowerCase();
         if (mode == "sequence")
@@ -681,7 +682,7 @@ bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
         return updateState();
     }
 
-    if (normalized == "setcursor")
+    if (command == "setcursor")
     {
         int seq = static_cast<int>(payload.getProperty("sequence", static_cast<int>(seqEditor.getCurrentSequence())));
         int step = static_cast<int>(payload.getProperty("step", static_cast<int>(seqEditor.getCurrentStep())));
@@ -690,33 +691,33 @@ bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
         return updateState();
     }
 
-    if (normalized == "armsequence")
+    if (command == "armsequence")
     {
         std::size_t seq = static_cast<std::size_t>(static_cast<int>(payload.getProperty("sequence", static_cast<int>(seqEditor.getCurrentSequence()))));
         seqEditor.setArmedSequence(seq);
         return updateState();
     }
 
-    if (normalized == "togglemute")
+    if (command == "togglemute")
     {
         std::size_t seq = static_cast<std::size_t>(static_cast<int>(payload.getProperty("sequence", static_cast<int>(seqEditor.getCurrentSequence()))));
         sequencer.toggleSequenceMute(seq);
         return updateState();
     }
 
-    if (normalized == "incrementbpm")
+    if (command == "incrementbpm")
     {
         trackerController.incrementBPM();
         return updateState();
     }
 
-    if (normalized == "decrementbpm")
+    if (command == "decrementbpm")
     {
         trackerController.decrementBPM();
         return updateState();
     }
 
-    if (normalized == "setbpm")
+    if (command == "setbpm")
     {
         double newBpm = static_cast<double>(payload.getProperty("bpm", getBPM()));
         if (newBpm > 0)
@@ -724,7 +725,7 @@ bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
         return updateState();
     }
 
-    if (normalized == "setstepvalue")
+    if (command == "setstepvalue")
     {
         juce::String field = payload.getProperty("field", "").toString().toLowerCase();
         double value = static_cast<double>(payload.getProperty("value", 0.0));
@@ -749,7 +750,7 @@ bool PluginProcessor::handleCommand(const juce::var& body, juce::String& error)
         return updateState();
     }
 
-    if (normalized == "enterstepdata")
+    if (command == "enterstepdata")
     {
         double value = static_cast<double>(payload.getProperty("value", 0.0));
         int column = static_cast<int>(payload.getProperty("column", static_cast<int>(Step::noteInd)));
