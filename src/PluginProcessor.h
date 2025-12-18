@@ -95,11 +95,17 @@ public:
     void setStateUpdateIntervalMs(double ms);
     
 private:
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     bool handleKeyCommand(const juce::var& payload, juce::String& error);
     juce::var stringGridToVar(const std::vector<std::vector<std::string>>& grid);
     juce::var numberGridToVar(const std::vector<std::vector<double>>& grid);
     void syncSequenceStrings();
     void maybeUpdateUiState(double blockDurationMs);
+    void applyPendingSequenceChanges();
+    void addSequenceImmediate();
+    void removeSequenceImmediate();
+    juce::var serializeSequencerState();
+    void restoreSequencerState(const juce::var& stateVar);
 
     Sequencer sequencer;
   /** keep the seq editor in the processor as the plugineditor
@@ -119,6 +125,7 @@ private:
     double bpm; 
     int outstandingNoteOffs;
 
+    juce::AudioProcessorValueTreeState apvts;
     std::unique_ptr<HttpServerThread> apiServer;
     // UI state push helpers
     double stateUpdateIntervalMs { 50.0 };

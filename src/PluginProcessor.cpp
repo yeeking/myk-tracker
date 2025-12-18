@@ -22,6 +22,7 @@ PluginProcessor::PluginProcessor()
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
                        ), 
+                       apvts(*this, nullptr, "params", createParameterLayout()),
                        sequencer{8, 16}, seqEditor{&sequencer}, 
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
@@ -255,17 +256,39 @@ juce::AudioProcessorEditor* PluginProcessor::createEditor()
 }
 
 //==============================================================================
+juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParameterLayout()
+{
+    // No traditional parameters yet – we just want the APVTS machinery for state persistence.
+    return {};
+}
+
 void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
+    const auto stateVar = serializeSequencerState();
+    const auto json = juce::JSON::toString(stateVar);
+    apvts.state.setProperty("json", json, nullptr);
+
+    juce::MemoryOutputStream stream(destData, true);
+    if (auto xml = apvts.copyState().createXml())
+        xml->writeTo(stream);
 }
 
 void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
+    juce::MemoryInputStream input(data, static_cast<size_t>(sizeInBytes), false);
+    if (auto xml = juce::parseXML(input.readEntireStreamAsString()))
+    {
+        auto vt = juce::ValueTree::fromXml(*xml);
+        if (vt.isValid())
+            apvts.replaceState(vt);
+    }
+
+    const juce::String json = apvts.state.getProperty("json").toString();
+    if (json.isNotEmpty())
+    {
+        const auto parsed = juce::JSON::fromString(json);
+        restoreSequencerState(parsed);
+    }
 }
 
 void PluginProcessor::syncSequenceStrings()
@@ -319,6 +342,10 @@ void PluginProcessor::maybeUpdateUiState(double blockDurationMs)
 
     sendChangeMessage();
 }
+
+void PluginProcessor::applyPendingSequenceChanges() {}
+void PluginProcessor::addSequenceImmediate() {}
+void PluginProcessor::removeSequenceImmediate() {}
 
 bool PluginProcessor::tryGetLatestSerializedUiState(juce::String& outJson)
 {
@@ -395,6 +422,180 @@ juce::var PluginProcessor::getUiState()
     state->setProperty("ticksPerStep", static_cast<int>(sequencer.getSequence(seqEditor.getCurrentSequence())->getTicksPerStep()));
 
     return state.get();
+}
+
+juce::var PluginProcessor::serializeSequencerState()
+{
+    juce::DynamicObject::Ptr root = new juce::DynamicObject();
+    auto sequencerToVar = [this]() {
+        juce::DynamicObject::Ptr seqRoot = new juce::DynamicObject();
+        juce::Array<juce::var> sequencesVar;
+        const auto seqCount = sequencer.howManySequences();
+        for (std::size_t seqIndex = 0; seqIndex < seqCount; ++seqIndex)
+        {
+            juce::DynamicObject::Ptr seqObj = new juce::DynamicObject();
+            Sequence* seq = sequencer.getSequence(seqIndex);
+            const auto length = seq->getLength();
+            seqObj->setProperty("length", static_cast<int>(length));
+            seqObj->setProperty("type", static_cast<int>(seq->getType()));
+            seqObj->setProperty("ticksPerStep", static_cast<int>(seq->getTicksPerStep()));
+            seqObj->setProperty("muted", seq->isMuted());
+            seqObj->setProperty("channel", sequencer.getStepDataAt(seqIndex, 0, 0, Step::chanInd));
+
+            juce::Array<juce::var> stepsVar;
+            for (std::size_t step = 0; step < length; ++step)
+            {
+                juce::DynamicObject::Ptr stepObj = new juce::DynamicObject();
+                stepObj->setProperty("active", sequencer.isStepActive(seqIndex, step));
+                juce::Array<juce::var> rows;
+                const auto data = sequencer.getStepData(seqIndex, step);
+                for (const auto& row : data)
+                {
+                    juce::Array<juce::var> cols;
+                    for (auto val : row)
+                        cols.add(val);
+                    rows.add(cols);
+                }
+                stepObj->setProperty("data", rows);
+                stepsVar.add(stepObj.get());
+            }
+
+            seqObj->setProperty("steps", stepsVar);
+            sequencesVar.add(seqObj.get());
+        }
+
+        seqRoot->setProperty("sequences", sequencesVar);
+        return juce::var(seqRoot.get());
+    };
+
+    root->setProperty("sequencer", sequencerToVar());
+    root->setProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence()));
+    root->setProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep()));
+    root->setProperty("currentStepRow", static_cast<int>(seqEditor.getCurrentStepRow()));
+    root->setProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol()));
+
+    juce::String modeStr = "sequence";
+    const auto uiState = getUiState();
+    if (uiState.isObject())
+        modeStr = uiState.getProperty("mode", "sequence").toString();
+    root->setProperty("mode", modeStr);
+
+    return root.get();
+}
+
+void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
+{
+    if (!stateVar.isObject())
+        return;
+
+    const auto seqVar = stateVar.getProperty("sequencer", juce::var());
+    if (seqVar.isObject())
+    {
+        const auto seqArrayVar = seqVar.getProperty("sequences", juce::var());
+        if (seqArrayVar.isArray())
+        {
+            const auto& seqArray = *seqArrayVar.getArray();
+            const auto seqCount = juce::jmin<std::size_t>(seqArray.size(), sequencer.howManySequences());
+            for (std::size_t i = 0; i < seqCount; ++i)
+            {
+                const auto& seqObj = seqArray[static_cast<int>(i)];
+                if (!seqObj.isObject())
+                    continue;
+
+                Sequence* seq = sequencer.getSequence(i);
+                const int length = juce::jmax(1, static_cast<int>(seqObj.getProperty("length", static_cast<int>(seq->getLength()))));
+                seq->ensureEnoughStepsForLength(static_cast<std::size_t>(length));
+                seq->setLength(static_cast<std::size_t>(length));
+
+                const auto typeInt = static_cast<int>(seqObj.getProperty("type", static_cast<int>(seq->getType())));
+                seq->setType(static_cast<SequenceType>(typeInt));
+
+                const std::size_t tps = static_cast<std::size_t>(static_cast<int>(seqObj.getProperty("ticksPerStep", static_cast<int>(seq->getTicksPerStep()))));
+                seq->setTicksPerStep(tps);
+                seq->onZeroSetTicksPerStep(tps);
+
+                const double channel = static_cast<double>(seqObj.getProperty("channel", sequencer.getStepDataAt(i, 0, 0, Step::chanInd)));
+
+                const auto stepsVar = seqObj.getProperty("steps", juce::var());
+                if (stepsVar.isArray())
+                {
+                    const auto& stepsArray = *stepsVar.getArray();
+                    const auto stepsToLoad = juce::jmin<std::size_t>(stepsArray.size(), static_cast<std::size_t>(length));
+                    for (std::size_t step = 0; step < stepsToLoad; ++step)
+                    {
+                        const auto& stepVar = stepsArray[static_cast<int>(step)];
+                        if (!stepVar.isObject())
+                            continue;
+
+                        const auto dataVar = stepVar.getProperty("data", juce::var());
+                        if (dataVar.isArray())
+                        {
+                            std::vector<std::vector<double>> data;
+                            for (const auto& rowVar : *dataVar.getArray())
+                            {
+                                std::vector<double> row;
+                                if (rowVar.isArray())
+                                {
+                                    for (const auto& val : *rowVar.getArray())
+                                        row.push_back(static_cast<double>(val));
+                                }
+                                if (!row.empty())
+                                    data.push_back(row);
+                            }
+                            if (!data.empty())
+                                sequencer.setStepData(i, step, data);
+                        }
+
+                        const bool active = static_cast<bool>(stepVar.getProperty("active", true));
+                        if (sequencer.isStepActive(i, step) != active)
+                            sequencer.toggleStepActive(i, step);
+                    }
+                }
+
+                for (std::size_t step = 0; step < seq->getLength(); ++step)
+                    sequencer.setStepDataAt(i, step, 0, Step::chanInd, channel);
+
+                const bool mutedTarget = static_cast<bool>(seqObj.getProperty("muted", false));
+                if (seq->isMuted() != mutedTarget)
+                    sequencer.toggleSequenceMute(i);
+            }
+        }
+    }
+
+    int seq = static_cast<int>(stateVar.getProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence())));
+    const int maxSeq = static_cast<int>(juce::jmax<std::size_t>(1, sequencer.howManySequences())) - 1;
+    seq = juce::jlimit(0, juce::jmax(0, maxSeq), seq);
+    seqEditor.setCurrentSequence(seq);
+
+    int step = static_cast<int>(stateVar.getProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep())));
+    const int maxStep = static_cast<int>(juce::jmax<std::size_t>(1, sequencer.howManySteps(seq))) - 1;
+    step = juce::jlimit(0, juce::jmax(0, maxStep), step);
+    seqEditor.setCurrentStep(step);
+
+    int stepRow = static_cast<int>(stateVar.getProperty("currentStepRow", static_cast<int>(seqEditor.getCurrentStepRow())));
+    stepRow = juce::jmax(0, stepRow);
+    seqEditor.setCurrentStepRow(stepRow);
+
+    int stepCol = static_cast<int>(stateVar.getProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol())));
+    stepCol = juce::jmax(0, stepCol);
+    seqEditor.setCurrentStepCol(stepCol);
+
+    juce::String mode = stateVar.getProperty("mode", "sequence").toString().toLowerCase();
+    if (mode == "step")
+        seqEditor.setEditMode(SequencerEditorMode::editingStep);
+    else if (mode == "config")
+        seqEditor.setEditMode(SequencerEditorMode::configuringSequence);
+    else
+        seqEditor.setEditMode(SequencerEditorMode::selectingSeqAndStep);
+
+    syncSequenceStrings();
+    msSinceLastStateUpdate = stateUpdateIntervalMs;
+    {
+        const juce::SpinLock::ScopedLockType lock(stateLock);
+        latestStateJson = juce::JSON::toString(getUiState());
+        stateDirty.store(true, std::memory_order_release);
+    }
+    sendChangeMessage();
 }
 
 bool PluginProcessor::handleKeyCommand(const juce::var& payload, juce::String& error)

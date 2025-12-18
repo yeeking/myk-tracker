@@ -114,6 +114,12 @@ void Step::deactivate()
   active = false;
 }
 
+void Step::setActive(bool shouldBeActive)
+{
+  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  active = shouldBeActive;
+}
+
 /** sets the data stored in this step */
 void Step::setData(const std::vector<std::vector<double>> &_data)
 {

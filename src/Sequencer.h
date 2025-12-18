@@ -87,6 +87,7 @@ class Step{
     void toggleActive();
     void activate();
     void deactivate();
+    void setActive(bool shouldBeActive);
     /** returns the activity status of this step */
     bool isActive() const;
     /** convert double to string with sent no. decimal places*/
