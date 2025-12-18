@@ -236,9 +236,9 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     }
     midiToSend.clear();
     midiToSend.swapWith(futureMidi);
-    const double sr = getSampleRate();
-    const double blockMs = sr > 0.0 ? (static_cast<double>(buffer.getNumSamples()) * 1000.0 / sr) : 0.0;
     if (ticked){
+        const double sr = getSampleRate();
+        const double blockMs = sr > 0.0 ? (static_cast<double>(buffer.getNumSamples()) * 1000.0 / sr) : 0.0;
         maybeUpdateUiState(blockMs);
     }
 }
