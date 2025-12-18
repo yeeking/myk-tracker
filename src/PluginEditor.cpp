@@ -107,8 +107,8 @@ void PluginEditor::pushStateToWebView(const juce::String& stateJson)
     webView->evaluateJavascript(
         script,
         [start] (juce::WebBrowserComponent::EvaluationResult) {
-            const auto elapsed = juce::Time::getMillisecondCounterHiRes() - start;
-            DBG("handleNativeState eval+callback took " << juce::String(elapsed, 2) << " ms");
+            // const auto elapsed = juce::Time::getMillisecondCounterHiRes() - start;
+            // DBG("handleNativeState eval+callback took " << juce::String(elapsed, 2) << " ms");
         });
 }
 

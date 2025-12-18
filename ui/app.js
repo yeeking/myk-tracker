@@ -3,6 +3,8 @@ const ui = {
   fetching: false,
   table: { cols: 0, rows: 0, cells: [], body: null, head: null },
 };
+let pendingState = null;
+let rafId = null;
 
 const dom = {
   bpm: null,
@@ -91,20 +93,21 @@ function pad(num) {
 }
 
 function handleNativeState(state) {
-  // console.log("app.js calling handleNativeState");
-  ui.state = state;
-  render(state);
-
+  pendingState = state;
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = null;
+    if (!pendingState) return;
+    ui.state = pendingState;
+    render(pendingState);
+    pendingState = null;
+  });
 }
 
 function renderNo(state) {
   console.log("Render");
 }
 function render(state){
-  // for (let i=0;i<1000000;i++){
-  //   var str = "" + i;
-  // }
-  // return;
   updateMeta(state);
   const dims = getTableDims(state);
   ensureTable(state, dims);
@@ -227,6 +230,8 @@ function updateTableCells(state, dims) {
   }
   const grid = state.sequenceGrid || [];
   const playHeads = state.playHeads || [];
+  const activeMap = new Set();
+  playHeads.forEach((p) => activeMap.add(`${p.sequence}:${p.step}`));
 
   for (let r = 0; r < ui.table.rows; r++) {
     const rowCells = ui.table.cells[r];
@@ -238,7 +243,7 @@ function updateTableCells(state, dims) {
       if (cell.textContent !== val) cell.textContent = val;
 
       cell.className = "seq-cell";
-      const playing = playHeads.some((p) => p.sequence === c && p.step === r);
+      const playing = activeMap.has(`${c}:${r}`);
       if (playing) cell.classList.add("active-step");
       if (state.armedSequence === c) cell.classList.add("armed-step");
       if (state.currentSequence === c && state.currentStep === r) {

@@ -184,6 +184,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     int blockStartSample = elapsedSamples;
     int blockEndSample = (elapsedSamples + getBlockSize()) % maxHorizon;
     int bufferSize = getBlockSize();
+    bool ticked{false};
     for (int i=0;i<bufferSize; ++i){
         // weird but since juce midi sample offsets are int not unsigned long, 
         // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
@@ -194,6 +195,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             this->tick(); 
             // this will cause any pending messages to be added to 'midiToSend'
             sequencer.tick();
+            ticked = true; 
         }
     }
     // to get sample-accurate midi as opposed to block-accurate midi (!)
@@ -236,7 +238,9 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     midiToSend.swapWith(futureMidi);
     const double sr = getSampleRate();
     const double blockMs = sr > 0.0 ? (static_cast<double>(buffer.getNumSamples()) * 1000.0 / sr) : 0.0;
-    maybeUpdateUiState(blockMs);
+    if (ticked){
+        maybeUpdateUiState(blockMs);
+    }
 }
 
 //==============================================================================
