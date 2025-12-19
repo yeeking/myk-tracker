@@ -54,12 +54,13 @@ private:
         bool isActivePlayhead = false;
         bool isSelected = false;
         bool isArmed = false;
+        float playheadGlow = 0.0f;
     };
 
     struct ShaderAttributes
     {
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> position;
-        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> colour;
+        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> normal;
     };
 
     struct ShaderUniforms
@@ -68,6 +69,11 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> viewMatrix;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> modelMatrix;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> cellColor;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> cellGlow;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> lightDirection;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> lightColor;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> ambientStrength;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> glowColor;
     };
 
     struct TextShaderAttributes
@@ -129,6 +135,7 @@ private:
     std::mutex cellStateMutex;
     std::vector<std::vector<CellVisualState>> cellStates;
     std::vector<std::vector<std::string>> visibleText;
+    std::vector<std::vector<float>> playheadGlow;
     size_t visibleCols = 0;
     size_t visibleRows = 0;
     size_t startCol = 0;

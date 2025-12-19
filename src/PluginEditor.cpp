@@ -10,6 +10,7 @@
 #include "PluginEditor.h"
 #include "SequencerCommands.h"
 #include "SimpleClock.h"
+#include <cmath>
 
 using namespace juce::gl;
 
@@ -18,31 +19,42 @@ namespace
 struct Vertex
 {
     float position[3];
-    float colour[4];
+    float normal[3];
 };
 
 const char* vertexShaderSource = R"(
     attribute vec3 position;
-    attribute vec4 colour;
+    attribute vec3 normal;
     uniform mat4 projectionMatrix;
     uniform mat4 viewMatrix;
     uniform mat4 modelMatrix;
-    uniform vec4 cellColor;
-    varying vec4 vColour;
+    varying vec3 vNormal;
 
     void main()
     {
-        vColour = colour * cellColor;
+        vec4 worldNormal = modelMatrix * vec4(normal, 0.0);
+        vNormal = normalize(worldNormal.xyz);
         gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
     }
 )";
 
 const char* fragmentShaderSource = R"(
-    varying vec4 vColour;
+    varying vec3 vNormal;
+    uniform vec4 cellColor;
+    uniform float cellGlow;
+    uniform vec3 lightDirection;
+    uniform vec3 lightColor;
+    uniform float ambientStrength;
+    uniform vec3 glowColor;
 
     void main()
     {
-        gl_FragColor = vColour;
+        vec3 normal = normalize(vNormal);
+        vec3 lightDir = normalize(lightDirection);
+        float diff = max(dot(normal, lightDir), 0.0);
+        vec3 litColor = cellColor.rgb * (ambientStrength + diff * lightColor);
+        vec3 glow = glowColor * cellGlow;
+        gl_FragColor = vec4(litColor + glow, cellColor.a);
     }
 )";
 
@@ -75,24 +87,46 @@ const char* textFragmentShaderSource = R"(
 
 const Vertex cubeVertices[] =
 {
-    { { -0.5f, -0.5f,  0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-    { {  0.5f, -0.5f,  0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-    { {  0.5f,  0.5f,  0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-    { { -0.5f,  0.5f,  0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-    { { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-    { {  0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-    { {  0.5f,  0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-    { { -0.5f,  0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f, 1.0f } }
+    // +Z
+    { { -0.5f, -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { {  0.5f, -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { {  0.5f,  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { { -0.5f,  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    // +X
+    { {  0.5f, -0.5f,  0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { {  0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { {  0.5f,  0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { {  0.5f,  0.5f,  0.5f }, { 1.0f, 0.0f, 0.0f } },
+    // -Z
+    { {  0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f, -1.0f } },
+    { { -0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f, -1.0f } },
+    { { -0.5f,  0.5f, -0.5f }, { 0.0f, 0.0f, -1.0f } },
+    { {  0.5f,  0.5f, -0.5f }, { 0.0f, 0.0f, -1.0f } },
+    // -X
+    { { -0.5f, -0.5f, -0.5f }, { -1.0f, 0.0f, 0.0f } },
+    { { -0.5f, -0.5f,  0.5f }, { -1.0f, 0.0f, 0.0f } },
+    { { -0.5f,  0.5f,  0.5f }, { -1.0f, 0.0f, 0.0f } },
+    { { -0.5f,  0.5f, -0.5f }, { -1.0f, 0.0f, 0.0f } },
+    // +Y
+    { { -0.5f,  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { {  0.5f,  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { {  0.5f,  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { -0.5f,  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    // -Y
+    { { -0.5f, -0.5f, -0.5f }, { 0.0f, -1.0f, 0.0f } },
+    { {  0.5f, -0.5f, -0.5f }, { 0.0f, -1.0f, 0.0f } },
+    { {  0.5f, -0.5f,  0.5f }, { 0.0f, -1.0f, 0.0f } },
+    { { -0.5f, -0.5f,  0.5f }, { 0.0f, -1.0f, 0.0f } }
 };
 
 const GLuint cubeIndices[] =
 {
-    0, 1, 2, 2, 3, 0, // front
-    1, 5, 6, 6, 2, 1, // right
-    5, 4, 7, 7, 6, 5, // back
-    4, 0, 3, 3, 7, 4, // left
-    3, 2, 6, 6, 7, 3, // top
-    4, 5, 1, 1, 0, 4  // bottom
+    0, 1, 2, 2, 3, 0,       // +Z
+    4, 5, 6, 6, 7, 4,       // +X
+    8, 9, 10, 10, 11, 8,    // -Z
+    12, 13, 14, 14, 15, 12, // -X
+    16, 17, 18, 18, 19, 16, // +Y
+    20, 21, 22, 22, 23, 20  // -Y
 };
 const GLsizei cubeIndexCount = static_cast<GLsizei>(sizeof(cubeIndices) / sizeof(cubeIndices[0]));
 
@@ -153,13 +187,18 @@ void PluginEditor::newOpenGLContextCreated()
     {
         shaderAttributes = std::make_unique<ShaderAttributes>();
         shaderAttributes->position = std::make_unique<juce::OpenGLShaderProgram::Attribute>(*shaderProgram, "position");
-        shaderAttributes->colour = std::make_unique<juce::OpenGLShaderProgram::Attribute>(*shaderProgram, "colour");
+        shaderAttributes->normal = std::make_unique<juce::OpenGLShaderProgram::Attribute>(*shaderProgram, "normal");
 
         shaderUniforms = std::make_unique<ShaderUniforms>();
         shaderUniforms->projectionMatrix = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "projectionMatrix");
         shaderUniforms->viewMatrix = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "viewMatrix");
         shaderUniforms->modelMatrix = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "modelMatrix");
         shaderUniforms->cellColor = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "cellColor");
+        shaderUniforms->cellGlow = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "cellGlow");
+        shaderUniforms->lightDirection = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "lightDirection");
+        shaderUniforms->lightColor = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "lightColor");
+        shaderUniforms->ambientStrength = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "ambientStrength");
+        shaderUniforms->glowColor = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*shaderProgram, "glowColor");
     }
     else
     {
@@ -269,15 +308,15 @@ void PluginEditor::renderOpenGL()
         openGLContext.extensions.glEnableVertexAttribArray(shaderAttributes->position->attributeID);
     }
 
-    if (shaderAttributes->colour != nullptr)
+    if (shaderAttributes->normal != nullptr)
     {
-        openGLContext.extensions.glVertexAttribPointer(shaderAttributes->colour->attributeID,
-                                                       4,
+        openGLContext.extensions.glVertexAttribPointer(shaderAttributes->normal->attributeID,
+                                                       3,
                                                        GL_FLOAT,
                                                        GL_FALSE,
                                                        stride,
-                                                       reinterpret_cast<GLvoid*>(offsetof(Vertex, colour)));
-        openGLContext.extensions.glEnableVertexAttribArray(shaderAttributes->colour->attributeID);
+                                                       reinterpret_cast<GLvoid*>(offsetof(Vertex, normal)));
+        openGLContext.extensions.glEnableVertexAttribArray(shaderAttributes->normal->attributeID);
     }
 
     {
@@ -286,7 +325,7 @@ void PluginEditor::renderOpenGL()
         {
             const float cellWidth = 1.0f;
             const float cellHeight = 1.0f;
-            const float cellDepth = 0.3f;
+            const float cellDepth = 0.6f;
             const float cellGap = 0.2f;
 
             const float stepX = cellWidth + cellGap;
@@ -310,6 +349,9 @@ void PluginEditor::renderOpenGL()
                     const auto scale = juce::Vector3D<float>(cellWidth, cellHeight, depth);
                     const auto modelMatrix = getModelMatrix(position, scale);
                     const auto colour = getCellColour(cell);
+                    const float timeSeconds = static_cast<float>(framesDrawn) / 25.0f;
+                    const float glowPulse = 0.75f + 0.25f * std::sin(timeSeconds * 6.0f);
+                    const float glow = cell.playheadGlow * glowPulse;
 
                     if (shaderUniforms->modelMatrix != nullptr)
                         shaderUniforms->modelMatrix->setMatrix4(modelMatrix.mat, 1, GL_FALSE);
@@ -319,6 +361,21 @@ void PluginEditor::renderOpenGL()
                                                        colour.getFloatGreen(),
                                                        colour.getFloatBlue(),
                                                        colour.getFloatAlpha());
+
+                    if (shaderUniforms->cellGlow != nullptr)
+                        shaderUniforms->cellGlow->set(glow);
+
+                    if (shaderUniforms->lightDirection != nullptr)
+                        shaderUniforms->lightDirection->set(0.2f, 0.4f, 1.0f);
+
+                    if (shaderUniforms->lightColor != nullptr)
+                        shaderUniforms->lightColor->set(1.0f, 0.95f, 0.9f);
+
+                    if (shaderUniforms->ambientStrength != nullptr)
+                        shaderUniforms->ambientStrength->set(0.35f);
+
+                    if (shaderUniforms->glowColor != nullptr)
+                        shaderUniforms->glowColor->set(1.0f, 0.6f, 0.15f);
 
                     glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
                 }
@@ -402,7 +459,7 @@ void PluginEditor::renderOpenGL()
 
                         const auto position = juce::Vector3D<float>(startX + static_cast<float>(col) * stepX,
                                                                     startY - static_cast<float>(row) * stepY,
-                                                                    0.2f);
+                                                                    0.5f);
                         const auto scale = juce::Vector3D<float>(cellWidth * 0.9f, cellHeight * 0.9f, 1.0f);
                         const auto modelMatrix = getModelMatrix(position, scale);
 
@@ -427,8 +484,8 @@ void PluginEditor::renderOpenGL()
     if (shaderAttributes->position != nullptr)
         openGLContext.extensions.glDisableVertexAttribArray(shaderAttributes->position->attributeID);
 
-    if (shaderAttributes->colour != nullptr)
-        openGLContext.extensions.glDisableVertexAttribArray(shaderAttributes->colour->attributeID);
+    if (shaderAttributes->normal != nullptr)
+        openGLContext.extensions.glDisableVertexAttribArray(shaderAttributes->normal->attributeID);
 
     openGLContext.extensions.glUseProgram(0);
     glDisable(GL_SCISSOR_TEST);
@@ -610,17 +667,34 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
     lastStartCol = nextStartCol;
     lastStartRow = nextStartRow;
 
+    std::vector<std::vector<float>> oldGlow;
+    size_t oldStartCol = 0;
+    size_t oldStartRow = 0;
+    {
+        std::lock_guard<std::mutex> lock(cellStateMutex);
+        oldGlow = playheadGlow;
+        oldStartCol = startCol;
+        oldStartRow = startRow;
+    }
+
+    const bool reuseGlow = (oldStartCol == nextStartCol && oldStartRow == nextStartRow);
+    const float glowDecay = 0.85f;
+
     std::vector<std::vector<CellVisualState>> nextStates;
     std::vector<std::vector<std::string>> nextText;
+    std::vector<std::vector<float>> nextGlow;
     nextStates.reserve(nextEndCol - nextStartCol);
     nextText.reserve(nextEndCol - nextStartCol);
+    nextGlow.reserve(nextEndCol - nextStartCol);
 
     for (size_t col = nextStartCol; col < nextEndCol; ++col)
     {
         std::vector<CellVisualState> columnStates;
         std::vector<std::string> columnText;
+        std::vector<float> columnGlow;
         columnStates.reserve(nextEndRow - nextStartRow);
         columnText.reserve(nextEndRow - nextStartRow);
+        columnGlow.reserve(nextEndRow - nextStartRow);
 
         for (size_t row = nextStartRow; row < nextEndRow; ++row)
         {
@@ -640,18 +714,31 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
             const bool isSelected = showCursor && col == cursorCol && row == cursorRow;
             const bool isArmed = (armedSeq != Sequencer::notArmed) && col == armedSeq;
 
-            columnStates.push_back(CellVisualState{hasNote, isHighlighted, isSelected, isArmed});
+            float previousGlow = 0.0f;
+            if (reuseGlow && (col - nextStartCol) < oldGlow.size())
+            {
+                const auto& oldColumn = oldGlow[col - nextStartCol];
+                if ((row - nextStartRow) < oldColumn.size())
+                    previousGlow = oldColumn[row - nextStartRow];
+            }
+
+            const float glowValue = isHighlighted ? 1.0f : (previousGlow * glowDecay);
+
+            columnStates.push_back(CellVisualState{hasNote, isHighlighted, isSelected, isArmed, glowValue});
             columnText.push_back(cellValue);
+            columnGlow.push_back(glowValue);
         }
 
         nextStates.push_back(std::move(columnStates));
         nextText.push_back(std::move(columnText));
+        nextGlow.push_back(std::move(columnGlow));
     }
 
     {
         std::lock_guard<std::mutex> lock(cellStateMutex);
         cellStates = std::move(nextStates);
         visibleText = std::move(nextText);
+        playheadGlow = std::move(nextGlow);
         visibleCols = nextEndCol - nextStartCol;
         visibleRows = nextEndRow - nextStartRow;
         startCol = nextStartCol;
@@ -687,7 +774,7 @@ juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
 {
     if (cell.isSelected)
         return juce::Colour::fromFloatRGBA(0.4f, 1.0f, 0.4f, 1.0f);
-    if (cell.isActivePlayhead)
+    if (cell.playheadGlow > 0.01f || cell.isActivePlayhead)
         return juce::Colour::fromFloatRGBA(1.0f, 0.6f, 0.1f, 1.0f);
     if (cell.isArmed)
         return juce::Colour::fromFloatRGBA(0.9f, 0.2f, 0.2f, 0.9f);
