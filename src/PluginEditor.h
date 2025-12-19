@@ -70,6 +70,21 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> cellColor;
     };
 
+    struct TextShaderAttributes
+    {
+        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> position;
+        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> texCoord;
+    };
+
+    struct TextShaderUniforms
+    {
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> projectionMatrix;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> viewMatrix;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> modelMatrix;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uvRect;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> textTexture;
+    };
+
     PluginProcessor& audioProcessor;
 
     StringTable controlPanelTable;
@@ -80,8 +95,13 @@ private:
     std::unique_ptr<juce::OpenGLShaderProgram> shaderProgram;
     std::unique_ptr<ShaderAttributes> shaderAttributes;
     std::unique_ptr<ShaderUniforms> shaderUniforms;
+    std::unique_ptr<juce::OpenGLShaderProgram> textShaderProgram;
+    std::unique_ptr<TextShaderAttributes> textShaderAttributes;
+    std::unique_ptr<TextShaderUniforms> textShaderUniforms;
+    juce::OpenGLTexture textTexture;
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
+    GLuint textVertexBuffer = 0;
 
     size_t rowsInUI;
     juce::Rectangle<int> seqViewBounds;
@@ -104,15 +124,24 @@ private:
     juce::Matrix3D<float> getModelMatrix(juce::Vector3D<float> position, juce::Vector3D<float> scale) const;
     juce::Colour getCellColour(const CellVisualState& cell) const;
     float getCellDepthScale(const CellVisualState& cell) const;
+    void updateTextAtlasImage();
 
     std::mutex cellStateMutex;
     std::vector<std::vector<CellVisualState>> cellStates;
+    std::vector<std::vector<std::string>> visibleText;
     size_t visibleCols = 0;
     size_t visibleRows = 0;
     size_t startCol = 0;
     size_t startRow = 0;
     size_t lastStartCol = 0;
     size_t lastStartRow = 0;
+    bool textAtlasDirty = false;
+    bool textAtlasUploadPending = false;
+    int textAtlasWidth = 0;
+    int textAtlasHeight = 0;
+    int cellPixelWidth = 0;
+    int cellPixelHeight = 0;
+    juce::Image textAtlasImage;
 
     bool waitingForPaint;
     bool updateSeqStrOnNextDraw;
