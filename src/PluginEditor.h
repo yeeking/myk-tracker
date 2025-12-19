@@ -38,6 +38,9 @@ public:
     void newOpenGLContextCreated() override;
     void renderOpenGL() override;
     void openGLContextClosing() override;
+    void mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
+    void mouseDown(const juce::MouseEvent& event) override;
+    void mouseDrag(const juce::MouseEvent& event) override;
 
     // KeyListener overrides
     using juce::Component::keyPressed;
@@ -131,6 +134,11 @@ private:
     juce::Colour getCellColour(const CellVisualState& cell) const;
     float getCellDepthScale(const CellVisualState& cell) const;
     void updateTextAtlasImage();
+    void adjustZoom(float delta);
+    void moveUp(float amount);
+    void moveDown(float amount);
+    void moveLeft(float amount);
+    void moveRight(float amount);
 
     std::mutex cellStateMutex;
     std::vector<std::vector<CellVisualState>> cellStates;
@@ -149,6 +157,10 @@ private:
     int cellPixelWidth = 0;
     int cellPixelHeight = 0;
     juce::Image textAtlasImage;
+    float zoomLevel = 1.0f;
+    juce::Point<int> lastDragPosition;
+    float panOffsetX = 0.0f;
+    float panOffsetY = 0.0f;
 
     bool waitingForPaint;
     bool updateSeqStrOnNextDraw;

@@ -678,7 +678,7 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
     }
 
     const bool reuseGlow = (oldStartCol == nextStartCol && oldStartRow == nextStartRow);
-    const float glowDecay = 0.85f;
+    const float glowDecayStep = 0.08f;
 
     std::vector<std::vector<CellVisualState>> nextStates;
     std::vector<std::vector<std::string>> nextText;
@@ -722,7 +722,7 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
                     previousGlow = oldColumn[row - nextStartRow];
             }
 
-            const float glowValue = isHighlighted ? 1.0f : (previousGlow * glowDecay);
+            const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow - glowDecayStep);
 
             columnStates.push_back(CellVisualState{hasNote, isHighlighted, isSelected, isArmed, glowValue});
             columnText.push_back(cellValue);
@@ -761,8 +761,9 @@ juce::Matrix3D<float> PluginEditor::getProjectionMatrix(float aspectRatio) const
 
 juce::Matrix3D<float> PluginEditor::getViewMatrix() const
 {
-    const float cameraDistance = 20.0f;
-    return juce::Matrix3D<float>::fromTranslation({0.0f, 0.0f, -cameraDistance});
+    const float baseDistance = 20.0f;
+    const float cameraDistance = baseDistance / zoomLevel;
+    return juce::Matrix3D<float>::fromTranslation({panOffsetX, panOffsetY, -cameraDistance});
 }
 
 juce::Matrix3D<float> PluginEditor::getModelMatrix(juce::Vector3D<float> position, juce::Vector3D<float> scale) const
@@ -774,8 +775,6 @@ juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
 {
     if (cell.isSelected)
         return juce::Colour::fromFloatRGBA(0.4f, 1.0f, 0.4f, 1.0f);
-    if (cell.playheadGlow > 0.01f || cell.isActivePlayhead)
-        return juce::Colour::fromFloatRGBA(1.0f, 0.6f, 0.1f, 1.0f);
     if (cell.isArmed)
         return juce::Colour::fromFloatRGBA(0.9f, 0.2f, 0.2f, 0.9f);
     if (cell.hasNote)
@@ -792,6 +791,65 @@ float PluginEditor::getCellDepthScale(const CellVisualState& cell) const
     if (cell.isSelected) scale = 1.6f;
     if (cell.isArmed) scale = 1.2f;
     return scale;
+}
+
+void PluginEditor::adjustZoom(float delta)
+{
+    const float minZoom = 0.5f;
+    const float maxZoom = 2.5f;
+    zoomLevel = juce::jlimit(minZoom, maxZoom, zoomLevel + delta);
+}
+
+void PluginEditor::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+{
+    if (!seqViewBounds.contains(event.getPosition()))
+        return;
+
+    const float zoomDelta = wheel.deltaY * 0.4f;
+    if (std::abs(zoomDelta) > 0.0001f)
+        adjustZoom(zoomDelta);
+}
+
+void PluginEditor::moveUp(float amount)
+{
+    panOffsetY += amount;
+}
+
+void PluginEditor::moveDown(float amount)
+{
+    panOffsetY -= amount;
+}
+
+void PluginEditor::moveLeft(float amount)
+{
+    panOffsetX += amount;
+}
+
+void PluginEditor::moveRight(float amount)
+{
+    panOffsetX -= amount;
+}
+
+void PluginEditor::mouseDown(const juce::MouseEvent& event)
+{
+    if (!seqViewBounds.contains(event.getPosition()))
+        return;
+
+    lastDragPosition = event.getPosition();
+}
+
+void PluginEditor::mouseDrag(const juce::MouseEvent& event)
+{
+    if (!seqViewBounds.contains(event.getPosition()))
+        return;
+
+    const auto currentPos = event.getPosition();
+    const auto delta = currentPos - lastDragPosition;
+    lastDragPosition = currentPos;
+
+    const float panScale = 0.02f / zoomLevel;
+    panOffsetX += static_cast<float>(delta.x) * panScale;
+    panOffsetY -= static_cast<float>(delta.y) * panScale;
 }
 
 void PluginEditor::updateTextAtlasImage()
