@@ -51,6 +51,12 @@ public:
     // void updateStringOnNextDraw();
     long framesDrawn; 
 private:
+// some variables to control the display style
+    const float glowDecayScalar{0.8f};
+    const float glowDecayStep{0.1f};
+    const float cellWidth{2.0f};
+
+
     struct CellVisualState
     {
         bool hasNote = false;

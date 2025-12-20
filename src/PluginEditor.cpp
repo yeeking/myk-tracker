@@ -162,7 +162,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.
     setSize (1024, 768);
-    addAndMakeVisible(controlPanelTable);
+    // addAndMakeVisible(controlPanelTable);
     
     // Add this editor as a key listener
     addKeyListener(this);
@@ -323,7 +323,9 @@ void PluginEditor::renderOpenGL()
         std::lock_guard<std::mutex> lock(cellStateMutex);
         if (visibleCols > 0 && visibleRows > 0 && !cellStates.empty())
         {
-            const float cellWidth = 1.0f;
+            // const float cellWidth = 1.0f;
+            // const float cellWidth = 2.0f;
+            
             const float cellHeight = 1.0f;
             const float cellDepth = 0.6f;
             const float cellGap = 0.2f;
@@ -435,7 +437,7 @@ void PluginEditor::renderOpenGL()
                 && textAtlasWidth > 0 && textAtlasHeight > 0
                 && cellPixelWidth > 0 && cellPixelHeight > 0)
             {
-                const float cellWidth = 1.0f;
+                // const float cellWidth = 1.0f;
                 const float cellHeight = 1.0f;
                 const float cellGap = 0.2f;
                 const float stepX = cellWidth + cellGap;
@@ -678,7 +680,9 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
     }
 
     const bool reuseGlow = (oldStartCol == nextStartCol && oldStartRow == nextStartRow);
-    const float glowDecayStep = 0.08f;
+    // const float glowDecayStep = 0.1f;
+    // const float glowDecayScalar = 0.8f;
+    
 
     std::vector<std::vector<CellVisualState>> nextStates;
     std::vector<std::vector<std::string>> nextText;
@@ -721,9 +725,11 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
                 if ((row - nextStartRow) < oldColumn.size())
                     previousGlow = oldColumn[row - nextStartRow];
             }
-
-            const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow - glowDecayStep);
-
+            // decay by a constant 
+            // const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow - glowDecayStep);
+            // decay using a scalar 
+            const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow * glowDecayScalar);
+            
             columnStates.push_back(CellVisualState{hasNote, isHighlighted, isSelected, isArmed, glowValue});
             columnText.push_back(cellValue);
             columnGlow.push_back(glowValue);
@@ -771,14 +777,17 @@ juce::Matrix3D<float> PluginEditor::getModelMatrix(juce::Vector3D<float> positio
     return juce::Matrix3D<float>::fromTranslation(position) * makeScaleMatrix(scale);
 }
 
+/** select colour based on cell state  */
 juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
 {
     if (cell.isSelected)
         return juce::Colour::fromFloatRGBA(0.4f, 1.0f, 0.4f, 1.0f);
     if (cell.isArmed)
         return juce::Colour::fromFloatRGBA(0.9f, 0.2f, 0.2f, 0.9f);
-    if (cell.hasNote)
-        return juce::Colour::fromFloatRGBA(0.2f, 0.7f, 0.9f, 0.9f);
+    if (cell.hasNote){
+        // return juce::Colour::fromFloatRGBA(0.2f, 0.7f, 0.9f, 0.9f);
+        return juce::Colour::fromFloatRGBA(0.0f, 0.2f, 0.0f, 0.1f);
+    }
 
     return juce::Colour::fromFloatRGBA(0.2f, 0.2f, 0.2f, 0.35f);
 }
@@ -852,6 +861,7 @@ void PluginEditor::mouseDrag(const juce::MouseEvent& event)
     panOffsetY -= static_cast<float>(delta.y) * panScale;
 }
 
+/** dynamically generate a bitmap of the text for the sequencer */
 void PluginEditor::updateTextAtlasImage()
 {
     std::vector<std::vector<std::string>> textCopy;
@@ -881,7 +891,9 @@ void PluginEditor::updateTextAtlasImage()
     juce::Graphics g(nextImage);
     g.fillAll(juce::Colours::transparentBlack);
     g.setColour(juce::Colours::white.withAlpha(0.9f));
-    g.setFont(juce::Font(static_cast<float>(nextCellHeight) * 0.35f, juce::Font::plain));
+    // g.setFont(juce::Font(static_cast<float>(nextCellHeight) * 0.35f, juce::Font::bold));
+    g.setFont(juce::Font(static_cast<float>(nextCellHeight) * 0.75f, juce::Font::bold));
+    
 
     for (size_t col = 0; col < cols; ++col)
     {
@@ -890,6 +902,7 @@ void PluginEditor::updateTextAtlasImage()
             const int x = static_cast<int>(col) * nextCellWidth;
             const int y = static_cast<int>(row) * nextCellHeight;
             const juce::Rectangle<int> cellBounds(x, y, nextCellWidth, nextCellHeight);
+            
             g.drawText(textCopy[col][row], cellBounds, juce::Justification::centred, true);
         }
     }
