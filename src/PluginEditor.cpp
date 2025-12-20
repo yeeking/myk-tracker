@@ -155,6 +155,20 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     trackerController{p.getTrackerController()}, 
     rowsInUI{9}, waitingForPaint{false}, updateSeqStrOnNextDraw{false}, framesDrawn{0}
 {
+    palette.background = juce::Colour(0xFF02040A);
+    palette.gridEmpty = juce::Colour(0xFF1B2024);
+    palette.gridNote = juce::Colour(0xFF00F6FF);
+    palette.gridPlayhead = juce::Colour(0xFFFF3B2F);
+    palette.gridSelected = juce::Colour(0xFF29E0FF);
+    palette.textPrimary = juce::Colour(0xFF3DE6C0);
+    palette.textWarning = juce::Colour(0xFFFF5A3C);
+    palette.textBackground = juce::Colours::transparentBlack;
+    palette.statusOk = juce::Colour(0xFF19FF6A);
+    palette.borderNeon = juce::Colour(0xFF0F5F4B);
+    palette.lightColor = juce::Colour(0xFFDDF6E8);
+    palette.ambientStrength = 0.32f;
+    palette.lightDirection = { 0.2f, 0.45f, 1.0f };
+
     openGLContext.setRenderer(this);
     openGLContext.setContinuousRepainting(false);
     openGLContext.setComponentPaintingEnabled(true);
@@ -278,7 +292,10 @@ void PluginEditor::renderOpenGL()
     glScissor(viewportX, viewportY, viewportWidth, viewportHeight);
     glViewport(viewportX, viewportY, viewportWidth, viewportHeight);
 
-    glClearColor(0.02f, 0.02f, 0.02f, 1.0f);
+    glClearColor(palette.background.getFloatRed(),
+                 palette.background.getFloatGreen(),
+                 palette.background.getFloatBlue(),
+                 palette.background.getFloatAlpha());
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     openGLContext.extensions.glUseProgram(shaderProgram->getProgramID());
@@ -354,6 +371,7 @@ void PluginEditor::renderOpenGL()
                     const float timeSeconds = static_cast<float>(framesDrawn) / 25.0f;
                     const float glowPulse = 0.75f + 0.25f * std::sin(timeSeconds * 6.0f);
                     const float glow = cell.playheadGlow * glowPulse;
+                    const bool wireframe = cell.hasNote;
 
                     if (shaderUniforms->modelMatrix != nullptr)
                         shaderUniforms->modelMatrix->setMatrix4(modelMatrix.mat, 1, GL_FALSE);
@@ -368,18 +386,37 @@ void PluginEditor::renderOpenGL()
                         shaderUniforms->cellGlow->set(glow);
 
                     if (shaderUniforms->lightDirection != nullptr)
-                        shaderUniforms->lightDirection->set(0.2f, 0.4f, 1.0f);
+                        shaderUniforms->lightDirection->set(palette.lightDirection.x,
+                                                            palette.lightDirection.y,
+                                                            palette.lightDirection.z);
 
                     if (shaderUniforms->lightColor != nullptr)
-                        shaderUniforms->lightColor->set(1.0f, 0.95f, 0.9f);
+                        shaderUniforms->lightColor->set(palette.lightColor.getFloatRed(),
+                                                        palette.lightColor.getFloatGreen(),
+                                                        palette.lightColor.getFloatBlue());
 
                     if (shaderUniforms->ambientStrength != nullptr)
-                        shaderUniforms->ambientStrength->set(0.35f);
+                        shaderUniforms->ambientStrength->set(palette.ambientStrength);
 
                     if (shaderUniforms->glowColor != nullptr)
-                        shaderUniforms->glowColor->set(1.0f, 0.6f, 0.15f);
+                        shaderUniforms->glowColor->set(palette.gridPlayhead.getFloatRed(),
+                                                       palette.gridPlayhead.getFloatGreen(),
+                                                       palette.gridPlayhead.getFloatBlue());
+
+                    if (wireframe)
+                    {
+                        glDisable(GL_CULL_FACE);
+                        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                        glLineWidth(1.5f);
+                    }
 
                     glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
+
+                    if (wireframe)
+                    {
+                        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                        glEnable(GL_CULL_FACE);
+                    }
                 }
             }
         }
@@ -781,15 +818,13 @@ juce::Matrix3D<float> PluginEditor::getModelMatrix(juce::Vector3D<float> positio
 juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
 {
     if (cell.isSelected)
-        return juce::Colour::fromFloatRGBA(0.4f, 1.0f, 0.4f, 1.0f);
+        return palette.gridSelected;
     if (cell.isArmed)
-        return juce::Colour::fromFloatRGBA(0.9f, 0.2f, 0.2f, 0.9f);
-    if (cell.hasNote){
-        // return juce::Colour::fromFloatRGBA(0.2f, 0.7f, 0.9f, 0.9f);
-        return juce::Colour::fromFloatRGBA(0.0f, 0.2f, 0.0f, 0.1f);
-    }
+        return palette.statusOk;
+    if (cell.hasNote)
+        return palette.gridNote;
 
-    return juce::Colour::fromFloatRGBA(0.2f, 0.2f, 0.2f, 0.35f);
+    return palette.gridEmpty;
 }
 
 float PluginEditor::getCellDepthScale(const CellVisualState& cell) const
@@ -889,8 +924,8 @@ void PluginEditor::updateTextAtlasImage()
 
     juce::Image nextImage(juce::Image::ARGB, nextAtlasWidth, nextAtlasHeight, true);
     juce::Graphics g(nextImage);
-    g.fillAll(juce::Colours::transparentBlack);
-    g.setColour(juce::Colours::white.withAlpha(0.9f));
+    g.fillAll(palette.textBackground);
+    g.setColour(palette.textPrimary.withAlpha(0.9f));
     // g.setFont(juce::Font(static_cast<float>(nextCellHeight) * 0.35f, juce::Font::bold));
     g.setFont(juce::Font(static_cast<float>(nextCellHeight) * 0.75f, juce::Font::bold));
     
@@ -1065,4 +1100,3 @@ bool PluginEditor::keyStateChanged(bool isKeyDown, juce::Component* originatingC
 {
   return false; 
 }
-

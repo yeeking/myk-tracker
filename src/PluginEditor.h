@@ -51,6 +51,23 @@ public:
     // void updateStringOnNextDraw();
     long framesDrawn; 
 private:
+    struct TrackerPalette
+    {
+        juce::Colour background;   // EFNY-style near-black
+        juce::Colour gridEmpty;    // dark grid cells
+        juce::Colour gridNote;     // neon grid notes
+        juce::Colour gridPlayhead; // hot red-orange glow
+        juce::Colour gridSelected; // bright cyan selection
+        juce::Colour textPrimary;  // HUD labels
+        juce::Colour textWarning;  // critical readouts
+        juce::Colour textBackground; // transparent text atlas background
+        juce::Colour statusOk;     // OK/ARMED
+        juce::Colour borderNeon;   // subtle neon outlines
+        juce::Colour lightColor;   // scene light tint
+        float ambientStrength = 0.35f;
+        juce::Vector3D<float> lightDirection { 0.2f, 0.4f, 1.0f };
+    };
+
 // some variables to control the display style
     const float glowDecayScalar{0.8f};
     const float glowDecayStep{0.1f};
@@ -167,6 +184,7 @@ private:
     juce::Point<int> lastDragPosition;
     float panOffsetX = 0.0f;
     float panOffsetY = 0.0f;
+    TrackerPalette palette;
 
     bool waitingForPaint;
     bool updateSeqStrOnNextDraw;
