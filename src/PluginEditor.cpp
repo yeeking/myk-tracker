@@ -293,6 +293,7 @@ void PluginEditor::renderOpenGL()
     if (shaderProgram == nullptr || seqViewBounds.isEmpty())
         return;
 
+    // Convert the JUCE pixel bounds into an OpenGL viewport/scissor rectangle.
     const float renderingScale = openGLContext.getRenderingScale();
     const int viewportWidth = juce::roundToInt(seqViewBounds.getWidth() * renderingScale);
     const int viewportHeight = juce::roundToInt(seqViewBounds.getHeight() * renderingScale);
@@ -303,6 +304,7 @@ void PluginEditor::renderOpenGL()
     const int viewportX = juce::roundToInt(seqViewBounds.getX() * renderingScale);
     const int viewportY = juce::roundToInt((getHeight() - seqViewBounds.getBottom()) * renderingScale);
 
+    // Constrain rendering to the sequencer view and clear to the palette background.
     glEnable(GL_SCISSOR_TEST);
     glScissor(viewportX, viewportY, viewportWidth, viewportHeight);
     glViewport(viewportX, viewportY, viewportWidth, viewportHeight);
@@ -313,6 +315,7 @@ void PluginEditor::renderOpenGL()
                  palette.background.getFloatAlpha());
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    // Main grid shader: cube geometry with lighting + glow uniforms.
     openGLContext.extensions.glUseProgram(shaderProgram->getProgramID());
 
     const float aspectRatio = static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight);
@@ -355,6 +358,7 @@ void PluginEditor::renderOpenGL()
         std::lock_guard<std::mutex> lock(cellStateMutex);
         if (visibleCols > 0 && visibleRows > 0 && !cellStates.empty())
         {
+            // Grid layout (same geometry spacing as the text overlay pass below).
             // const float cellWidth = 1.0f;
             // const float cellWidth = 2.0f;
             
@@ -374,6 +378,7 @@ void PluginEditor::renderOpenGL()
                 for (size_t row = 0; row < visibleRows; ++row)
                 {
                     const auto& cell = cellStates[col][row];
+                    // Depth/thickness, colour, glow, and wireframe are all derived from cell state.
                     const float depthScale = getCellDepthScale(cell);
                     const float depth = cellDepth * depthScale;
 
@@ -382,10 +387,13 @@ void PluginEditor::renderOpenGL()
                                                                 depth * 0.5f);
                     const auto scale = juce::Vector3D<float>(cellWidth, cellHeight, depth);
                     const auto modelMatrix = getModelMatrix(position, scale);
+                    // getCellColour maps selection/armed/note states to palette colors.
                     const auto colour = getCellColour(cell);
+                    // playheadGlow is animated so the active playhead can pulse.
                     const float timeSeconds = static_cast<float>(framesDrawn) / 25.0f;
                     const float glowPulse = 0.75f + 0.25f * std::sin(timeSeconds * 6.0f);
                     const float glow = cell.playheadGlow * glowPulse;
+                    // Cells with notes draw as a wireframe cube to show "note present".
                     const bool wireframe = cell.hasNote;
 
                     if (shaderUniforms->modelMatrix != nullptr)
@@ -418,6 +426,7 @@ void PluginEditor::renderOpenGL()
                                                        palette.gridPlayhead.getFloatGreen(),
                                                        palette.gridPlayhead.getFloatBlue());
 
+                    // Wireframe vs solid cube depending on note presence.
                     if (wireframe)
                     {
                         glDisable(GL_CULL_FACE);
@@ -436,12 +445,15 @@ void PluginEditor::renderOpenGL()
         }
     }
 
+    // Upload the text atlas image when it changes; atlas is generated in updateTextAtlasImage()
+    // from visibleText (one string per cell) and the palette text colors.
     if (textShaderProgram != nullptr && textAtlasUploadPending && textAtlasImage.isValid())
     {
         textTexture.loadImage(textAtlasImage);
         textAtlasUploadPending = false;
     }
 
+    // Text pass: draw one textured quad per cell using the atlas built from visibleText.
     if (textShaderProgram != nullptr && textTexture.getTextureID() != 0)
     {
         openGLContext.extensions.glUseProgram(textShaderProgram->getProgramID());
@@ -488,6 +500,7 @@ void PluginEditor::renderOpenGL()
                 && textAtlasWidth > 0 && textAtlasHeight > 0
                 && cellPixelWidth > 0 && cellPixelHeight > 0)
             {
+                // Match the same grid layout as the 3D cells so text sits centered on each cube.
                 // const float cellWidth = 1.0f;
                 const float cellHeight = 1.0f;
                 const float cellGap = 0.2f;
@@ -502,6 +515,7 @@ void PluginEditor::renderOpenGL()
                 {
                     for (size_t row = 0; row < visibleRows; ++row)
                     {
+                        // Per-cell UVs into the atlas image (each cell owns a fixed rect).
                         const float u0 = (static_cast<float>(col * cellPixelWidth)) / static_cast<float>(textAtlasWidth);
                         const float u1 = (static_cast<float>((col + 1) * cellPixelWidth)) / static_cast<float>(textAtlasWidth);
                         const float v0 = 1.0f - (static_cast<float>((row + 1) * cellPixelHeight)) / static_cast<float>(textAtlasHeight);
@@ -837,6 +851,8 @@ juce::Matrix3D<float> PluginEditor::getModelMatrix(juce::Vector3D<float> positio
 /** select colour based on cell state  */
 juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
 {
+    if (cell.isSelected && cell.hasNote)
+        return juce::Colours::red.withAlpha(0.4f);
     if (cell.isSelected)
         return palette.gridSelected;
     if (cell.isArmed)
