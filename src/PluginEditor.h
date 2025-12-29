@@ -133,6 +133,7 @@ private:
     juce::OpenGLTexture textTexture;
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
+    GLuint edgeIndexBuffer = 0;
     GLuint textVertexBuffer = 0;
 
     size_t rowsInUI;

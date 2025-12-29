@@ -130,6 +130,14 @@ const GLuint cubeIndices[] =
 };
 const GLsizei cubeIndexCount = static_cast<GLsizei>(sizeof(cubeIndices) / sizeof(cubeIndices[0]));
 
+const GLuint cubeEdgeIndices[] =
+{
+    0, 1, 1, 2, 2, 3, 3, 0,       // front
+    8, 9, 9, 10, 10, 11, 11, 8,   // back
+    0, 13, 1, 4, 2, 7, 3, 16      // side connections
+};
+const GLsizei cubeEdgeIndexCount = static_cast<GLsizei>(sizeof(cubeEdgeIndices) / sizeof(cubeEdgeIndices[0]));
+
 const float quadVertices[] =
 {
     -0.5f, -0.5f, 0.0f,  0.0f, 0.0f,
@@ -256,6 +264,13 @@ void PluginEditor::newOpenGLContextCreated()
     openGLContext.extensions.glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                                           sizeof(cubeIndices),
                                           cubeIndices,
+                                          GL_STATIC_DRAW);
+
+    openGLContext.extensions.glGenBuffers(1, &edgeIndexBuffer);
+    openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, edgeIndexBuffer);
+    openGLContext.extensions.glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                                          sizeof(cubeEdgeIndices),
+                                          cubeEdgeIndices,
                                           GL_STATIC_DRAW);
 
     openGLContext.extensions.glGenBuffers(1, &textVertexBuffer);
@@ -406,16 +421,15 @@ void PluginEditor::renderOpenGL()
                     if (wireframe)
                     {
                         glDisable(GL_CULL_FACE);
-                        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
                         glLineWidth(1.5f);
-                    }
-
-                    glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
-
-                    if (wireframe)
-                    {
-                        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                        openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, edgeIndexBuffer);
+                        glDrawElements(GL_LINES, cubeEdgeIndexCount, GL_UNSIGNED_INT, nullptr);
+                        openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
                         glEnable(GL_CULL_FACE);
+                    }
+                    else
+                    {
+                        glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
                     }
                 }
             }
@@ -552,6 +566,12 @@ void PluginEditor::openGLContextClosing()
     {
         openGLContext.extensions.glDeleteBuffers(1, &indexBuffer);
         indexBuffer = 0;
+    }
+
+    if (edgeIndexBuffer != 0)
+    {
+        openGLContext.extensions.glDeleteBuffers(1, &edgeIndexBuffer);
+        edgeIndexBuffer = 0;
     }
 
     if (textVertexBuffer != 0)
