@@ -721,6 +721,12 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
     if (data.empty() || data[0].empty())
         return;
 
+    // Clamp the cursor to the data bounds so view switches don't leave us with an invalid window.
+    const size_t maxCols = data.size();
+    const size_t maxRows = data[0].size();
+    if (cursorCol >= maxCols) cursorCol = maxCols - 1;
+    if (cursorRow >= maxRows) cursorRow = maxRows - 1;
+
     size_t nextStartCol = lastStartCol;
     size_t nextStartRow = lastStartRow;
     size_t nextEndCol = nextStartCol + colsToDisplay;
@@ -852,7 +858,7 @@ juce::Matrix3D<float> PluginEditor::getModelMatrix(juce::Vector3D<float> positio
 juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
 {
     if (cell.isSelected && cell.hasNote)
-        return juce::Colours::red.withAlpha(0.4f);
+        return juce::Colours::red.withAlpha(0.9f);
     if (cell.isSelected)
         return palette.gridSelected;
     if (cell.isArmed)
