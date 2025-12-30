@@ -65,14 +65,12 @@ juce_add_plugin(myk-tracker-plug
     IS_MIDI_EFFECT TRUE                 # Is this plugin a MIDI effect?
     NEEDS_MIDI_OUTPUT TRUE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE    # Does the editor need keyboard focus?
-    NEEDS_WEB_BROWSER TRUE
-    NEEDS_CURL TRUE
-    COPY_PLUGIN_AFTER_BUILD TRUE        # Should the plugin be installed to a default location after building?
+    COPY_PLUGIN_AFTER_BUILD FALSE      # Avoid copying into system plugin dirs during local builds.
     PLUGIN_MANUFACTURER_CODE Yeek               # A four-character manufacturer id with at least one upper-case ``
-    PLUGIN_CODE MykT                            # A unique four-character plugin id with exactly one upper-case character
+    PLUGIN_CODE Trak                            # A unique four-character plugin id with exactly one upper-case character
                                                 # GarageBand 10.3 requires the first letter to be upper-case, and the remaining letters to be lower-case
     FORMATS AU VST3 Standalone                  # The formats to build. Other valid formats are: AAX Unity VST AU AUv3
-    PRODUCT_NAME "MYK Tracker")        # The name of the final executable, which can differ from the target name
+    PRODUCT_NAME "MYK Tracker GL")        # The name of the final executable, which can differ from the target name
 
 
 juce_generate_juce_header(myk-tracker-plug)
@@ -121,9 +119,3 @@ target_link_libraries(myk-tracker-plug
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
-
-target_include_directories(myk-tracker-plug
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs
-        ${CMAKE_CURRENT_SOURCE_DIR}/webui-juce-cmake-example/libs)

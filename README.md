@@ -1,4 +1,5 @@
-# myk-tracker
+# myk-tracker: curse/ JUCE GUI version freeze
+
 Music sequencer with tracker-like properties
 
 ## Building it

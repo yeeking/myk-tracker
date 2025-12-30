@@ -1,3 +1,4 @@
+
 /*
   ==============================================================================
 
@@ -35,7 +36,6 @@ PluginProcessor::PluginProcessor()
     CommandProcessor::assignMasterClock(this);
     CommandProcessor::assignMidiUtils(this);
 
-    sequencer.setDefaultMIDIChannels();
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
@@ -159,34 +159,26 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 {
     juce::ScopedNoDenormals noDenormals;
     bool receivedMidi = false; 
-    size_t armedSequence = seqEditor.getArmedSequence();
+    for (const MidiMessageMetadata metadata : midiMessages){
+        if (metadata.getMessage().isNoteOn()) {
+            DBG("Got a note " << metadata.getMessage().getNoteNumber());
+            // add a note to the current sequence 
+            // and move it on a step 
 
-    if (armedSequence != Sequencer::notArmed){// can write MIDI to the sequence
-        for (const MidiMessageMetadata metadata : midiMessages){
+            // get the armed sequence 
 
-            if (metadata.getMessage().isNoteOn()) {
-                // add a note to the currently armed sequence 
-                // void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note, int velocity)
-
-                seqEditor.insertNoteAtTickPos(armedSequence, 
-                                            0, 
-                                            metadata.getMessage().getNoteNumber(), 
-                                            metadata.getMessage().getVelocity());                
-                receivedMidi = true; 
-            }
+            // seqEditor.enterStepData(metadata.getMessage().getNoteNumber(), Step::noteInd);
+            receivedMidi = true; 
         }
     }
-    if (receivedMidi || sequencer.isPlaying()) {
-        // update the string rep maybe? or leave that to the GUI to figure out probably 
-        midiMessages.clear();
+    if (receivedMidi) {
+        // tell the 
     }
 
-
+    int blockSize = getBlockSize();
     int blockStartSample = elapsedSamples;
-    int blockEndSample = (elapsedSamples + getBlockSize()) % maxHorizon;
-    int bufferSize = getBlockSize();
-    bool ticked{false};
-    for (int i=0;i<bufferSize; ++i){
+    int blockEndSample = (elapsedSamples + blockSize) % maxHorizon;
+    for (int i=0;i<blockSize; ++i){
         // weird but since juce midi sample offsets are int not unsigned long, 
         // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
         // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
@@ -1037,3 +1029,4 @@ void PluginProcessor::clearPendingEvents()
 {
     midiToSend.clear();
 }
+
