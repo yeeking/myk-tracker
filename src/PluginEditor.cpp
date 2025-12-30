@@ -718,12 +718,28 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
                                     bool showCursor,
                                     size_t armedSeq)
 {
-    if (data.empty() || data[0].empty())
+    if (rowsToDisplay == 0 || colsToDisplay == 0)
         return;
 
-    // Clamp the cursor to the data bounds so view switches don't leave us with an invalid window.
     const size_t maxCols = data.size();
-    const size_t maxRows = data[0].size();
+    const size_t maxRows = (maxCols > 0) ? data[0].size() : 0;
+    if (maxCols == 0 || maxRows == 0)
+    {
+        std::lock_guard<std::mutex> lock(cellStateMutex);
+        cellStates.assign(colsToDisplay, std::vector<CellVisualState>(rowsToDisplay, CellVisualState{}));
+        visibleText.assign(colsToDisplay, std::vector<std::string>(rowsToDisplay, ""));
+        playheadGlow.assign(colsToDisplay, std::vector<float>(rowsToDisplay, 0.0f));
+        visibleCols = colsToDisplay;
+        visibleRows = rowsToDisplay;
+        startCol = 0;
+        startRow = 0;
+        lastStartCol = 0;
+        lastStartRow = 0;
+        textAtlasDirty = true;
+        return;
+    }
+
+    // Clamp the cursor to the data bounds so view switches don't leave us with an invalid window.
     if (cursorCol >= maxCols) cursorCol = maxCols - 1;
     if (cursorRow >= maxRows) cursorRow = maxRows - 1;
 
@@ -740,8 +756,8 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
     nextEndCol = nextStartCol + colsToDisplay;
     nextEndRow = nextStartRow + rowsToDisplay;
 
-    if (nextEndRow >= data[0].size()) nextEndRow = data[0].size();
-    if (nextEndCol >= data.size()) nextEndCol = data.size();
+    if (nextEndRow >= maxRows) nextEndRow = maxRows;
+    if (nextEndCol >= maxCols) nextEndCol = maxCols;
 
     lastStartCol = nextStartCol;
     lastStartRow = nextStartRow;
@@ -761,34 +777,36 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
     // const float glowDecayScalar = 0.8f;
     
 
-    std::vector<std::vector<CellVisualState>> nextStates;
-    std::vector<std::vector<std::string>> nextText;
-    std::vector<std::vector<float>> nextGlow;
-    nextStates.reserve(nextEndCol - nextStartCol);
-    nextText.reserve(nextEndCol - nextStartCol);
-    nextGlow.reserve(nextEndCol - nextStartCol);
+    std::vector<std::vector<CellVisualState>> nextStates(colsToDisplay,
+                                                         std::vector<CellVisualState>(rowsToDisplay));
+    std::vector<std::vector<std::string>> nextText(colsToDisplay,
+                                                   std::vector<std::string>(rowsToDisplay, ""));
+    std::vector<std::vector<float>> nextGlow(colsToDisplay,
+                                             std::vector<float>(rowsToDisplay, 0.0f));
 
-    for (size_t col = nextStartCol; col < nextEndCol; ++col)
+    for (size_t displayCol = 0; displayCol < colsToDisplay; ++displayCol)
     {
-        std::vector<CellVisualState> columnStates;
-        std::vector<std::string> columnText;
-        std::vector<float> columnGlow;
-        columnStates.reserve(nextEndRow - nextStartRow);
-        columnText.reserve(nextEndRow - nextStartRow);
-        columnGlow.reserve(nextEndRow - nextStartRow);
+        const size_t col = nextStartCol + displayCol;
+        const bool colInRange = col < maxCols;
 
-        for (size_t row = nextStartRow; row < nextEndRow; ++row)
+        for (size_t displayRow = 0; displayRow < rowsToDisplay; ++displayRow)
         {
-            const auto& cellValue = data[col][row];
+            const size_t row = nextStartRow + displayRow;
+            const bool rowInRange = row < maxRows;
+
+            const std::string cellValue = (colInRange && rowInRange) ? data[col][row] : "";
             const bool hasNote = !cellValue.empty() && cellValue != "----" && cellValue != "-";
 
             bool isHighlighted = false;
-            for (const auto& cell : highlightCells)
+            if (colInRange && rowInRange)
             {
-                if (static_cast<size_t>(cell.first) == col && static_cast<size_t>(cell.second) == row)
+                for (const auto& cell : highlightCells)
                 {
-                    isHighlighted = true;
-                    break;
+                    if (static_cast<size_t>(cell.first) == col && static_cast<size_t>(cell.second) == row)
+                    {
+                        isHighlighted = true;
+                        break;
+                    }
                 }
             }
 
@@ -796,25 +814,21 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
             const bool isArmed = (armedSeq != Sequencer::notArmed) && col == armedSeq;
 
             float previousGlow = 0.0f;
-            if (reuseGlow && (col - nextStartCol) < oldGlow.size())
+            if (reuseGlow && displayCol < oldGlow.size())
             {
-                const auto& oldColumn = oldGlow[col - nextStartCol];
-                if ((row - nextStartRow) < oldColumn.size())
-                    previousGlow = oldColumn[row - nextStartRow];
+                const auto& oldColumn = oldGlow[displayCol];
+                if (displayRow < oldColumn.size())
+                    previousGlow = oldColumn[displayRow];
             }
             // decay by a constant 
             // const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow - glowDecayStep);
             // decay using a scalar 
             const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow * glowDecayScalar);
-            
-            columnStates.push_back(CellVisualState{hasNote, isHighlighted, isSelected, isArmed, glowValue});
-            columnText.push_back(cellValue);
-            columnGlow.push_back(glowValue);
-        }
 
-        nextStates.push_back(std::move(columnStates));
-        nextText.push_back(std::move(columnText));
-        nextGlow.push_back(std::move(columnGlow));
+            nextStates[displayCol][displayRow] = CellVisualState{hasNote, isHighlighted, isSelected, isArmed, glowValue};
+            nextText[displayCol][displayRow] = cellValue;
+            nextGlow[displayCol][displayRow] = glowValue;
+        }
     }
 
     {
@@ -822,8 +836,8 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
         cellStates = std::move(nextStates);
         visibleText = std::move(nextText);
         playheadGlow = std::move(nextGlow);
-        visibleCols = nextEndCol - nextStartCol;
-        visibleRows = nextEndRow - nextStartRow;
+        visibleCols = colsToDisplay;
+        visibleRows = rowsToDisplay;
         startCol = nextStartCol;
         startRow = nextStartRow;
         textAtlasDirty = true;
