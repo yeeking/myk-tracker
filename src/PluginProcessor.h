@@ -9,6 +9,10 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
+#include <memory>
+#include <vector>
+
 #include "MidiUtilsAbs.h"
 #include "ClockAbs.h"
 #include "Sequencer.h"
@@ -21,7 +25,9 @@
 */
 class PluginProcessor  :    public MidiUtilsAbs, 
                             public ClockAbs, 
-                            public juce::AudioProcessor
+                            public juce::AudioProcessor, 
+                            public juce::ChangeBroadcaster
+
                             #if JucePlugin_Enable_ARA
                              , public juce::AudioProcessorARAExtension
                             #endif
@@ -97,7 +103,20 @@ private:
     unsigned int samplesPerTick; 
     double bpm; 
     int outstandingNoteOffs;
-
+    /** configure plugin params */
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    /** stores the plugin state */
+    juce::AudioProcessorValueTreeState apvts;
+  
+    juce::var stringGridToVar(const std::vector<std::vector<std::string>>& grid);
+    juce::var numberGridToVar(const std::vector<std::vector<double>>& grid);
+  
+    /** convert ui state into a var  */
+    juce::var getUiState();
+    /** convert state into 'storable' var */
+    juce::var serializeSequencerState();
+    /** retrieve state from var  */
+    void restoreSequencerState(const juce::var& stateVar);
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };
