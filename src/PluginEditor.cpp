@@ -139,6 +139,12 @@ const GLuint cubeEdgeIndices[] =
 };
 const GLsizei cubeEdgeIndexCount = static_cast<GLsizei>(sizeof(cubeEdgeIndices) / sizeof(cubeEdgeIndices[0]));
 
+const GLuint frontFaceEdgeIndices[] =
+{
+    0, 1, 1, 2, 2, 3, 3, 0
+};
+const GLsizei frontFaceEdgeIndexCount = static_cast<GLsizei>(sizeof(frontFaceEdgeIndices) / sizeof(frontFaceEdgeIndices[0]));
+
 const float quadVertices[] =
 {
     -0.5f, -0.5f, 0.0f,  0.0f, 0.0f,
@@ -274,6 +280,13 @@ void PluginEditor::newOpenGLContextCreated()
                                           cubeEdgeIndices,
                                           GL_STATIC_DRAW);
 
+    openGLContext.extensions.glGenBuffers(1, &frontEdgeIndexBuffer);
+    openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, frontEdgeIndexBuffer);
+    openGLContext.extensions.glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                                          sizeof(frontFaceEdgeIndices),
+                                          frontFaceEdgeIndices,
+                                          GL_STATIC_DRAW);
+
     openGLContext.extensions.glGenBuffers(1, &textVertexBuffer);
     openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, textVertexBuffer);
     openGLContext.extensions.glBufferData(GL_ARRAY_BUFFER,
@@ -315,6 +328,13 @@ void PluginEditor::renderOpenGL()
                  palette.background.getFloatBlue(),
                  palette.background.getFloatAlpha());
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
 
     // Main grid shader: cube geometry with lighting + glow uniforms.
     openGLContext.extensions.glUseProgram(shaderProgram->getProgramID());
@@ -359,6 +379,15 @@ void PluginEditor::renderOpenGL()
         std::lock_guard<std::mutex> lock(cellStateMutex);
         if (visibleCols > 0 && visibleRows > 0 && !cellStates.empty())
         {
+            struct NoteOutline
+            {
+                juce::Matrix3D<float> modelMatrix;
+                float glow = 0.0f;
+            };
+
+            std::vector<NoteOutline> noteOutlines;
+            noteOutlines.reserve(visibleCols * visibleRows);
+
             // Grid layout (same geometry spacing as the text overlay pass below).
             // const float cellWidth = 1.0f;
             // const float cellWidth = 2.0f;
@@ -394,8 +423,6 @@ void PluginEditor::renderOpenGL()
                     const float timeSeconds = static_cast<float>(framesDrawn) / 25.0f;
                     const float glowPulse = 0.75f + 0.25f * std::sin(timeSeconds * 6.0f);
                     const float glow = cell.playheadGlow * glowPulse;
-                    // Cells with notes draw as a wireframe cube to show "note present".
-                    const bool wireframe = cell.hasNote;
 
                     if (shaderUniforms->modelMatrix != nullptr)
                         shaderUniforms->modelMatrix->setMatrix4(modelMatrix.mat, 1, GL_FALSE);
@@ -427,21 +454,53 @@ void PluginEditor::renderOpenGL()
                                                        palette.gridPlayhead.getFloatGreen(),
                                                        palette.gridPlayhead.getFloatBlue());
 
-                    // Wireframe vs solid cube depending on note presence.
-                    if (wireframe)
-                    {
-                        glDisable(GL_CULL_FACE);
-                        glLineWidth(1.5f);
-                        openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, edgeIndexBuffer);
-                        glDrawElements(GL_LINES, cubeEdgeIndexCount, GL_UNSIGNED_INT, nullptr);
-                        openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-                        glEnable(GL_CULL_FACE);
-                    }
-                    else
-                    {
-                        glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
-                    }
+                    glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
+
+                    if (cell.hasNote)
+                        noteOutlines.push_back(NoteOutline{modelMatrix, glow});
                 }
+            }
+
+            if (!noteOutlines.empty())
+            {
+                glDepthMask(GL_FALSE);
+                glEnable(GL_POLYGON_OFFSET_LINE);
+                glPolygonOffset(-2.0f, -2.0f);
+                glLineWidth(1.8f);
+                openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, frontEdgeIndexBuffer);
+
+                const auto outlineColour = palette.gridNote;
+                if (shaderUniforms->cellColor != nullptr)
+                    shaderUniforms->cellColor->set(outlineColour.getFloatRed(),
+                                                   outlineColour.getFloatGreen(),
+                                                   outlineColour.getFloatBlue(),
+                                                   1.0f);
+
+                if (shaderUniforms->ambientStrength != nullptr)
+                    shaderUniforms->ambientStrength->set(1.0f);
+
+                if (shaderUniforms->lightColor != nullptr)
+                    shaderUniforms->lightColor->set(0.0f, 0.0f, 0.0f);
+
+                if (shaderUniforms->glowColor != nullptr)
+                    shaderUniforms->glowColor->set(outlineColour.getFloatRed(),
+                                                   outlineColour.getFloatGreen(),
+                                                   outlineColour.getFloatBlue());
+
+                if (shaderUniforms->cellGlow != nullptr)
+                    shaderUniforms->cellGlow->set(1.0f);
+
+                for (const auto& outline : noteOutlines)
+                {
+                    if (shaderUniforms->modelMatrix != nullptr)
+                        shaderUniforms->modelMatrix->setMatrix4(outline.modelMatrix.mat, 1, GL_FALSE);
+
+                    glDrawElements(GL_LINES, frontFaceEdgeIndexCount, GL_UNSIGNED_INT, nullptr);
+                }
+
+                openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+                glDisable(GL_POLYGON_OFFSET_LINE);
+                glDepthMask(GL_TRUE);
             }
         }
     }
@@ -504,7 +563,9 @@ void PluginEditor::renderOpenGL()
                 // Match the same grid layout as the 3D cells so text sits centered on each cube.
                 // const float cellWidth = 1.0f;
                 const float cellHeight = 1.0f;
+                const float cellDepth = 0.6f;
                 const float cellGap = 0.2f;
+                const float textDepthOffset = 0.02f;
                 const float stepX = cellWidth + cellGap;
                 const float stepY = cellHeight + cellGap;
                 const float gridWidth = stepX * static_cast<float>(visibleCols);
@@ -516,6 +577,10 @@ void PluginEditor::renderOpenGL()
                 {
                     for (size_t row = 0; row < visibleRows; ++row)
                     {
+                        const auto& cell = cellStates[col][row];
+                        const float depthScale = getCellDepthScale(cell);
+                        const float depth = cellDepth * depthScale;
+
                         // Per-cell UVs into the atlas image (each cell owns a fixed rect).
                         const float u0 = (static_cast<float>(col * cellPixelWidth)) / static_cast<float>(textAtlasWidth);
                         const float u1 = (static_cast<float>((col + 1) * cellPixelWidth)) / static_cast<float>(textAtlasWidth);
@@ -527,7 +592,7 @@ void PluginEditor::renderOpenGL()
 
                         const auto position = juce::Vector3D<float>(startX + static_cast<float>(col) * stepX,
                                                                     startY - static_cast<float>(row) * stepY,
-                                                                    0.5f);
+                                                                    depth + textDepthOffset);
                         const auto scale = juce::Vector3D<float>(cellWidth * 0.9f, cellHeight * 0.9f, 1.0f);
                         const auto modelMatrix = getModelMatrix(position, scale);
 
@@ -587,6 +652,12 @@ void PluginEditor::openGLContextClosing()
     {
         openGLContext.extensions.glDeleteBuffers(1, &edgeIndexBuffer);
         edgeIndexBuffer = 0;
+    }
+
+    if (frontEdgeIndexBuffer != 0)
+    {
+        openGLContext.extensions.glDeleteBuffers(1, &frontEdgeIndexBuffer);
+        frontEdgeIndexBuffer = 0;
     }
 
     if (textVertexBuffer != 0)
@@ -878,8 +949,6 @@ juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
         return palette.gridSelected;
     if (cell.isArmed)
         return palette.statusOk;
-    if (cell.hasNote)
-        return palette.gridNote;
 
     return palette.gridEmpty;
 }
