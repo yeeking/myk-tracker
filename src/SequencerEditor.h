@@ -132,8 +132,6 @@ public:
   void setCurrentSequence(int seq);
   /** move the cursor to a specific step*/
   void setCurrentStep(int step);
-  void setCurrentStepRow(int row);
-  void setCurrentStepCol(int col);
   /** write the sent data to the current step and sequence */
   void writeStepData(std::vector<std::vector<double>> data);
   /** write the sent data to the sequence at 'currentSequence' - 1D data version for simple one value per step -style sequences*/

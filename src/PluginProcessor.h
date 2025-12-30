@@ -9,27 +9,19 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include <atomic>
-#include <memory>
-#include <vector>
 #include "MidiUtilsAbs.h"
 #include "ClockAbs.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "TrackerController.h"
 
-class HttpServerThread;
-
 
 //==============================================================================
 /**
 */
-class PluginEditor;
-
 class PluginProcessor  :    public MidiUtilsAbs, 
                             public ClockAbs, 
-                            public juce::AudioProcessor,
-                            public juce::ChangeBroadcaster
+                            public juce::AudioProcessor
                             #if JucePlugin_Enable_ARA
                              , public juce::AudioProcessorARAExtension
                             #endif
@@ -86,27 +78,8 @@ public:
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
     TrackerController* getTrackerController();
-    /** serialises the sequencer/editor state for the web UI */
-    juce::var getUiState();
-    /** handle a command sent from the HTTP API */
-    bool handleCommand(const juce::var& body, juce::String& error);
-    /** read the latest serialized UI state if available (non-blocking, reader gives way to writer) */
-    bool tryGetLatestSerializedUiState(juce::String& outJson);
-    void setStateUpdateIntervalMs(double ms);
     
 private:
-    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
-    bool handleKeyCommand(const juce::var& payload, juce::String& error);
-    juce::var stringGridToVar(const std::vector<std::vector<std::string>>& grid);
-    juce::var numberGridToVar(const std::vector<std::vector<double>>& grid);
-    void syncSequenceStrings();
-    void maybeUpdateUiState(double blockDurationMs);
-    void applyPendingSequenceChanges();
-    void addSequenceImmediate();
-    void removeSequenceImmediate();
-    juce::var serializeSequencerState();
-    void restoreSequencerState(const juce::var& stateVar);
-
     Sequencer sequencer;
   /** keep the seq editor in the processor as the plugineditor
      * can be deleted but the processor persists and we want to retain state on the seqeditor
@@ -124,15 +97,6 @@ private:
     unsigned int samplesPerTick; 
     double bpm; 
     int outstandingNoteOffs;
-
-    juce::AudioProcessorValueTreeState apvts;
-    std::unique_ptr<HttpServerThread> apiServer;
-    // UI state push helpers
-    double stateUpdateIntervalMs { 50.0 };
-    double msSinceLastStateUpdate { 0.0 };
-    juce::SpinLock stateLock; // writer (audio thread) prioritized; readers should try-lock
-    juce::String latestStateJson;
-    std::atomic<bool> stateDirty { false };
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)

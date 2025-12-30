@@ -926,14 +926,6 @@ void SequencerEditor::setCurrentStep(int step)
 {
   currentStep = step;
 }
-void SequencerEditor::setCurrentStepRow(int row)
-{
-  currentStepRow = row;
-}
-void SequencerEditor::setCurrentStepCol(int col)
-{
-  currentStepCol = col;
-}
 /** write the sent data to the current step and sequence */
 void SequencerEditor::writeStepData(std::vector<std::vector<double>> data)
 {

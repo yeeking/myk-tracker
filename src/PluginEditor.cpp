@@ -1,7 +1,7 @@
 /*
   ==============================================================================
 
-    WebView-based plugin editor for MYK Tracker.
+    This file contains the basic framework code for a JUCE plugin editor.
 
   ==============================================================================
 */
@@ -595,9 +595,10 @@ void PluginEditor::openGLContextClosing()
     }
 }
 
+//==============================================================================
 void PluginEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    waitingForPaint = false; 
 }
 
 void PluginEditor::resized()
