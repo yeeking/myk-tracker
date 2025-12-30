@@ -11,6 +11,7 @@ class TrackerController{
     TrackerController( Sequencer* _sequencer, ClockAbs* _clockAbs, SequencerEditor* _seqEditor);
 /** return the tracker controls and status info as a grid of strings */
     std::vector<std::vector<std::string>> getControlPanelAsGridOfStrings();
+/** stops playback */
     void stopPlaying();
     void startPlaying();
     /** directly set BPM */
