@@ -181,6 +181,7 @@ private:
     int cellPixelWidth = 0;
     int cellPixelHeight = 0;
     juce::Image textAtlasImage;
+    juce::Typeface::Ptr textAtlasTypeface;
     float zoomLevel = 1.0f;
     juce::Point<int> lastDragPosition;
     float panOffsetX = 0.0f;

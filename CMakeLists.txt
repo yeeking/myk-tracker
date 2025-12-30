@@ -82,10 +82,15 @@ target_compile_definitions(myk-tracker-plug
         JUCE_USE_CURL=0     # If you remove this, add `NEEDS_CURL TRUE` to the `juce_add_plugin` call
         JUCE_VST3_CAN_REPLACE_VST2=0)
 
+
+        # the font for the display
+juce_add_binary_data(AudioPluginData SOURCES src/data/segment14.regular.otf)
+
+
 target_link_libraries(myk-tracker-plug
     PRIVATE
 #        seq-lib
-        # AudioPluginData           # If we'd created a binary data target, we'd link to it here
+        AudioPluginData           
         juce::juce_audio_utils
         juce::juce_opengl
     PUBLIC

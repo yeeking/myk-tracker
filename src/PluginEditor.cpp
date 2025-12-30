@@ -10,6 +10,7 @@
 #include "PluginEditor.h"
 #include "SequencerCommands.h"
 #include "SimpleClock.h"
+#include "BinaryData.h"
 #include <cmath>
 
 using namespace juce::gl;
@@ -982,8 +983,16 @@ void PluginEditor::updateTextAtlasImage()
     juce::Graphics g(nextImage);
     g.fillAll(palette.textBackground);
     g.setColour(palette.textPrimary.withAlpha(0.9f));
-    // g.setFont(juce::Font(static_cast<float>(nextCellHeight) * 0.35f, juce::Font::bold));
-    g.setFont(juce::Font(static_cast<float>(nextCellHeight) * 0.75f, juce::Font::bold));
+    if (textAtlasTypeface == nullptr)
+    {
+        textAtlasTypeface = juce::Typeface::createSystemTypefaceFor(
+            BinaryData::segment14_regular_otf,
+            BinaryData::segment14_regular_otfSize);
+    }
+
+    juce::Font atlasFont(textAtlasTypeface);
+    atlasFont.setHeight(static_cast<float>(nextCellHeight) * 0.5f);
+    g.setFont(atlasFont);
     
 
     for (size_t col = 0; col < cols; ++col)
@@ -994,7 +1003,7 @@ void PluginEditor::updateTextAtlasImage()
             const int y = static_cast<int>(row) * nextCellHeight;
             const juce::Rectangle<int> cellBounds(x, y, nextCellWidth, nextCellHeight);
             
-            g.drawText(textCopy[col][row], cellBounds, juce::Justification::centred, true);
+            g.drawText(textCopy[col][row], cellBounds, juce::Justification::centredLeft, true);
         }
     }
 
