@@ -5,9 +5,6 @@ project(myk-tracker VERSION 0.0.4)
 set(CMAKE_CXX_STANDARD 17)
 set (CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # mac - target macos 11
 set (CMAKE_OSX_ARCHITECTURES arm64;x86_64) # mac - build universal binary
-if (NOT DEFINED JUCE_VST3_COPY_DIR)
-    set(JUCE_VST3_COPY_DIR "${CMAKE_BINARY_DIR}/vst3" CACHE PATH "Where to copy built VST3s" FORCE)
-endif()
 
 
 ########## CLI version cmake config 
@@ -30,29 +27,15 @@ add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerComma
 
 add_executable(MykTracker src/Gui.cpp src/MidiUtils.cpp src/main.cpp)
 add_executable(CurTest src/Gui.cpp src/MidiUtils.cpp src/curtest.cpp)
-add_executable(HttpFetchPerf src/HttpFetchPerf.cpp)
 
 # Link the ncurses library with your executable
 target_link_libraries(MykTracker PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
 target_link_libraries(CurTest PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
-target_link_libraries(HttpFetchPerf PRIVATE)
 
 ########## END/ CLI version cmake config 
 
 ########## JUCE version cmake config 
-if (NOT TARGET juce::juce_audio_utils)
-    # Prefer vendored JUCE if present, otherwise fall back to the repository root copy.
-    set(myk_tracker_juce_dir "${CMAKE_CURRENT_LIST_DIR}/libs/JUCE")
-    if (NOT EXISTS "${myk_tracker_juce_dir}/CMakeLists.txt")
-        set(myk_tracker_juce_dir "${CMAKE_CURRENT_LIST_DIR}/../../JUCE")
-    endif()
-
-    if (EXISTS "${myk_tracker_juce_dir}/CMakeLists.txt")
-        add_subdirectory(${myk_tracker_juce_dir} ${CMAKE_CURRENT_BINARY_DIR}/JUCE)
-    else()
-        message(FATAL_ERROR "Could not find JUCE; expected at ${myk_tracker_juce_dir}")
-    endif()
-endif()
+add_subdirectory(./libs/JUCE ./JUCE)               
 
 juce_add_plugin(myk-tracker-plug
     # VERSION ...                               # Set this if the plugin version is different to the project version
@@ -75,21 +58,12 @@ juce_add_plugin(myk-tracker-plug
 
 juce_generate_juce_header(myk-tracker-plug)
 
-juce_add_binary_data(WebUIData
-    SOURCES
-        ui/index.html
-        ui/styles.css
-        ui/palette-amber-teal.css
-        ui/palette-neon-purple.css
-        ui/app.js)
-
 target_sources(myk-tracker-plug
     PRIVATE
     src/PluginEditor.cpp
     src/PluginProcessor.cpp
     src/StringTable.cpp
-    src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp
-    src/HTTPServer.cpp src/HTTPServer.h src/Utils.h
+src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp
 )
 
     
@@ -103,8 +77,9 @@ target_compile_definitions(myk-tracker-plug
         #JUCE_PLUGINHOST_VST3=1
         JUCE_USE_OGGVORBIS=1
         #JUCE_VST3_HOST_CROSS_PLATFORM_UID=1
-        JUCE_WEB_BROWSER=1
-        JUCE_USE_CURL=1
+        # JUCE_WEB_BROWSER and JUCE_USE_CURL would be on by default, but you might not need them.
+        JUCE_WEB_BROWSER=0  # If you remove this, add `NEEDS_WEB_BROWSER TRUE` to the `juce_add_plugin` call
+        JUCE_USE_CURL=0     # If you remove this, add `NEEDS_CURL TRUE` to the `juce_add_plugin` call
         JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(myk-tracker-plug
@@ -112,9 +87,7 @@ target_link_libraries(myk-tracker-plug
 #        seq-lib
         # AudioPluginData           # If we'd created a binary data target, we'd link to it here
         juce::juce_audio_utils
-        juce::juce_gui_extra
         juce::juce_opengl
-        WebUIData
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
