@@ -15,6 +15,7 @@
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "TrackerController.h"
+// #include "Segment14Geometry.h"
 //==============================================================================
 /**
 */
@@ -71,7 +72,13 @@ private:
 // some variables to control the display style
     const float glowDecayScalar{0.8f};
     const float glowDecayStep{0.1f};
+    // render sizes for cells and 
     const float cellWidth{2.0f};
+    const float cellHeight{1.0f};
+    // proportion of cellHeight
+    const float fontHeight{0.5f};
+    
+    
 
 
     struct CellVisualState

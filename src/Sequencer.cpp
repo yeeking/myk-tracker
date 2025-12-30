@@ -54,7 +54,7 @@ std::string Step::toStringFlat() const
     disp += "-" + std::to_string(oct) + " ";
     std::size_t power = (int)this->data[0][Step::velInd] / 32; 
     for (std::size_t p=0;p<power;++p){
-      disp += "]";
+      disp += "+";
     }
     return disp; 
     // return std::string(1, note);

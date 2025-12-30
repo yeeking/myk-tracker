@@ -392,7 +392,7 @@ void PluginEditor::renderOpenGL()
             // const float cellWidth = 1.0f;
             // const float cellWidth = 2.0f;
             
-            const float cellHeight = 1.0f;
+            // const float cellHeight = 1.0f;// 
             const float cellDepth = 0.6f;
             const float cellGap = 0.2f;
 
@@ -562,7 +562,7 @@ void PluginEditor::renderOpenGL()
             {
                 // Match the same grid layout as the 3D cells so text sits centered on each cube.
                 // const float cellWidth = 1.0f;
-                const float cellHeight = 1.0f;
+                // const float cellHeight = 1.0f;
                 const float cellDepth = 0.6f;
                 const float cellGap = 0.2f;
                 const float textDepthOffset = 0.02f;
@@ -944,7 +944,7 @@ juce::Matrix3D<float> PluginEditor::getModelMatrix(juce::Vector3D<float> positio
 juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
 {
     if (cell.isSelected && cell.hasNote)
-        return juce::Colours::red.withAlpha(0.9f);
+        return juce::Colours::red.withAlpha(0.6f);
     if (cell.isSelected)
         return palette.gridSelected;
     if (cell.isArmed)
@@ -1060,7 +1060,7 @@ void PluginEditor::updateTextAtlasImage()
     }
 
     juce::Font atlasFont(textAtlasTypeface);
-    atlasFont.setHeight(static_cast<float>(nextCellHeight) * 0.5f);
+    atlasFont.setHeight(static_cast<float>(nextCellHeight) * fontHeight);
     g.setFont(atlasFont);
     
 
@@ -1072,7 +1072,7 @@ void PluginEditor::updateTextAtlasImage()
             const int y = static_cast<int>(row) * nextCellHeight;
             const juce::Rectangle<int> cellBounds(x, y, nextCellWidth, nextCellHeight);
             
-            g.drawText(textCopy[col][row], cellBounds, juce::Justification::centredLeft, true);
+            g.drawText(textCopy[col][row], cellBounds, juce::Justification::centredLeft, false);
         }
     }
 
