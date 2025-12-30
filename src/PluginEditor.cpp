@@ -10,8 +10,9 @@
 #include "PluginEditor.h"
 #include "SequencerCommands.h"
 #include "SimpleClock.h"
-#include "BinaryData.h"
+#include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 using namespace juce::gl;
 
@@ -61,28 +62,25 @@ const char* fragmentShaderSource = R"(
 
 const char* textVertexShaderSource = R"(
     attribute vec3 position;
-    attribute vec2 texCoord;
     uniform mat4 projectionMatrix;
     uniform mat4 viewMatrix;
     uniform mat4 modelMatrix;
-    uniform vec4 uvRect;
-    varying vec2 vTexCoord;
 
     void main()
     {
-        vTexCoord = texCoord * uvRect.zw + uvRect.xy;
         gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
     }
 )";
 
 const char* textFragmentShaderSource = R"(
-    varying vec2 vTexCoord;
-    uniform sampler2D textTexture;
+    uniform vec4 textColor;
+    uniform float glowStrength;
+    uniform vec3 glowColor;
 
     void main()
     {
-        vec4 sampled = texture2D(textTexture, vTexCoord);
-        gl_FragColor = sampled;
+        vec3 color = textColor.rgb + glowColor * glowStrength;
+        gl_FragColor = vec4(color, textColor.a);
     }
 )";
 
@@ -145,13 +143,6 @@ const GLuint frontFaceEdgeIndices[] =
 };
 const GLsizei frontFaceEdgeIndexCount = static_cast<GLsizei>(sizeof(frontFaceEdgeIndices) / sizeof(frontFaceEdgeIndices[0]));
 
-const float quadVertices[] =
-{
-    -0.5f, -0.5f, 0.0f,  0.0f, 0.0f,
-     0.5f, -0.5f, 0.0f,  1.0f, 0.0f,
-     0.5f,  0.5f, 0.0f,  1.0f, 1.0f,
-    -0.5f,  0.5f, 0.0f,  0.0f, 1.0f
-};
 juce::Matrix3D<float> makeScaleMatrix(juce::Vector3D<float> scale)
 {
     return { scale.x, 0.0f, 0.0f, 0.0f,
@@ -163,12 +154,15 @@ juce::Matrix3D<float> makeScaleMatrix(juce::Vector3D<float> scale)
 
 //==============================================================================
 PluginEditor::PluginEditor (PluginProcessor& p)
-    : AudioProcessorEditor (&p), 
-    audioProcessor (p), 
-    sequencer{p.getSequencer()},  
-    seqEditor{p.getSequenceEditor()}, 
-    trackerController{p.getTrackerController()}, 
-    rowsInUI{9}, waitingForPaint{false}, updateSeqStrOnNextDraw{false}, framesDrawn{0}
+    : AudioProcessorEditor (&p),
+    framesDrawn{0},
+    audioProcessor (p),
+    sequencer{p.getSequencer()},
+    seqEditor{p.getSequenceEditor()},
+    trackerController{p.getTrackerController()},
+    rowsInUI{9},
+    waitingForPaint{false},
+    updateSeqStrOnNextDraw{false}
 {
     palette.background = juce::Colour(0xFF02040A);
     palette.gridEmpty = juce::Colour(0xFF1B2024);
@@ -183,6 +177,14 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     palette.lightColor = juce::Colour(0xFFDDF6E8);
     palette.ambientStrength = 0.32f;
     palette.lightDirection = { 0.2f, 0.45f, 1.0f };
+    textGeomParams.cellW = 1.0f;
+    textGeomParams.cellH = 1.6f;
+    textGeomParams.thickness = 0.14f;
+    textGeomParams.inset = 0.12f;
+    textGeomParams.gap = 0.06f;
+    textGeomParams.advance = 1.12f;
+    textGeomParams.includeDot = true;
+    textGeometry.setParams(textGeomParams);
 
     openGLContext.setRenderer(this);
     openGLContext.setContinuousRepainting(false);
@@ -243,14 +245,14 @@ void PluginEditor::newOpenGLContextCreated()
     {
         textShaderAttributes = std::make_unique<TextShaderAttributes>();
         textShaderAttributes->position = std::make_unique<juce::OpenGLShaderProgram::Attribute>(*textShaderProgram, "position");
-        textShaderAttributes->texCoord = std::make_unique<juce::OpenGLShaderProgram::Attribute>(*textShaderProgram, "texCoord");
 
         textShaderUniforms = std::make_unique<TextShaderUniforms>();
         textShaderUniforms->projectionMatrix = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "projectionMatrix");
         textShaderUniforms->viewMatrix = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "viewMatrix");
         textShaderUniforms->modelMatrix = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "modelMatrix");
-        textShaderUniforms->uvRect = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "uvRect");
-        textShaderUniforms->textTexture = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "textTexture");
+        textShaderUniforms->textColor = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "textColor");
+        textShaderUniforms->glowStrength = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "glowStrength");
+        textShaderUniforms->glowColor = std::make_unique<juce::OpenGLShaderProgram::Uniform>(*textShaderProgram, "glowColor");
     }
     else
     {
@@ -258,6 +260,7 @@ void PluginEditor::newOpenGLContextCreated()
         textShaderProgram.reset();
         return;
     }
+    textGeometryDirty = true;
 
     openGLContext.extensions.glGenBuffers(1, &vertexBuffer);
     openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
@@ -285,13 +288,6 @@ void PluginEditor::newOpenGLContextCreated()
     openGLContext.extensions.glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                                           sizeof(frontFaceEdgeIndices),
                                           frontFaceEdgeIndices,
-                                          GL_STATIC_DRAW);
-
-    openGLContext.extensions.glGenBuffers(1, &textVertexBuffer);
-    openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, textVertexBuffer);
-    openGLContext.extensions.glBufferData(GL_ARRAY_BUFFER,
-                                          sizeof(quadVertices),
-                                          quadVertices,
                                           GL_STATIC_DRAW);
 
     glEnable(GL_DEPTH_TEST);
@@ -505,17 +501,9 @@ void PluginEditor::renderOpenGL()
         }
     }
 
-    // Upload the text atlas image when it changes; atlas is generated in updateTextAtlasImage()
-    // from visibleText (one string per cell) and the palette text colors.
-    if (textShaderProgram != nullptr && textAtlasUploadPending && textAtlasImage.isValid())
+    if (textShaderProgram != nullptr)
     {
-        textTexture.loadImage(textAtlasImage);
-        textAtlasUploadPending = false;
-    }
-
-    // Text pass: draw one textured quad per cell using the atlas built from visibleText.
-    if (textShaderProgram != nullptr && textTexture.getTextureID() != 0)
-    {
+        updateTextGeometryCache();
         openGLContext.extensions.glUseProgram(textShaderProgram->getProgramID());
 
         if (textShaderUniforms->projectionMatrix != nullptr)
@@ -524,45 +512,18 @@ void PluginEditor::renderOpenGL()
         if (textShaderUniforms->viewMatrix != nullptr)
             textShaderUniforms->viewMatrix->setMatrix4(viewMatrix.mat, 1, GL_FALSE);
 
-        glActiveTexture(GL_TEXTURE0);
-        textTexture.bind();
-        if (textShaderUniforms->textTexture != nullptr)
-            textShaderUniforms->textTexture->set(0);
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, textVertexBuffer);
-
-        const GLsizei textStride = sizeof(float) * 5;
         if (textShaderAttributes->position != nullptr)
-        {
-            openGLContext.extensions.glVertexAttribPointer(textShaderAttributes->position->attributeID,
-                                                           3,
-                                                           GL_FLOAT,
-                                                           GL_FALSE,
-                                                           textStride,
-                                                           reinterpret_cast<GLvoid*>(0));
             openGLContext.extensions.glEnableVertexAttribArray(textShaderAttributes->position->attributeID);
-        }
-
-        if (textShaderAttributes->texCoord != nullptr)
-        {
-            openGLContext.extensions.glVertexAttribPointer(textShaderAttributes->texCoord->attributeID,
-                                                           2,
-                                                           GL_FLOAT,
-                                                           GL_FALSE,
-                                                           textStride,
-                                                           reinterpret_cast<GLvoid*>(sizeof(float) * 3));
-            openGLContext.extensions.glEnableVertexAttribArray(textShaderAttributes->texCoord->attributeID);
-        }
 
         {
             std::lock_guard<std::mutex> lock(cellStateMutex);
-            if (visibleCols > 0 && visibleRows > 0 && !cellStates.empty()
-                && textAtlasWidth > 0 && textAtlasHeight > 0
-                && cellPixelWidth > 0 && cellPixelHeight > 0)
+            if (visibleCols > 0 && visibleRows > 0 && !cellStates.empty())
             {
-                // Match the same grid layout as the 3D cells so text sits centered on each cube.
-                // const float cellWidth = 1.0f;
-                // const float cellHeight = 1.0f;
                 const float cellDepth = 0.6f;
                 const float cellGap = 0.2f;
                 const float textDepthOffset = 0.02f;
@@ -572,34 +533,78 @@ void PluginEditor::renderOpenGL()
                 const float gridHeight = stepY * static_cast<float>(visibleRows);
                 const float startX = -gridWidth * 0.5f + stepX * 0.5f;
                 const float startY = gridHeight * 0.5f - stepY * 0.5f;
+                const float targetHeight = cellHeight * 0.6f;
+                const float targetWidth = cellWidth * 0.9f;
+                const float padX = cellWidth * 0.08f;
 
                 for (size_t col = 0; col < visibleCols; ++col)
                 {
                     for (size_t row = 0; row < visibleRows; ++row)
                     {
                         const auto& cell = cellStates[col][row];
+                        const auto& text = visibleText[col][row];
+                        if (text.empty())
+                            continue;
+
+                        auto meshIt = textMeshCache.find(text);
+                        if (meshIt == textMeshCache.end() || meshIt->second.indexCount == 0)
+                            continue;
+                        const auto& mesh = meshIt->second;
+
                         const float depthScale = getCellDepthScale(cell);
                         const float depth = cellDepth * depthScale;
+                        const float cellCenterX = startX + static_cast<float>(col) * stepX;
+                        const float cellCenterY = startY - static_cast<float>(row) * stepY;
+                        const float textZ = depth + textDepthOffset;
 
-                        // Per-cell UVs into the atlas image (each cell owns a fixed rect).
-                        const float u0 = (static_cast<float>(col * cellPixelWidth)) / static_cast<float>(textAtlasWidth);
-                        const float u1 = (static_cast<float>((col + 1) * cellPixelWidth)) / static_cast<float>(textAtlasWidth);
-                        const float v0 = 1.0f - (static_cast<float>((row + 1) * cellPixelHeight)) / static_cast<float>(textAtlasHeight);
-                        const float v1 = 1.0f - (static_cast<float>(row * cellPixelHeight)) / static_cast<float>(textAtlasHeight);
+                        const float textWidth = textGeomParams.advance * static_cast<float>(text.size());
+                        const float widthScale = (textWidth > 0.0f) ? (targetWidth / textWidth) : 1.0f;
+                        const float heightScale = targetHeight / textGeomParams.cellH;
+                        const float scale = std::min(widthScale, heightScale);
+                        const float textHeightScaled = textGeomParams.cellH * scale;
+                        const float baseX = cellCenterX - cellWidth * 0.5f + padX;
+                        const float baseY = cellCenterY - textHeightScaled * 0.5f;
 
-                        if (textShaderUniforms->uvRect != nullptr)
-                            textShaderUniforms->uvRect->set(u0, v0, u1 - u0, v1 - v0);
+                        const auto position = juce::Vector3D<float>(baseX, baseY, textZ);
+                        const auto scaleVec = juce::Vector3D<float>(scale, scale, 1.0f);
+                        const auto modelMatrix = getModelMatrix(position, scaleVec);
 
-                        const auto position = juce::Vector3D<float>(startX + static_cast<float>(col) * stepX,
-                                                                    startY - static_cast<float>(row) * stepY,
-                                                                    depth + textDepthOffset);
-                        const auto scale = juce::Vector3D<float>(cellWidth * 0.9f, cellHeight * 0.9f, 1.0f);
-                        const auto modelMatrix = getModelMatrix(position, scale);
+                        const auto textColour = getTextColour(cell);
+                        if (textShaderUniforms->textColor != nullptr)
+                            textShaderUniforms->textColor->set(textColour.getFloatRed(),
+                                                               textColour.getFloatGreen(),
+                                                               textColour.getFloatBlue(),
+                                                               textColour.getFloatAlpha());
+
+                        const float timeSeconds = static_cast<float>(framesDrawn) / 25.0f;
+                        const float glowPulse = 0.75f + 0.25f * std::sin(timeSeconds * 6.0f);
+                        const float glowStrength = cell.playheadGlow * glowPulse;
+
+                        if (textShaderUniforms->glowStrength != nullptr)
+                            textShaderUniforms->glowStrength->set(glowStrength);
+
+                        if (textShaderUniforms->glowColor != nullptr)
+                            textShaderUniforms->glowColor->set(palette.gridPlayhead.getFloatRed(),
+                                                               palette.gridPlayhead.getFloatGreen(),
+                                                               palette.gridPlayhead.getFloatBlue());
 
                         if (textShaderUniforms->modelMatrix != nullptr)
                             textShaderUniforms->modelMatrix->setMatrix4(modelMatrix.mat, 1, GL_FALSE);
 
-                        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+                        openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
+                        openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ibo);
+
+                        if (textShaderAttributes->position != nullptr)
+                        {
+                            openGLContext.extensions.glVertexAttribPointer(textShaderAttributes->position->attributeID,
+                                                                           3,
+                                                                           GL_FLOAT,
+                                                                           GL_FALSE,
+                                                                           sizeof(Segment14Geometry::Vertex),
+                                                                           reinterpret_cast<GLvoid*>(offsetof(Segment14Geometry::Vertex, x)));
+                        }
+
+                        glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
                     }
                 }
             }
@@ -608,10 +613,9 @@ void PluginEditor::renderOpenGL()
         if (textShaderAttributes->position != nullptr)
             openGLContext.extensions.glDisableVertexAttribArray(textShaderAttributes->position->attributeID);
 
-        if (textShaderAttributes->texCoord != nullptr)
-            openGLContext.extensions.glDisableVertexAttribArray(textShaderAttributes->texCoord->attributeID);
-
-        textTexture.release();
+        glDepthMask(GL_TRUE);
+        openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, 0);
+        openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     }
 
     if (shaderAttributes->position != nullptr)
@@ -634,7 +638,7 @@ void PluginEditor::openGLContextClosing()
     textShaderAttributes.reset();
     textShaderUniforms.reset();
     textShaderProgram.reset();
-    textTexture.release();
+    clearTextMeshCache();
 
     if (vertexBuffer != 0)
     {
@@ -658,12 +662,6 @@ void PluginEditor::openGLContextClosing()
     {
         openGLContext.extensions.glDeleteBuffers(1, &frontEdgeIndexBuffer);
         frontEdgeIndexBuffer = 0;
-    }
-
-    if (textVertexBuffer != 0)
-    {
-        openGLContext.extensions.glDeleteBuffers(1, &textVertexBuffer);
-        textVertexBuffer = 0;
     }
 }
 
@@ -715,7 +713,6 @@ void PluginEditor::timerCallback ()
     sequencer->updateSeqStringGrid();
     updateSeqStrOnNextDraw = false; 
   }
-  updateTextAtlasImage();
   openGLContext.triggerRepaint();
 }
 
@@ -807,7 +804,7 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
         startRow = 0;
         lastStartCol = 0;
         lastStartRow = 0;
-        textAtlasDirty = true;
+        textGeometryDirty = true;
         return;
     }
 
@@ -912,7 +909,7 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
         visibleRows = rowsToDisplay;
         startCol = nextStartCol;
         startRow = nextStartRow;
-        textAtlasDirty = true;
+        textGeometryDirty = true;
     }
 }
 
@@ -951,6 +948,17 @@ juce::Colour PluginEditor::getCellColour(const CellVisualState& cell) const
         return palette.statusOk;
 
     return palette.gridEmpty;
+}
+
+juce::Colour PluginEditor::getTextColour(const CellVisualState& cell) const
+{
+    if (cell.isSelected)
+        return palette.gridSelected;
+    if (cell.isArmed)
+        return palette.statusOk;
+    if (cell.hasNote)
+        return palette.gridNote;
+    return palette.textPrimary;
 }
 
 float PluginEditor::getCellDepthScale(const CellVisualState& cell) const
@@ -1022,70 +1030,68 @@ void PluginEditor::mouseDrag(const juce::MouseEvent& event)
     panOffsetY -= static_cast<float>(delta.y) * panScale;
 }
 
-/** dynamically generate a bitmap of the text for the sequencer */
-void PluginEditor::updateTextAtlasImage()
+void PluginEditor::updateTextGeometryCache()
 {
     std::vector<std::vector<std::string>> textCopy;
-    size_t cols = 0;
-    size_t rows = 0;
-    juce::Rectangle<int> boundsCopy;
-
     {
         std::lock_guard<std::mutex> lock(cellStateMutex);
-        if (!textAtlasDirty || visibleText.empty())
+        if (!textGeometryDirty || visibleText.empty())
             return;
         textCopy = visibleText;
-        cols = visibleCols;
-        rows = visibleRows;
-        boundsCopy = seqViewBounds;
+        textGeometryDirty = false;
     }
 
-    if (boundsCopy.isEmpty() || cols == 0 || rows == 0)
-        return;
+    std::unordered_set<std::string> uniqueStrings;
+    for (const auto& column : textCopy)
+        for (const auto& text : column)
+            if (!text.empty())
+                uniqueStrings.insert(text);
 
-    const int nextCellWidth = std::max(1, boundsCopy.getWidth() / static_cast<int>(cols));
-    const int nextCellHeight = std::max(1, boundsCopy.getHeight() / static_cast<int>(rows));
-    const int nextAtlasWidth = nextCellWidth * static_cast<int>(cols);
-    const int nextAtlasHeight = nextCellHeight * static_cast<int>(rows);
+    for (const auto& text : uniqueStrings)
+        ensureTextMesh(text);
+}
 
-    juce::Image nextImage(juce::Image::ARGB, nextAtlasWidth, nextAtlasHeight, true);
-    juce::Graphics g(nextImage);
-    g.fillAll(palette.textBackground);
-    g.setColour(palette.textPrimary.withAlpha(0.9f));
-    if (textAtlasTypeface == nullptr)
+PluginEditor::TextMesh& PluginEditor::ensureTextMesh(const std::string& text)
+{
+    auto it = textMeshCache.find(text);
+    if (it != textMeshCache.end())
+        return it->second;
+
+    TextMesh meshInfo{};
+    const auto mesh = textGeometry.buildStringMesh(text);
+    meshInfo.indexCount = static_cast<GLsizei>(mesh.indices.size());
+
+    if (meshInfo.indexCount > 0)
     {
-        textAtlasTypeface = juce::Typeface::createSystemTypefaceFor(
-            BinaryData::segment14_regular_otf,
-            BinaryData::segment14_regular_otfSize);
+        openGLContext.extensions.glGenBuffers(1, &meshInfo.vbo);
+        openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, meshInfo.vbo);
+        openGLContext.extensions.glBufferData(GL_ARRAY_BUFFER,
+                                              static_cast<GLsizeiptr>(mesh.vertices.size() * sizeof(Segment14Geometry::Vertex)),
+                                              mesh.vertices.data(),
+                                              GL_STATIC_DRAW);
+
+        openGLContext.extensions.glGenBuffers(1, &meshInfo.ibo);
+        openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, meshInfo.ibo);
+        openGLContext.extensions.glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                                              static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(uint32_t)),
+                                              mesh.indices.data(),
+                                              GL_STATIC_DRAW);
     }
 
-    juce::Font atlasFont(textAtlasTypeface);
-    atlasFont.setHeight(static_cast<float>(nextCellHeight) * fontHeight);
-    g.setFont(atlasFont);
-    
+    auto [inserted, _] = textMeshCache.emplace(text, meshInfo);
+    return inserted->second;
+}
 
-    for (size_t col = 0; col < cols; ++col)
+void PluginEditor::clearTextMeshCache()
+{
+    for (auto& entry : textMeshCache)
     {
-        for (size_t row = 0; row < rows; ++row)
-        {
-            const int x = static_cast<int>(col) * nextCellWidth;
-            const int y = static_cast<int>(row) * nextCellHeight;
-            const juce::Rectangle<int> cellBounds(x, y, nextCellWidth, nextCellHeight);
-            
-            g.drawText(textCopy[col][row], cellBounds, juce::Justification::centredLeft, false);
-        }
+        if (entry.second.vbo != 0)
+            openGLContext.extensions.glDeleteBuffers(1, &entry.second.vbo);
+        if (entry.second.ibo != 0)
+            openGLContext.extensions.glDeleteBuffers(1, &entry.second.ibo);
     }
-
-    {
-        std::lock_guard<std::mutex> lock(cellStateMutex);
-        textAtlasImage = std::move(nextImage);
-        textAtlasWidth = nextAtlasWidth;
-        textAtlasHeight = nextAtlasHeight;
-        cellPixelWidth = nextCellWidth;
-        cellPixelHeight = nextCellHeight;
-        textAtlasDirty = false;
-        textAtlasUploadPending = true;
-    }
+    textMeshCache.clear();
 }
 
 bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)

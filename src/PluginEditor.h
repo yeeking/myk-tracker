@@ -10,12 +10,13 @@
 
 #include <JuceHeader.h>
 #include <mutex>
+#include <unordered_map>
 #include "PluginProcessor.h"
 #include "StringTable.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "TrackerController.h"
-// #include "Segment14Geometry.h"
+#include "Segment14Geometry.h"
 //==============================================================================
 /**
 */
@@ -75,8 +76,6 @@ private:
     // render sizes for cells and 
     const float cellWidth{2.0f};
     const float cellHeight{1.0f};
-    // proportion of cellHeight
-    const float fontHeight{0.5f};
     
     
 
@@ -112,7 +111,6 @@ private:
     struct TextShaderAttributes
     {
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> position;
-        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> texCoord;
     };
 
     struct TextShaderUniforms
@@ -120,8 +118,16 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> projectionMatrix;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> viewMatrix;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> modelMatrix;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uvRect;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> textTexture;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> textColor;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> glowStrength;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> glowColor;
+    };
+
+    struct TextMesh
+    {
+        GLuint vbo = 0;
+        GLuint ibo = 0;
+        GLsizei indexCount = 0;
     };
 
     PluginProcessor& audioProcessor;
@@ -137,12 +143,13 @@ private:
     std::unique_ptr<juce::OpenGLShaderProgram> textShaderProgram;
     std::unique_ptr<TextShaderAttributes> textShaderAttributes;
     std::unique_ptr<TextShaderUniforms> textShaderUniforms;
-    juce::OpenGLTexture textTexture;
+    std::unordered_map<std::string, TextMesh> textMeshCache;
+    Segment14Geometry::Params textGeomParams{};
+    Segment14Geometry textGeometry{ textGeomParams };
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
     GLuint edgeIndexBuffer = 0;
     GLuint frontEdgeIndexBuffer = 0;
-    GLuint textVertexBuffer = 0;
 
     size_t rowsInUI;
     juce::Rectangle<int> seqViewBounds;
@@ -164,8 +171,11 @@ private:
     juce::Matrix3D<float> getViewMatrix() const;
     juce::Matrix3D<float> getModelMatrix(juce::Vector3D<float> position, juce::Vector3D<float> scale) const;
     juce::Colour getCellColour(const CellVisualState& cell) const;
+    juce::Colour getTextColour(const CellVisualState& cell) const;
     float getCellDepthScale(const CellVisualState& cell) const;
-    void updateTextAtlasImage();
+    void updateTextGeometryCache();
+    TextMesh& ensureTextMesh(const std::string& text);
+    void clearTextMeshCache();
     void adjustZoom(float delta);
     void moveUp(float amount);
     void moveDown(float amount);
@@ -182,14 +192,7 @@ private:
     size_t startRow = 0;
     size_t lastStartCol = 0;
     size_t lastStartRow = 0;
-    bool textAtlasDirty = false;
-    bool textAtlasUploadPending = false;
-    int textAtlasWidth = 0;
-    int textAtlasHeight = 0;
-    int cellPixelWidth = 0;
-    int cellPixelHeight = 0;
-    juce::Image textAtlasImage;
-    juce::Typeface::Ptr textAtlasTypeface;
+    bool textGeometryDirty = false;
     float zoomLevel = 1.0f;
     juce::Point<int> lastDragPosition;
     float panOffsetX = 0.0f;

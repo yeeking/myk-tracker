@@ -21,14 +21,13 @@ PluginProcessor::PluginProcessor()
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
                        ), 
-                        apvts(*this, nullptr, "params", createParameterLayout()),
-
-                       sequencer{16, 8}, seqEditor{&sequencer}, 
+                       sequencer{16, 8}, seqEditor{&sequencer},
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
-                       elapsedSamples{0},maxHorizon{44100 * 3600}, 
-                       samplesPerTick{44100/(120/60)/8}, bpm{120}, 
-                       outstandingNoteOffs{0}
+                       elapsedSamples{0}, maxHorizon{44100 * 3600},
+                       samplesPerTick{44100/(120/60)/8}, bpm{120},
+                       outstandingNoteOffs{0},
+                       apvts(*this, nullptr, "params", createParameterLayout())
 #endif
 {
     
@@ -606,4 +605,3 @@ void PluginProcessor::clearPendingEvents()
 {
     midiToSend.clear();
 }
-
