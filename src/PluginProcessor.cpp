@@ -25,7 +25,7 @@ PluginProcessor::PluginProcessor()
                        // seq, clock, editor
                        trackerController{&sequencer, this, &seqEditor},
                        elapsedSamples{0}, maxHorizon{44100 * 3600},
-                       samplesPerTick{44100/(120/60)/8}, bpm{120},
+                       samplesPerTick{44100/(120/60)/8}, bpm{120.0},
                        outstandingNoteOffs{0},
                        apvts(*this, nullptr, "params", createParameterLayout())
 #endif
@@ -592,12 +592,12 @@ void PluginProcessor::setBPM(double _bpm)
     assert(_bpm > 0);
     // update tick interval in samples 
     samplesPerTick = getSampleRate() *  (60/_bpm) /8;
-    bpm = _bpm;
+    bpm.store(_bpm, std::memory_order_relaxed);
 }
 
 double PluginProcessor::getBPM()
 {
-    return bpm;
+    return bpm.load(std::memory_order_relaxed);
 }
 
 

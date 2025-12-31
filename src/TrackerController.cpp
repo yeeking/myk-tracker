@@ -39,7 +39,7 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
              
     }
     std::string playMode = (clock->getCurrentTick() % 8) > 3 ? "+" : "-"; 
-    std::string bpm = std::to_string(static_cast<int>(clock->getBPM()));
+    std::string bpm = "@" + std::to_string(static_cast<int>(clock->getBPM()));
     if (sequencer->isPlaying()){
         playMode = "> " + playMode + bpm;
     }

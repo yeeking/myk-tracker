@@ -10,6 +10,7 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -102,7 +103,7 @@ private:
     int elapsedSamples;
     int maxHorizon;   
     unsigned int samplesPerTick; 
-    double bpm; 
+    std::atomic<double> bpm; 
     int outstandingNoteOffs;
     /** configure plugin params */
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();

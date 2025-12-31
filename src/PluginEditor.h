@@ -193,6 +193,8 @@ private:
     size_t lastStartCol = 0;
     size_t lastStartRow = 0;
     bool textGeometryDirty = false;
+    std::string hudBpmText;
+    int lastHudBpm = -1;
     float zoomLevel = 1.0f;
     juce::Point<int> lastDragPosition;
     float panOffsetX = 0.0f;

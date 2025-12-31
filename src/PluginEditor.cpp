@@ -610,6 +610,86 @@ void PluginEditor::renderOpenGL()
             }
         }
 
+        const double bpmValue = audioProcessor.getBPM();
+        const int bpmInt = static_cast<int>(std::lround(bpmValue));
+        if (bpmInt != lastHudBpm)
+        {
+            // hudBpmText = "@BPM " + std::to_string(bpmInt);
+            hudBpmText = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+            lastHudBpm = bpmInt;
+            ensureTextMesh(hudBpmText);
+        }
+
+        if (!hudBpmText.empty())
+        {
+            auto meshIt = textMeshCache.find(hudBpmText);
+            if (meshIt != textMeshCache.end() && meshIt->second.indexCount > 0)
+            {
+                const float nearPlane = 6.0f;
+                const float frustumHeight = 3.0f;
+                const float frustumWidth = frustumHeight * aspectRatio;
+                const float hudDistance = 8.0f;
+                const float hudHalfWidth = frustumWidth * (hudDistance / nearPlane);
+                const float hudHalfHeight = frustumHeight * (hudDistance / nearPlane);
+                const float padding = hudHalfHeight * 0.12f;
+                const float targetHeight = hudHalfHeight * 0.18f;
+                const float targetWidth = hudHalfWidth * 0.9f;
+
+                const float textWidth = textGeomParams.advance * static_cast<float>(hudBpmText.size());
+                const float widthScale = (textWidth > 0.0f) ? (targetWidth / textWidth) : 1.0f;
+                const float heightScale = targetHeight / textGeomParams.cellH;
+                const float scale = std::min(widthScale, heightScale);
+                const float textHeightScaled = textGeomParams.cellH * scale;
+
+                const float cameraDistance = 20.0f / zoomLevel;
+                const float viewX = -hudHalfWidth + padding;
+                const float viewY = hudHalfHeight - padding - textHeightScaled;
+                const float worldX = -panOffsetX + viewX;
+                const float worldY = -panOffsetY + viewY;
+                const float worldZ = cameraDistance - hudDistance;
+
+                const auto position = juce::Vector3D<float>(worldX, worldY, worldZ);
+                const auto scaleVec = juce::Vector3D<float>(scale, scale, 1.0f);
+                const auto modelMatrix = getModelMatrix(position, scaleVec);
+
+                const auto& mesh = meshIt->second;
+                if (textShaderUniforms->textColor != nullptr)
+                    textShaderUniforms->textColor->set(palette.textPrimary.getFloatRed(),
+                                                       palette.textPrimary.getFloatGreen(),
+                                                       palette.textPrimary.getFloatBlue(),
+                                                       1.0f);
+
+                if (textShaderUniforms->glowStrength != nullptr)
+                    textShaderUniforms->glowStrength->set(0.35f);
+
+                if (textShaderUniforms->glowColor != nullptr)
+                    textShaderUniforms->glowColor->set(palette.gridPlayhead.getFloatRed(),
+                                                       palette.gridPlayhead.getFloatGreen(),
+                                                       palette.gridPlayhead.getFloatBlue());
+
+                if (textShaderUniforms->modelMatrix != nullptr)
+                    textShaderUniforms->modelMatrix->setMatrix4(modelMatrix.mat, 1, GL_FALSE);
+
+                glDisable(GL_DEPTH_TEST);
+                openGLContext.extensions.glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
+                openGLContext.extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ibo);
+
+                if (textShaderAttributes->position != nullptr)
+                {
+                    openGLContext.extensions.glVertexAttribPointer(textShaderAttributes->position->attributeID,
+                                                                   3,
+                                                                   GL_FLOAT,
+                                                                   GL_FALSE,
+                                                                   sizeof(Segment14Geometry::Vertex),
+                                                                   reinterpret_cast<GLvoid*>(offsetof(Segment14Geometry::Vertex, x)));
+                }
+
+                glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+                glEnable(GL_DEPTH_TEST);
+            }
+        }
+
         if (textShaderAttributes->position != nullptr)
             openGLContext.extensions.glDisableVertexAttribArray(textShaderAttributes->position->attributeID);
 
@@ -675,9 +755,8 @@ void PluginEditor::resized()
 {
     // This is generally where you'll want topip install tf-keras lay out the positions of any
     // subcomponents in your editor..
-    int cPanelHeight = getHeight() / static_cast<int>(rowsInUI);
-    controlPanelTable.setBounds(0, 0, getWidth(), cPanelHeight);
-    seqViewBounds = juce::Rectangle<int>(0, cPanelHeight, getWidth(), getHeight() - cPanelHeight);
+    controlPanelTable.setBounds(0, 0, 0, 0);
+    seqViewBounds = getLocalBounds();
    
 }
 

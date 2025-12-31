@@ -84,13 +84,13 @@ target_compile_definitions(myk-tracker-plug
 
 
         # the font for the display
-juce_add_binary_data(AudioPluginData SOURCES src/data/segment14.regular.otf)
+# juce_add_binary_data(AudioPluginData SOURCES src/data/segment14.regular.otf)
 
 
 target_link_libraries(myk-tracker-plug
     PRIVATE
 #        seq-lib
-        AudioPluginData           
+        # AudioPluginData           
         juce::juce_audio_utils
         juce::juce_opengl
     PUBLIC
