@@ -1,5 +1,5 @@
 #include "Sequencer.h"
-#include "MidiUtils.h"
+#include "MidiUtilsAbs.h"
 #include <sstream>
 #include <iomanip>
 
@@ -48,7 +48,7 @@ std::string Step::toStringFlat() const
   else {
     std::string disp = "";
     std::size_t note = (int)this->data[0][Step::noteInd];
-    char nchar = MidiUtils::getIntToNoteMap()[note % 12];
+    char nchar = MidiUtilsAbs::getIntToNoteMap()[note % 12];
     std::size_t oct = note / 12; 
     disp.push_back(nchar);
     disp += "-" + std::to_string(oct) + " ";
@@ -228,7 +228,7 @@ Sequence::Sequence(Sequencer *_sequencer,
       midiChannel{_midiChannel}, type{SequenceType::midiNote},
       transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, nextTicksPerStep{0}, ticksElapsed{0}, tickOfFour{0}, muted{false}, 
       rw_mutex{std::make_unique<std::shared_mutex>()}, rewindAtNextZeroTick{false}
-// , midiScaleToDrum{MidiUtils::getScaleMidiToDrumMidi()}
+// , midiScaleToDrum{MidiUtilsAbs::getScaleMidiToDrumMidi()}
 {
   currentLength = seqLength;
   for (std::size_t i = 0; i < seqLength; i++)

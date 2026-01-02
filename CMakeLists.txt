@@ -7,33 +7,6 @@ set (CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # mac - target macos 11
 set (CMAKE_OSX_ARCHITECTURES arm64;x86_64) # mac - build universal binary
 
 
-########## CLI version cmake config 
-# Find the ncurses package
-find_package(Curses REQUIRED)
-# Include the ncurses headers
-include_directories(${CURSES_INCLUDE_DIR})
-
-# Add the RtMidi subdirectory
-# Set the RTMIDI_API_JACK option to OFF
-# if(APPLE) 
-set(RTMIDI_API_JACK OFF CACHE BOOL "Disable Jack support" FORCE)
-# endif()
-add_subdirectory(./libs/rtmidi ./rtmidi)
-
-
-
-# build the sequencer library
-add_library(seq-lib src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp)
-
-add_executable(MykTracker src/Gui.cpp src/MidiUtils.cpp src/main.cpp)
-add_executable(CurTest src/Gui.cpp src/MidiUtils.cpp src/curtest.cpp)
-
-# Link the ncurses library with your executable
-target_link_libraries(MykTracker PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
-target_link_libraries(CurTest PRIVATE seq-lib  ${CURSES_LIBRARIES} panel  rtmidi)
-
-########## END/ CLI version cmake config 
-
 ########## JUCE version cmake config 
 add_subdirectory(./libs/JUCE ./JUCE)               
 
