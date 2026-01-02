@@ -9,14 +9,12 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include <mutex>
-#include <unordered_map>
 #include "PluginProcessor.h"
 #include "StringTable.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "TrackerController.h"
-#include "Segment14Geometry.h"
+#include "TrackerUIComponent.h"
 //==============================================================================
 /**
 */
@@ -72,63 +70,12 @@ private:
 
 // some variables to control the display style
     const float glowDecayScalar{0.8f};
-    const float glowDecayStep{0.1f};
     // render sizes for cells and 
     const float cellWidth{2.0f};
     const float cellHeight{1.0f};
     
     
 
-
-    struct CellVisualState
-    {
-        bool hasNote = false;
-        bool isActivePlayhead = false;
-        bool isSelected = false;
-        bool isArmed = false;
-        float playheadGlow = 0.0f;
-    };
-
-    struct ShaderAttributes
-    {
-        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> position;
-        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> normal;
-    };
-
-    struct ShaderUniforms
-    {
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> projectionMatrix;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> viewMatrix;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> modelMatrix;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> cellColor;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> cellGlow;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> lightDirection;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> lightColor;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> ambientStrength;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> glowColor;
-    };
-
-    struct TextShaderAttributes
-    {
-        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> position;
-    };
-
-    struct TextShaderUniforms
-    {
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> projectionMatrix;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> viewMatrix;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> modelMatrix;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> textColor;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> glowStrength;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> glowColor;
-    };
-
-    struct TextMesh
-    {
-        GLuint vbo = 0;
-        GLuint ibo = 0;
-        GLsizei indexCount = 0;
-    };
 
     PluginProcessor& audioProcessor;
 
@@ -137,19 +84,7 @@ private:
     SequencerEditor* seqEditor;
     TrackerController* trackerController; 
     juce::OpenGLContext openGLContext;
-    std::unique_ptr<juce::OpenGLShaderProgram> shaderProgram;
-    std::unique_ptr<ShaderAttributes> shaderAttributes;
-    std::unique_ptr<ShaderUniforms> shaderUniforms;
-    std::unique_ptr<juce::OpenGLShaderProgram> textShaderProgram;
-    std::unique_ptr<TextShaderAttributes> textShaderAttributes;
-    std::unique_ptr<TextShaderUniforms> textShaderUniforms;
-    std::unordered_map<std::string, TextMesh> textMeshCache;
-    Segment14Geometry::Params textGeomParams{};
-    Segment14Geometry textGeometry{ textGeomParams };
-    GLuint vertexBuffer = 0;
-    GLuint indexBuffer = 0;
-    GLuint edgeIndexBuffer = 0;
-    GLuint frontEdgeIndexBuffer = 0;
+    TrackerUIComponent uiComponent;
 
     size_t rowsInUI;
     juce::Rectangle<int> seqViewBounds;
@@ -167,24 +102,25 @@ private:
                           bool showCursor,
                           size_t armedSeq);
 
-    juce::Matrix3D<float> getProjectionMatrix(float aspectRatio) const;
-    juce::Matrix3D<float> getViewMatrix() const;
-    juce::Matrix3D<float> getModelMatrix(juce::Vector3D<float> position, juce::Vector3D<float> scale) const;
-    juce::Colour getCellColour(const CellVisualState& cell) const;
-    juce::Colour getTextColour(const CellVisualState& cell) const;
-    float getCellDepthScale(const CellVisualState& cell) const;
-    void updateTextGeometryCache();
-    TextMesh& ensureTextMesh(const std::string& text);
-    void clearTextMeshCache();
+    struct CellVisualFlags
+    {
+        bool hasNote = false;
+        bool isActivePlayhead = false;
+        bool isSelected = false;
+        bool isArmed = false;
+    };
+
+    TrackerUIComponent::CellState makeDefaultCell() const;
+    juce::Colour getCellColour(const CellVisualFlags& cell) const;
+    juce::Colour getTextColour(const CellVisualFlags& cell) const;
+    float getCellDepthScale(const CellVisualFlags& cell) const;
     void adjustZoom(float delta);
     void moveUp(float amount);
     void moveDown(float amount);
     void moveLeft(float amount);
     void moveRight(float amount);
 
-    std::mutex cellStateMutex;
-    std::vector<std::vector<CellVisualState>> cellStates;
-    std::vector<std::vector<std::string>> visibleText;
+    TrackerUIComponent::CellGrid cellStates;
     std::vector<std::vector<float>> playheadGlow;
     size_t visibleCols = 0;
     size_t visibleRows = 0;
@@ -192,8 +128,7 @@ private:
     size_t startRow = 0;
     size_t lastStartCol = 0;
     size_t lastStartRow = 0;
-    bool textGeometryDirty = false;
-    std::string hudBpmText;
+    TrackerUIComponent::OverlayState overlayState;
     int lastHudBpm = -1;
     float zoomLevel = 1.0f;
     juce::Point<int> lastDragPosition;

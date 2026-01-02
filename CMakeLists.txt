@@ -63,6 +63,7 @@ target_sources(myk-tracker-plug
     src/PluginEditor.cpp
     src/PluginProcessor.cpp
     src/StringTable.cpp
+    src/TrackerUIComponent.cpp
 src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp
 )
 
