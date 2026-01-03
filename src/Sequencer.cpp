@@ -741,6 +741,13 @@ void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<
 
   if (!assertSeqAndStep(sequence, step))
     return;
+  double machineType = sequences[sequence].getMachineType();
+  for (auto& row : data)
+  {
+    if (row.size() < Step::maxInd + 1)
+      row.resize(Step::maxInd + 1, 0.0);
+    row[Step::cmdInd] = machineType;
+  }
   sequences[sequence].setStepData(step, data);
 }
 /** update a single value in the  data
@@ -751,6 +758,8 @@ void Sequencer::setStepDataAt(std::size_t sequence, std::size_t step, std::size_
 
   if (!assertSeqAndStep(sequence, step))
     return;
+  if (col == Step::cmdInd)
+    value = sequences[sequence].getMachineType();
   sequences[sequence].setStepDataAt(step, row, col, value);
 }
 
@@ -1043,8 +1052,7 @@ void Sequencer::incrementStepDataAt(std::size_t sequence, std::size_t step, std:
   // check if they are changing the step command. 
   // if so, do not use param config stuff to edit. 
   if (col == Step::cmdInd) {
-    val ++;
-    if (val >= CommandProcessor::countCommands()) val = CommandProcessor::countCommands();
+    val = sequences[sequence].getMachineType();
   }
   else {
     double stepCmd = getStepDataAt(sequence, step, row, Step::cmdInd);
@@ -1060,8 +1068,7 @@ void Sequencer::decrementStepDataAt(std::size_t sequence, std::size_t step, std:
 {
   double val = getStepDataAt(sequence, step, row, col);
   if (col == Step::cmdInd) {
-    val --;
-    if (val < 0) val = 0;
+    val = sequences[sequence].getMachineType();
   }
   else {
     // get the step param config for the step's 
