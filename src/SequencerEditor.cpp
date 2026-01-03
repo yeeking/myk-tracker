@@ -155,8 +155,7 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
   {
     assert(column == Step::noteInd ||
            column == Step::velInd ||
-           column == Step::lengthInd ||
-           column == Step::chanInd);
+           column == Step::lengthInd);
     // get a copy of the data for reference
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     // get the relevant parameter index
@@ -321,12 +320,29 @@ void SequencerEditor::enterDataAtCursor(double inValue)
 
   if (editMode == SequencerEditorMode::configuringSequence)
   {
-    // set channel on all notes for this sequence
-    int channelI = (unsigned int)inValue;
-    channelI = channelI % 16; // 16 channels
-    for (int step = 0; step < sequencer->howManySteps(currentSequence); ++step)
-    {
-      sequencer->setStepDataAt(currentSequence, step, 0, Step::chanInd, channelI);
+    Sequence* sequence = sequencer->getSequence(currentSequence);
+    if (currentSeqParam == Sequence::machineIdConfig){
+      double machineId = fmod(inValue, 16);
+      if (machineId < 0) machineId = 0;
+      sequence->setMachineId(machineId);
+    }
+    else if (currentSeqParam == Sequence::machineTypeConfig){
+      double machineType = fmod(inValue, CommandProcessor::countCommands());
+      if (machineType < 0) machineType = 0;
+      sequence->setMachineType(machineType);
+    }
+    else if (currentSeqParam == Sequence::probConfig){
+      double prob = inValue;
+      if (prob < 0) prob = 0;
+      if (prob > 1) prob = 1;
+      sequence->setTriggerProbability(prob);
+    }
+    else if (currentSeqParam == Sequence::tpsConfig){
+      int tps = static_cast<int>(inValue);
+      if (tps < 1) tps = 1;
+      if (tps > 16) tps = 16;
+      sequence->setTicksPerStep(static_cast<std::size_t>(tps));
+      sequence->onZeroSetTicksPerStep(static_cast<std::size_t>(tps));
     }
   }
 }
@@ -346,6 +362,12 @@ void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note
   }
 
   data[0][Step::probInd] = 1.0; // keep the prob
+
+  // align sequence machine id to the incoming channel if supplied
+  if (channel >= 0)
+  {
+    sequencer->getSequence(sequence)->setMachineId(channel % 16);
+  }
 
   sequencer->setStepData(sequence,
                          sequencer->getCurrentStep(sequence),
@@ -545,6 +567,7 @@ void SequencerEditor::addRow()
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     // decrementStepData(data, sequencer->getSequenceType(currentSequence));
     std::vector<double> newRow(data[0].size(), 0.0);
+    newRow[Step::cmdInd] = sequencer->getSequence(currentSequence)->getMachineType();
     data.push_back(newRow);
     writeStepData(data);
     break;
@@ -788,18 +811,7 @@ void SequencerEditor::incrementStepData(std::vector<std::vector<double>> &data, 
  */
 void SequencerEditor::incrementSeqConfigParam()
 {
-  switch (editSubMode)
-  {
-  case SequencerEditorSubMode::editCol1: // channel
-    incrementChannel();
-    break;
-  case SequencerEditorSubMode::editCol2: // type
-    SequencerEditor::nextSequenceType(sequencer, currentSequence);
-    break;
-  case SequencerEditorSubMode::editCol3: // ticks per step
-    incrementTicksPerStep();
-    break;
-  }
+  sequencer->incrementSeqParam(currentSequence, currentSeqParam);
 }
 
 /** decrease the value of the seq param relating to the
@@ -807,45 +819,24 @@ void SequencerEditor::incrementSeqConfigParam()
  */
 void SequencerEditor::decrementSeqConfigParam()
 {
-  switch (editSubMode)
-  {
-  case SequencerEditorSubMode::editCol1: // channel
-    decrementChannel();
-    break;
-  case SequencerEditorSubMode::editCol2: // type
-    break;
-  case SequencerEditorSubMode::editCol3: // ticks per step
-    decrementTicksPerStep();
-    break;
-  }
+  sequencer->decrementSeqParam(currentSequence, currentSeqParam);
 }
 
 void SequencerEditor::incrementChannel()
 {
-  std::vector<std::vector<double>> data2 = sequencer->getStepData(currentSequence, 0);
-  int channel = data2[0][Step::chanInd];
-  channel = (channel + 1) % 16;
-  for (int step = 0; step < sequencer->howManySteps(currentSequence); ++step)
-  {
-    // note this only sets channel on first row for now
-    sequencer->setStepDataAt(currentSequence, step, 0, Step::chanInd, channel);
-  }
+  Sequence* sequence = sequencer->getSequence(currentSequence);
+  int machineId = static_cast<int>(sequence->getMachineId());
+  machineId = (machineId + 1) % 16;
+  sequence->setMachineId(machineId);
 }
 void SequencerEditor::decrementChannel()
 {
-  // set the channel based on step 0
-  std::vector<std::vector<double>> data2 = sequencer->getStepData(currentSequence, 0);
-  unsigned int channel = data2[0][Step::chanInd];
-  channel = (channel - 1) % 16;
-  if (channel > 16)
-    channel = 16;
-  if (channel < 0)
-    channel = 0;
-  for (int step = 0; step < sequencer->howManySteps(currentSequence); ++step)
-  {
-    // note this only sets channel on first row for now
-    sequencer->setStepDataAt(currentSequence, step, 0, Step::chanInd, channel);
-  }
+  Sequence* sequence = sequencer->getSequence(currentSequence);
+  int machineId = static_cast<int>(sequence->getMachineId());
+  machineId = (machineId - 1);
+  if (machineId < 0)
+    machineId = 15;
+  sequence->setMachineId(machineId);
 }
 
 void SequencerEditor::incrementTicksPerStep()

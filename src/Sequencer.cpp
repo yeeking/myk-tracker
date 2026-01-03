@@ -63,7 +63,7 @@ std::string Step::toStringFlat() const
   // return std::to_string((int)this->data[0][Step::noteInd]);
 }
 
-std::vector<std::vector<std::string>> Step::toStringGrid() const 
+std::vector<std::vector<std::string>> Step::toStringGrid(const SequenceReadOnly* sequenceContext) const 
 {
 
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
@@ -92,7 +92,11 @@ std::vector<std::vector<std::string>> Step::toStringGrid() const
         // decide how to display the step 
         // based on column index
         if (col == Step::probInd){
-          colData.push_back(cmd.parameters[col - 1].shortName + Step::dblToString(data[row][col], 2));
+          double probValue = data[row][col];
+          if (sequenceContext != nullptr && sequenceContext->triggerProbability > 0){
+            probValue = sequenceContext->triggerProbability;
+          }
+          colData.push_back(cmd.parameters[col - 1].shortName + Step::dblToString(probValue, 2));
         }
         else{
           colData.push_back(cmd.parameters[col - 1].shortName + std::to_string((int)data[row][col]));
@@ -129,9 +133,7 @@ void Step::resetRow(std::size_t row)
   assert(row < data.size());
   for (std::size_t col = 0; col < data[row].size(); ++col)
   {
-    if (col != Step::chanInd){// do not reset channel
-      data[row][col] = 0;
-    }
+    data[row][col] = 0;
   }
 }
 
@@ -177,7 +179,7 @@ std::function<void(std::vector<std::vector<double>> *)> Step::getCallback()
 }
 
 /** trigger this step, causing it to pass its data to its callback*/
-void Step::trigger(std::size_t row) 
+void Step::trigger(std::size_t row, const SequenceReadOnly* sequenceContext) 
 {
   // shared lock as reading
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
@@ -189,7 +191,7 @@ void Step::trigger(std::size_t row)
       assert(row < data.size());
       // note that the command decides if 
       // the data is valid and therefore, if it should do anything, not the step 
-      CommandProcessor::executeCommand(data[row][Step::cmdInd], &data[row]);
+      CommandProcessor::executeCommand(data[row][Step::cmdInd], &data[row], sequenceContext);
     }
     else
     {
@@ -197,7 +199,7 @@ void Step::trigger(std::size_t row)
       {
       // note that the command decides if 
       // the data is valid and therefore, if it should do anything, not the step 
-        CommandProcessor::executeCommand(dataRow[Step::cmdInd], &dataRow);
+        CommandProcessor::executeCommand(dataRow[Step::cmdInd], &dataRow, sequenceContext);
       }
     }
   }
@@ -224,9 +226,10 @@ std::string Step::dblToString(double val, std::size_t dps)
 
 Sequence::Sequence(Sequencer *_sequencer,
                    std::size_t seqLength,
-                   unsigned short _midiChannel)
+                   unsigned short _machineId)
     : sequencer{_sequencer}, currentStep{0},
-      midiChannel{_midiChannel}, type{SequenceType::midiNote},
+      machineId{static_cast<double>(_machineId)}, type{SequenceType::midiNote},
+      machineType{static_cast<double>(CommandType::MidiNote)}, triggerProbability{0.0},
       transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, nextTicksPerStep{0}, ticksElapsed{0}, tickOfFour{0}, muted{false}, 
       rw_mutex{std::make_unique<std::shared_mutex>()}, rewindAtNextZeroTick{false}
 // , midiScaleToDrum{MachineUtilsAbs::getScaleMidiToDrumMidi()}
@@ -279,7 +282,8 @@ void Sequence::tick(bool trigger)
     ticksElapsed = 0;
     if (trigger && !muted)
     {
-      steps[currentStep].trigger(0);
+      SequenceReadOnly context = getReadOnlyContext();
+      steps[currentStep].trigger(0, &context);
     }
 
     if (currentLength + lengthAdjustment < 1)
@@ -298,7 +302,8 @@ void Sequence::tick(bool trigger)
 
 void Sequence::triggerStep(std::size_t step, std::size_t row)
 {
-  steps[step].trigger(row);
+  SequenceReadOnly context = getReadOnlyContext();
+  steps[step].trigger(row, &context);
 }
 
 void Sequence::deactivateProcessors()
@@ -411,9 +416,7 @@ void Sequence::ensureEnoughStepsForLength(std::size_t length)
       Step s;
       s.setCallback(
           steps[0].getCallback());
-      // set the channel
-      std::size_t channel = steps[0].getDataAt(0, Step::chanInd);
-      s.setDataAt(0, Step::chanInd, channel);
+      s.setDataAt(0, Step::cmdInd, machineType);
       steps.push_back(std::move(s));
     }
   }
@@ -489,6 +492,58 @@ SequenceType Sequence::getType() const
   return this->type;
 }
 
+void Sequence::setMachineType(double newMachineType)
+{
+  int maxCommands = CommandProcessor::countCommands();
+  if (maxCommands > 0)
+  {
+    if (newMachineType < 0) newMachineType = 0;
+    if (newMachineType >= maxCommands) newMachineType = maxCommands - 1;
+  }
+  this->machineType = newMachineType;
+  for (std::size_t step = 0; step < steps.size(); ++step)
+  {
+    for (std::size_t row = 0; row < steps[step].howManyDataRows(); ++row)
+    {
+      steps[step].setDataAt(row, Step::cmdInd, newMachineType);
+    }
+  }
+}
+
+double Sequence::getMachineType() const
+{
+  return this->machineType;
+}
+
+void Sequence::setMachineId(double newMachineId)
+{
+  if (newMachineId < 0) newMachineId = 0;
+  if (newMachineId > 15) newMachineId = 15;
+  this->machineId = newMachineId;
+}
+
+double Sequence::getMachineId() const
+{
+  return this->machineId;
+}
+
+void Sequence::setTriggerProbability(double newTriggerProbability)
+{
+  if (newTriggerProbability < 0) newTriggerProbability = 0;
+  if (newTriggerProbability > 1) newTriggerProbability = 1;
+  this->triggerProbability = newTriggerProbability;
+}
+
+double Sequence::getTriggerProbability() const
+{
+  return this->triggerProbability;
+}
+
+SequenceReadOnly Sequence::getReadOnlyContext() const
+{
+  return SequenceReadOnly{triggerProbability, machineType, machineId};
+}
+
 void Sequence::setTranspose(double transpose)
 {
   this->transpose = transpose;
@@ -513,11 +568,13 @@ void Sequence::reset()
     // reset the data
     Step cleanStep{};
     step.setData(cleanStep.getData());
+    step.setDataAt(0, Step::cmdInd, machineType);
   }
 }
 std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(std::size_t step)
 {
-  return steps[step].toStringGrid();
+  SequenceReadOnly context = getReadOnlyContext();
+  return steps[step].toStringGrid(&context);
 }
 
 bool Sequence::isMuted() const
@@ -558,15 +615,12 @@ Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std
 
 void Sequencer::setDefaultMIDIChannels()
 {
-  // set MIDI channels on steps to something useful
+  // set default machine ids to something useful
   std::size_t seqCount = sequences.size();
   for (std::size_t seq = 0; seq < seqCount; ++seq)
   {
-    double ch = floor(seq / 2);
-    std::size_t seqLength = sequences[seq].getLength();
-    for (std::size_t step = 0; step < seqLength; ++step){
-      setStepDataAt(seq, step, 0, Step::chanInd, ch);
-    }
+    double machineId = floor(seq / 2);
+    sequences[seq].setMachineId(machineId);
   }
 }
 
@@ -585,13 +639,9 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
   for (std::size_t seq = 0; seq < this->sequences.size(); ++seq)
   {
     this->sequences[seq].setType(otherSeq->sequences[seq].getType());
-    // assign the same channel
-    double channel = otherSeq->sequences[seq].getStepDataAt(0, 0, Step::chanInd);
-    for (std::size_t step = 0; step < this->sequences[seq].howManySteps(); ++step)
-    {
-      // note this assumes a single row step
-      this->setStepDataAt(seq, step, 0, Step::chanInd, channel);
-    }
+    this->sequences[seq].setMachineId(otherSeq->sequences[seq].getMachineId());
+    this->sequences[seq].setMachineType(otherSeq->sequences[seq].getMachineType());
+    this->sequences[seq].setTriggerProbability(otherSeq->sequences[seq].getTriggerProbability());
   }
 }
 
@@ -862,16 +912,21 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
 
   for (std::size_t seq =0;seq<howManySequences();++seq){
     confGrid.push_back(std::vector<std::string>());
-    for (Parameter& p : params){
-      if (p.stepCol == Step::chanInd ||
-        p.stepCol == Step::probInd){ 
-        // display the setting on the first step in this sequence
-        double val = getStepDataAt(seq, 0, 0, p.stepCol);
-        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(val, p.decPlaces));
+    Sequence* sequence = getSequence(seq);
+    for (std::size_t paramIndex = 0; paramIndex < params.size(); ++paramIndex){
+      Parameter& p = params[paramIndex];
+      if (paramIndex == Sequence::machineIdConfig){
+        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getMachineId(), p.decPlaces));
       }
-      if (p.stepCol == -1){ // config is sequence level not step
-        // ticks
+      else if (paramIndex == Sequence::machineTypeConfig){
+        Command cmd = CommandProcessor::getCommand(sequence->getMachineType());
+        confGrid[seq].push_back(p.shortName + ":" + cmd.shortName);
+      }
+      else if (paramIndex == Sequence::tpsConfig){
         confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequencerNextTicksPerStep(seq)));    
+      }
+      else if (paramIndex == Sequence::probConfig){
+        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getTriggerProbability(), p.decPlaces));
       }
     }
   }    
@@ -891,10 +946,11 @@ std::vector<Parameter>& Sequencer::getSeqConfigSpecs()
 }
 void Sequencer::setupSeqConfigSpecs()
 {
-  seqConfigSpecs.resize(3);
-  seqConfigSpecs[Sequence::chanConfig] = Parameter("Channel", "Ch", 0, 15, 1, 1, Step::chanInd); // affects step channel value
-  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1); // -1 as no step level option
-  seqConfigSpecs[Sequence::probConfig] = Parameter("Probability %", "P", 0.0, 1.0, 0.1, 1.0, Step::probInd, 2); // affects step prob value
+  seqConfigSpecs.resize(4);
+  seqConfigSpecs[Sequence::machineIdConfig] = Parameter("Machine ID", "ID", 0, 15, 1, 1, -1);
+  seqConfigSpecs[Sequence::machineTypeConfig] = Parameter("Machine", "Type", 0, 0, 1, 0, -1);
+  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1);
+  seqConfigSpecs[Sequence::probConfig] = Parameter("Trig Prob", "P", 0.0, 1.0, 0.1, 0.0, -1, 2);
   // TODO
   // seqParamSpecs.push_back(Parameter("Velocity variation plus/minus %", "velvary", 0.0, 1.0, 0.1, 0.0));
   // seqParamSpecs.push_back(Parameter("Shuffle +/- ticks", "shuf", 0, 3, 1, 0.0));
@@ -910,26 +966,28 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
   assert(paramIndex < getSeqConfigSpecs().size() &&
          paramIndex >= 0);
   Parameter p = seqConfigSpecs[paramIndex];
-  // deal with 'step-level' where we are overriding at sequence level
-  if (paramIndex == Sequence::chanConfig || 
-     paramIndex == Sequence::probConfig){
-    // meed to update all steps to the new parameter     sequences[seq].
-    double val = getStepDataAt(seq, 0, 0, p.stepCol);
+  Sequence* sequence = getSequence(seq);
+  if (paramIndex == Sequence::machineIdConfig){
+    double val = sequence->getMachineId();
     val += p.step;
-    if (val >= p.max) val = p.max;
-    for (std::size_t step = 0; step < howManySteps(seq); ++ step){
-      for (std::size_t row =0; row < howManyStepDataRows(seq, step); ++row){
-        setStepDataAt(seq, step, row, p.stepCol, val);
-      }
-    }
+    if (val > p.max) val = p.max;
+    if (val < p.min) val = p.min;
+    sequence->setMachineId(val);
   }
-  // extra behaviour - if they are setting the sequence's channel, 
-  // remember it for use for new notes
-  if (paramIndex == Sequence::chanConfig){
-    
+  if (paramIndex == Sequence::machineTypeConfig){
+    double val = sequence->getMachineType();
+    val += p.step;
+    if (val >= CommandProcessor::countCommands()) val = 0;
+    if (val < 0) val = CommandProcessor::countCommands() - 1;
+    sequence->setMachineType(val);
   }
-
-
+  if (paramIndex == Sequence::probConfig){
+    double val = sequence->getTriggerProbability();
+    val += p.step;
+    if (val > p.max) val = p.max;
+    if (val < p.min) val = p.min;
+    sequence->setTriggerProbability(val);
+  }
   if (paramIndex == Sequence::tpsConfig){
     std::size_t tps = sequences[seq].getTicksPerStep();
     tps += p.step;
@@ -946,17 +1004,27 @@ void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex)
          paramIndex >= 0);
 
   Parameter p = seqConfigSpecs[paramIndex];
-  if (paramIndex == Sequence::chanConfig || 
-     paramIndex == Sequence::probConfig){
-    // meed to update all steps to the new parameter     sequences[seq].
-    double val = getStepDataAt(seq, 0, 0, p.stepCol);
+  Sequence* sequence = getSequence(seq);
+  if (paramIndex == Sequence::machineIdConfig){
+    double val = sequence->getMachineId();
     val -= p.step;
     if (val < p.min) val = p.min;
-    for (std::size_t step = 0; step < howManySteps(seq); ++ step){
-      for (std::size_t row =0; row < howManyStepDataRows(seq, step); ++row){
-        setStepDataAt(seq, step, row, p.stepCol, val);
-      }
-    }
+    if (val > p.max) val = p.max;
+    sequence->setMachineId(val);
+  }
+  if (paramIndex == Sequence::machineTypeConfig){
+    double val = sequence->getMachineType();
+    val -= p.step;
+    if (val < 0) val = CommandProcessor::countCommands() - 1;
+    if (val >= CommandProcessor::countCommands()) val = 0;
+    sequence->setMachineType(val);
+  }
+  if (paramIndex == Sequence::probConfig){
+    double val = sequence->getTriggerProbability();
+    val -= p.step;
+    if (val < p.min) val = p.min;
+    if (val > p.max) val = p.max;
+    sequence->setTriggerProbability(val);
   }
   if (paramIndex == Sequence::tpsConfig){
     std::size_t tps = sequences[seq].getTicksPerStep();

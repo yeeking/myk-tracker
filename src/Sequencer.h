@@ -35,13 +35,12 @@ class Step{
   public:
   // these should be in an enum probably
     const static std::size_t cmdInd{0}; // maps to CommandRegistry::getCommand
-    const static std::size_t chanInd{1};
-    const static std::size_t noteInd{2};
-    const static std::size_t velInd{3};
-    const static std::size_t lengthInd{4};
-    const static std::size_t probInd{5};
+    const static std::size_t noteInd{1};
+    const static std::size_t velInd{2};
+    const static std::size_t lengthInd{3};
+    const static std::size_t probInd{4};
     /** when populating an empty step, use this */
-    const static std::size_t maxInd{5};
+    const static std::size_t maxInd{4};
 
     
     
@@ -63,7 +62,7 @@ class Step{
     /** returns a one line string representation of the step's data */
     std::string toStringFlat() const ;
     /** returns a grid representation of the step's data*/
-    std::vector<std::vector<std::string>> toStringGrid() const;
+    std::vector<std::vector<std::string>> toStringGrid(const SequenceReadOnly* sequenceContext) const;
     
     /** sets the data stored in this step to a copy of the sent data and updates stored string representations */
     void setData(const std::vector<std::vector<double>>& data);
@@ -81,7 +80,7 @@ class Step{
     /** return the callback for this step*/
     std::function<void(std::vector<std::vector<double>>*)> getCallback();
     /** trigger this step, causing it to pass its data to its callback. if row > -1, only trigger that row */
-    void trigger(std::size_t row);
+    void trigger(std::size_t row, const SequenceReadOnly* sequenceContext);
     void resetRow(std::size_t row);
     /** toggle the activity status of this step*/
     void toggleActive();
@@ -117,14 +116,15 @@ enum class SequenceType {midiNote, drumMidi, chordMidi, samplePlayer, transposer
 class Sequence{
   public:
     /** param index for */
-    const static std::size_t chanConfig{0}; 
-    const static std::size_t tpsConfig{1};
-    const static std::size_t probConfig{2};
+    const static std::size_t machineIdConfig{0}; 
+    const static std::size_t machineTypeConfig{1};
+    const static std::size_t tpsConfig{2};
+    const static std::size_t probConfig{3};
      
     
 
 
-    Sequence(Sequencer* sequencer, std::size_t seqLength = 16, unsigned short midiChannel = 1);
+    Sequence(Sequencer* sequencer, std::size_t seqLength = 16, unsigned short machineId = 1);
 
     // stop copying so mutex is ok 
     Sequence(const Sequence& other) = delete;
@@ -209,6 +209,13 @@ class Sequence{
     /** set the sequence type */
     void setType(SequenceType type);
     SequenceType getType() const;
+    void setMachineType(double machineType);
+    double getMachineType() const;
+    void setMachineId(double machineId);
+    double getMachineId() const;
+    void setTriggerProbability(double triggerProbability);
+    double getTriggerProbability() const;
+    SequenceReadOnly getReadOnlyContext() const;
   /** add a transpose processor to this sequence. 
      * Normally, a transposer type sequence will call this on a midiNote type sequence
      * to apply a transpose to it 
@@ -238,9 +245,11 @@ class Sequence{
     std::size_t currentLength;
     /** Current seq length. This is signed in case we are computing current step using currentLength*/
     std::size_t currentStep;
-    unsigned short midiChannel;
+    double machineId;
     std::vector<Step> steps;
     SequenceType type;
+    double machineType;
+    double triggerProbability;
     // temporary sequencer adjustment parameters that get reset at step 0
     double transpose; 
     signed int lengthAdjustment;
@@ -403,7 +412,6 @@ class Sequencer  {
 
 
 };
-
 
 
 

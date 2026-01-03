@@ -14,7 +14,7 @@ Parameter::Parameter(const std::string& name, const std::string& shortName, doub
 
 Command::Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
                  int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam,
-                 std::function<void(std::vector<double>*)> execute)
+                 std::function<void(std::vector<double>*, const SequenceReadOnly*)> execute)
     : name(name), shortName(shortName), description(description), parameters(parameters), 
     noteEditGoesToParam{noteEditGoesToParam}, numberEditGoesToParam{numberEditGoesToParam}, lengthEditGoesToParam{lengthEditGoesToParam}, execute(std::move(execute)) {}
 
@@ -79,8 +79,7 @@ void CommandProcessor::initialiseCommands() {
     Command midiNote{
             "MIDINote", "Midi", "Plays a MIDI note",
               // long, short, min, max, step,default
-            { Parameter("Channel", "C", 0, 16, 1, 0, Step::chanInd), 
-              Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
+            { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
               Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
               Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
@@ -88,15 +87,20 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd, // int noteEditGoesToParam;
             Step::velInd, // int numberEditGoesToParam;
             Step::lengthInd, // int lengthEditGoesToParam;  
-            [](std::vector<double>* stepData) {
+            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
+                assert(sequenceContext != nullptr);
                 if ((*stepData)[Step::noteInd] > 0) {// there is a valid note
+                    double triggerProbability = (*stepData)[Step::probInd];
+                    if (sequenceContext->triggerProbability > 0){
+                        triggerProbability = sequenceContext->triggerProbability;
+                    }
                     double random_number = RandomNumberGenerator::getRandomNumber();
-                    if (random_number < (*stepData)[Step::probInd]){ 
+                    if (random_number < triggerProbability){ 
                         double now = CommandData::masterClock->getCurrentTick();
                         // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
                         CommandData::machineUtils->sendMessageToMachine(
-                            static_cast<unsigned short> ((*stepData)[Step::chanInd]),
+                            static_cast<unsigned short> (sequenceContext->machineId),
                             static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
                             static_cast<unsigned short> ((*stepData)[Step::velInd]), 
                             // (long) ((*stepData)[Step::lengthInd]+now)
@@ -105,6 +109,37 @@ void CommandProcessor::initialiseCommands() {
                     }
                 }
                 
+            }
+    };
+    Command logCommand{
+            "Log", "Log", "Prints step data to the console",
+            { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
+              Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
+              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
+              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
+            Step::noteInd,
+            Step::velInd,
+            Step::lengthInd,
+            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                assert(stepData->size() == Step::maxInd + 1);
+                assert(sequenceContext != nullptr);
+                double triggerProbability = (*stepData)[Step::probInd];
+                if (sequenceContext->triggerProbability > 0){
+                    triggerProbability = sequenceContext->triggerProbability;
+                }
+                double random_number = RandomNumberGenerator::getRandomNumber();
+                if (random_number < triggerProbability){
+                    std::cout << "Log command: machineId=" << sequenceContext->machineId
+                              << " triggerProb=" << triggerProbability
+                              << " stepData=[";
+                    for (std::size_t i = 0; i < stepData->size(); ++i){
+                        std::cout << (*stepData)[i];
+                        if (i + 1 < stepData->size()){
+                            std::cout << ", ";
+                        }
+                    }
+                    std::cout << "]" << std::endl;
+                }
             }
     };
     // Command sample{
@@ -128,9 +163,11 @@ void CommandProcessor::initialiseCommands() {
     // };
 
     CommandData::commands[midiNote.shortName] = midiNote;
-    CommandData::commandsDouble[0] = midiNote;
+    CommandData::commands[logCommand.shortName] = logCommand;
+    CommandData::commandsDouble[static_cast<double>(CommandType::MidiNote)] = midiNote;
+    CommandData::commandsDouble[static_cast<double>(CommandType::Log)] = logCommand;
     // CommandData::commands[sample.shortName] = sample;
-    // CommandData::commandsDouble[1] = sample;
+    // CommandData::commandsDouble[2] = sample;
 }
 
 
@@ -160,13 +197,13 @@ Command& CommandProcessor::getCommand(const std::string& commandName) {
 }
 
 
-void CommandProcessor::executeCommand(double cmdInd, std::vector<double>* params)
+void CommandProcessor::executeCommand(double cmdInd, std::vector<double>* params, const SequenceReadOnly* sequenceContext)
 {
     if (CommandData::commands.size() == 0){
         CommandProcessor::initialiseCommands();
     }
     assert(CommandData::commandsDouble.find(cmdInd) != CommandData::commandsDouble.end());
-    CommandData::commandsDouble[cmdInd].execute(params);// later: add in other stuff commands need
+    CommandData::commandsDouble[cmdInd].execute(params, sequenceContext);// later: add in other stuff commands need
 }
 
 

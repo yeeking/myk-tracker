@@ -31,6 +31,12 @@ struct Parameter {
     Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol, int dps=0);
 };
 
+struct SequenceReadOnly {
+    double triggerProbability;
+    double machineType;
+    double machineId;
+};
+
 /** Commands are the main things that are executed by the sequencer when triggering a step 
  * 
 */
@@ -46,15 +52,17 @@ struct Command {
     int numberEditGoesToParam;
     /** when user sends length input during editing, which param to send it to? */
     int lengthEditGoesToParam;
-    std::function<void(std::vector<double>*)> execute;
+    std::function<void(std::vector<double>*, const SequenceReadOnly*)> execute;
     Command(){}
     Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
-            int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam, std::function<void(std::vector<double>*)> execute);
+            int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam,
+            std::function<void(std::vector<double>*, const SequenceReadOnly*)> execute);
 };
 
 // Stable identifiers for command slots in CommandProcessor::commandsDouble.
 enum class CommandType : std::size_t {
     MidiNote = 0,
+    Log = 1,
 };
 
 
@@ -72,7 +80,7 @@ public:
     static Command& getCommand(double commandInd);
     static Command& getCommand(const std::string& commandName);
     // static void executeCommand(const std::string& commandName, std::vector<double>* params);
-    static void executeCommand(double cmdInd, std::vector<double>* params);
+    static void executeCommand(double cmdInd, std::vector<double>* params, const SequenceReadOnly* sequenceContext);
     static int countCommands();
 private: 
 /** populates the commands variable */

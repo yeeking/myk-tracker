@@ -346,8 +346,10 @@ juce::var PluginProcessor::getUiState()
         seqLengths.add(static_cast<int>(sequencer.howManySteps(col)));
     state->setProperty("sequenceLengths", seqLengths);
 
-    double channel = sequencer.getStepDataAt(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep(), 0, Step::chanInd);
-    state->setProperty("channel", channel);
+    Sequence* currentSequence = sequencer.getSequence(seqEditor.getCurrentSequence());
+    state->setProperty("machineId", currentSequence->getMachineId());
+    state->setProperty("machineType", currentSequence->getMachineType());
+    state->setProperty("triggerProbability", currentSequence->getTriggerProbability());
 
     state->setProperty("ticksPerStep", static_cast<int>(sequencer.getSequence(seqEditor.getCurrentSequence())->getTicksPerStep()));
 
@@ -370,7 +372,9 @@ juce::var PluginProcessor::serializeSequencerState()
             seqObj->setProperty("type", static_cast<int>(seq->getType()));
             seqObj->setProperty("ticksPerStep", static_cast<int>(seq->getTicksPerStep()));
             seqObj->setProperty("muted", seq->isMuted());
-            seqObj->setProperty("channel", sequencer.getStepDataAt(seqIndex, 0, 0, Step::chanInd));
+            seqObj->setProperty("machineId", seq->getMachineId());
+            seqObj->setProperty("machineType", seq->getMachineType());
+            seqObj->setProperty("triggerProbability", seq->getTriggerProbability());
 
             juce::Array<juce::var> stepsVar;
             for (std::size_t step = 0; step < length; ++step)
@@ -444,7 +448,9 @@ void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
                 seq->setTicksPerStep(tps);
                 seq->onZeroSetTicksPerStep(tps);
 
-                const double channel = static_cast<double>(seqObj.getProperty("channel", sequencer.getStepDataAt(i, 0, 0, Step::chanInd)));
+                const double machineId = static_cast<double>(seqObj.getProperty("machineId", seq->getMachineId()));
+                const double machineType = static_cast<double>(seqObj.getProperty("machineType", seq->getMachineType()));
+                const double triggerProbability = static_cast<double>(seqObj.getProperty("triggerProbability", seq->getTriggerProbability()));
 
                 const auto stepsVar = seqObj.getProperty("steps", juce::var());
                 if (stepsVar.isArray())
@@ -470,7 +476,28 @@ void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
                                         row.push_back(static_cast<double>(val));
                                 }
                                 if (!row.empty())
-                                    data.push_back(row);
+                                {
+                                    if (row.size() == Step::maxInd + 2)
+                                    {
+                                        // Legacy row layout: cmd, chan, note, vel, length, prob.
+                                        std::vector<double> remapped = {
+                                            row[Step::cmdInd],
+                                            row[2],
+                                            row[3],
+                                            row[4],
+                                            row[5]
+                                        };
+                                        data.push_back(std::move(remapped));
+                                    }
+                                    else
+                                    {
+                                        if (row.size() < Step::maxInd + 1)
+                                            row.resize(Step::maxInd + 1, 0.0);
+                                        if (row.size() > Step::maxInd + 1)
+                                            row.resize(Step::maxInd + 1);
+                                        data.push_back(std::move(row));
+                                    }
+                                }
                             }
                             if (!data.empty())
                                 sequencer.setStepData(i, step, data);
@@ -482,8 +509,9 @@ void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
                     }
                 }
 
-                for (std::size_t step = 0; step < seq->getLength(); ++step)
-                    sequencer.setStepDataAt(i, step, 0, Step::chanInd, channel);
+                seq->setMachineId(machineId);
+                seq->setMachineType(machineType);
+                seq->setTriggerProbability(triggerProbability);
 
                 const bool mutedTarget = static_cast<bool>(seqObj.getProperty("muted", false));
                 if (seq->isMuted() != mutedTarget)
