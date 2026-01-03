@@ -6,7 +6,7 @@
 #include <tuple>
 #include <functional>
 #include "ClockAbs.h"
-#include "MidiUtilsAbs.h"
+#include "MachineUtilsAbs.h"
 
 /** Define the structure for a parameter 
  * parameters are used as arguments to Commands but also as a handy wrapper 
@@ -52,15 +52,20 @@ struct Command {
             int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam, std::function<void(std::vector<double>*)> execute);
 };
 
+// Stable identifiers for command slots in CommandProcessor::commandsDouble.
+enum class CommandType : std::size_t {
+    MidiNote = 0,
+};
+
 
 
 /** Static class to manage objects and data relating to running of commands e.g. 
- * the MidiUtilsAbs object which allows commands to send MIDI 
+ * the MachineUtilsAbs object which allows commands to send MIDI 
  * and the ClockAbs object which allows commands to know about time  */ 
 class CommandProcessor {
 public:
     static void assignMasterClock(ClockAbs* masterClock);
-    static void assignMidiUtils(MidiUtilsAbs* _midiUtils);
+    static void assignMachineUtils(MachineUtilsAbs* _machineUtils);
     static void sendAllNotesOff();
     static void sendQueuedMIDI(long tick);
 
@@ -73,4 +78,3 @@ private:
 /** populates the commands variable */
     static void initialiseCommands();
 };
-

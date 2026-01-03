@@ -99,7 +99,7 @@ void PluginEditor::resized()
 {
     // This is generally where you'll want topip install tf-keras lay out the positions of any
     // subcomponents in your editor..
-    controlPanelTable.setBounds(0, 0, 0, 0);
+    // controlPanelTable.setBounds(0, 0, 0, 0);
     seqViewBounds = getLocalBounds();
    
 }
@@ -213,11 +213,11 @@ void PluginEditor::prepareSeqConfigView()
 
 void PluginEditor::prepareControlPanelView()
 {
-    std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
-    controlPanelTable.updateData(grid, 
-        1, 12, 
-        0, 0, // todo - pull these from the editor which keeps track of this 
-        std::vector<std::pair<int, int>>(), false); 
+    // std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
+    // controlPanelTable.updateData(grid, 
+    //     1, 12, 
+    //     0, 0, // todo - pull these from the editor which keeps track of this 
+    //     std::vector<std::pair<int, int>>(), false); 
 }
 
 void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>& data,
@@ -535,7 +535,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
 
         default:
             char ch = static_cast<char>(key.getTextCharacter()); // sketch as converting wchar unicode to char... 
-            std::map<char, double> key_to_note = MidiUtilsAbs::getKeyboardToMidiNotes(0);
+            std::map<char, double> key_to_note = MachineUtilsAbs::getKeyboardToMidiNotes(0);
             for (const std::pair<const char, double>& key_note : key_to_note)
             {
               if (ch == key_note.first){ 

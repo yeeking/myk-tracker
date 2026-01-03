@@ -3,7 +3,7 @@
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "ClockAbs.h"
-#include "MidiUtilsAbs.h"
+#include "MachineUtilsAbs.h"
 
 /** This class provides high level control over the tracker. Includes 'sequencer-level' things  */
 class TrackerController{

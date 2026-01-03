@@ -1,5 +1,5 @@
 #include "Sequencer.h"
-#include "MidiUtilsAbs.h"
+#include "MachineUtilsAbs.h"
 #include <sstream>
 #include <iomanip>
 
@@ -10,6 +10,7 @@ Step::Step() : rw_mutex{std::make_unique<std::shared_mutex>()}, active{true}
   for (std::size_t i=0;i<=Step::maxInd;++i){
     data[0].push_back(0.0);
   }
+  data[0][Step::cmdInd] = static_cast<double>(CommandType::MidiNote);
 }
 /** returns a copy of the data stored in this step*/
 std::vector<std::vector<double>> Step::getData() const
@@ -48,7 +49,7 @@ std::string Step::toStringFlat() const
   else {
     std::string disp = "";
     std::size_t note = (int)this->data[0][Step::noteInd];
-    char nchar = MidiUtilsAbs::getIntToNoteMap()[note % 12];
+    char nchar = MachineUtilsAbs::getIntToNoteMap()[note % 12];
     std::size_t oct = note / 12; 
     disp.push_back(nchar);
     disp += "-" + std::to_string(oct) + " ";
@@ -228,7 +229,7 @@ Sequence::Sequence(Sequencer *_sequencer,
       midiChannel{_midiChannel}, type{SequenceType::midiNote},
       transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, nextTicksPerStep{0}, ticksElapsed{0}, tickOfFour{0}, muted{false}, 
       rw_mutex{std::make_unique<std::shared_mutex>()}, rewindAtNextZeroTick{false}
-// , midiScaleToDrum{MidiUtilsAbs::getScaleMidiToDrumMidi()}
+// , midiScaleToDrum{MachineUtilsAbs::getScaleMidiToDrumMidi()}
 {
   currentLength = seqLength;
   for (std::size_t i = 0; i < seqLength; i++)

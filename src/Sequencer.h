@@ -21,7 +21,7 @@
 #include "SequencerCommands.h"
 //#include "ChordUtils.h"
 // #include "SequencerUtils.h"
-// #include "MidiUtils.h"
+// #include "MachineUtils.h"
 
 
 /** default spec for a Step's data, 

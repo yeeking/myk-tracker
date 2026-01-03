@@ -4,7 +4,7 @@
 #include <iostream>
 #include <assert.h>
 #include <random>
-#include "MidiUtilsAbs.h"
+#include "MachineUtilsAbs.h"
 #include "Sequencer.h"
 
 // Constructor definitions
@@ -53,7 +53,7 @@ namespace CommandData {
     // this is for fast double-based access to commands
     // when the double is stored in the Step data
     std::unordered_map<double, Command> commandsDouble;
-    MidiUtilsAbs* midiUtils = nullptr;
+    MachineUtilsAbs* machineUtils = nullptr;
     // the clock is externally created but 
     // we need access to it for 
     // some of the lambdas
@@ -72,7 +72,7 @@ void CommandProcessor::assignMasterClock(ClockAbs* masterClock)
 void CommandProcessor::initialiseCommands() {
 
     assert(CommandData::masterClock != nullptr);
-    assert(CommandData::midiUtils != nullptr);
+    assert(CommandData::machineUtils != nullptr);
     
     RandomNumberGenerator::initialize();
     // get a MIDI link going
@@ -95,7 +95,7 @@ void CommandProcessor::initialiseCommands() {
                     if (random_number < (*stepData)[Step::probInd]){ 
                         double now = CommandData::masterClock->getCurrentTick();
                         // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
-                        CommandData::midiUtils->playSingleNote(
+                        CommandData::machineUtils->sendMessageToMachine(
                             static_cast<unsigned short> ((*stepData)[Step::chanInd]),
                             static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
                             static_cast<unsigned short> ((*stepData)[Step::velInd]), 
@@ -178,17 +178,16 @@ int CommandProcessor::countCommands()
     return CommandData::commands.size();
 }
 
-void CommandProcessor::assignMidiUtils(MidiUtilsAbs* _midiUtils)
+void CommandProcessor::assignMachineUtils(MachineUtilsAbs* _machineUtils)
 {
-    CommandData::midiUtils = _midiUtils; 
+    CommandData::machineUtils = _machineUtils; 
 }
 
 void CommandProcessor::sendAllNotesOff()
 {
-    CommandData::midiUtils->allNotesOff();
+    CommandData::machineUtils->allNotesOff();
 }
 void CommandProcessor::sendQueuedMIDI(long tick)
 {
-    CommandData::midiUtils->sendQueuedMessages(tick);
+    CommandData::machineUtils->sendQueuedMessages(tick);
 }
-

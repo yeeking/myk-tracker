@@ -14,7 +14,7 @@
 #include <memory>
 #include <vector>
 
-#include "MidiUtilsAbs.h"
+#include "MachineUtilsAbs.h"
 #include "ClockAbs.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
@@ -24,7 +24,7 @@
 //==============================================================================
 /**
 */
-class PluginProcessor  :    public MidiUtilsAbs, 
+class PluginProcessor  :    public MachineUtilsAbs, 
                             public ClockAbs, 
                             public juce::AudioProcessor, 
                             public juce::ChangeBroadcaster
@@ -38,9 +38,9 @@ public:
     PluginProcessor();
     ~PluginProcessor() override;
 
-    // the MidiUtils interface 
+    // the MachineUtils interface 
     void allNotesOff() override;
-    void playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
+    void sendMessageToMachine(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
     void sendQueuedMessages(long tick) override; 
     // the ClockAbs interface
     void setBPM(double bpm) override; 

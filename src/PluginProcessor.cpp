@@ -32,7 +32,7 @@ PluginProcessor::PluginProcessor()
 {
     
     CommandProcessor::assignMasterClock(this);
-    CommandProcessor::assignMidiUtils(this);
+    CommandProcessor::assignMachineUtils(this);
 
 
     // sequencer.decrementSeqParam(0, 1);
@@ -563,13 +563,13 @@ void PluginProcessor::allNotesOff()
         midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
 }
-void PluginProcessor::playSingleNote(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks)
+void PluginProcessor::sendMessageToMachine(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks)
 {
     channel ++; // channels come in 0-15 but we want 1-16
     // offtick is an absolute tick from the start of time 
     // but we have a max horizon which is how far in the future we can set things 
     int offSample =  elapsedSamples +  (samplesPerTick * static_cast<int>(durInTicks)) % maxHorizon;
-    // DBG("playSingleNote note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
+    // DBG("sendMessageToMachine note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
     // generate a note on and a note off 
     // note on is right now 
     midiToSend.addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);

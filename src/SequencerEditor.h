@@ -1,6 +1,5 @@
 #pragma once
 
-/** TODO: split this to h and cpp */
 #include "Sequencer.h"
 
 /**

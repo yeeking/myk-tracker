@@ -10,7 +10,7 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-#include "StringTable.h"
+// #include "StringTable.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "TrackerController.h"
@@ -79,7 +79,7 @@ private:
 
     PluginProcessor& audioProcessor;
 
-    StringTable controlPanelTable;
+    // StringTable controlPanelTable;
     Sequencer* sequencer; 
     SequencerEditor* seqEditor;
     TrackerController* trackerController; 
