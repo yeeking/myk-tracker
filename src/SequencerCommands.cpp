@@ -100,6 +100,7 @@ void CommandProcessor::initialiseCommands() {
                         double now = CommandData::masterClock->getCurrentTick();
                         // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
                         CommandData::machineUtils->sendMessageToMachine(
+                            static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
                             static_cast<unsigned short> (sequenceContext->machineId),
                             static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
                             static_cast<unsigned short> ((*stepData)[Step::velInd]), 
@@ -142,6 +143,34 @@ void CommandProcessor::initialiseCommands() {
                 }
             }
     };
+    Command samplerCommand{
+            "Sampler", "Samp", "Plays a sampler voice",
+            { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
+              Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
+              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
+              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
+            Step::noteInd,
+            Step::velInd,
+            Step::lengthInd,
+            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                assert(stepData->size() == Step::maxInd + 1);
+                assert(sequenceContext != nullptr);
+                double triggerProbability = (*stepData)[Step::probInd];
+                if (sequenceContext->triggerProbability > 0){
+                    triggerProbability = sequenceContext->triggerProbability;
+                }
+                double random_number = RandomNumberGenerator::getRandomNumber();
+                if (random_number < triggerProbability){ 
+                    CommandData::machineUtils->sendMessageToMachine(
+                        static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
+                        static_cast<unsigned short> (sequenceContext->machineId),
+                        static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
+                        static_cast<unsigned short> ((*stepData)[Step::velInd]), 
+                        static_cast<unsigned short> ((*stepData)[Step::lengthInd])
+                    );
+                }
+            }
+    };
     // Command sample{
     //         "Sample", "Samp", "Plays a Sample",
     //         { Parameter("Sound", "Bank", 0, 16, 1, 0, Step::chanInd), 
@@ -164,8 +193,10 @@ void CommandProcessor::initialiseCommands() {
 
     CommandData::commands[midiNote.shortName] = midiNote;
     CommandData::commands[logCommand.shortName] = logCommand;
+    CommandData::commands[samplerCommand.shortName] = samplerCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::MidiNote)] = midiNote;
     CommandData::commandsDouble[static_cast<double>(CommandType::Log)] = logCommand;
+    CommandData::commandsDouble[static_cast<double>(CommandType::Sampler)] = samplerCommand;
     // CommandData::commands[sample.shortName] = sample;
     // CommandData::commandsDouble[2] = sample;
 }

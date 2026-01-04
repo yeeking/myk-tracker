@@ -34,6 +34,11 @@ PluginProcessor::PluginProcessor()
     CommandProcessor::assignMasterClock(this);
     CommandProcessor::assignMachineUtils(this);
 
+    samplers.reserve(4);
+    for (int i = 0; i < 4; ++i)
+    {
+        samplers.push_back(std::make_unique<SuperSamplerProcessor>());
+    }
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
@@ -114,12 +119,20 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
+    for (auto& sampler : samplers)
+    {
+        sampler->prepareToPlay(sampleRate, samplesPerBlock);
+    }
 }
 
 void PluginProcessor::releaseResources()
 {
     // When playback stops, you can use this as an opportunity to free up any
     // spare memory, etc.
+    for (auto& sampler : samplers)
+    {
+        sampler->releaseResources();
+    }
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -221,6 +234,45 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     }
     midiToSend.clear();
     midiToSend.swapWith(futureMidi);
+
+    juce::MidiBuffer samplerMidiThisBlock;
+    juce::MidiBuffer futureSamplerMidi;
+    for (const MidiMessageMetadata metadata : midiToSendToSampler){
+        if (blockEndSample < blockStartSample){// we wrapped block end back around 
+            if ( metadata.samplePosition >= blockStartSample ||  
+                metadata.samplePosition < blockEndSample) {
+                samplerMidiThisBlock.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
+            }
+            else{// it is in the future            
+                futureSamplerMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
+            }
+        }
+        if (blockStartSample < blockEndSample){
+            if ( metadata.samplePosition >= blockStartSample && 
+                metadata.samplePosition < blockEndSample) {
+                samplerMidiThisBlock.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
+            }
+            else{// it is in the future            
+                futureSamplerMidi.addEvent(metadata.getMessage(),  metadata.samplePosition);
+            }
+        }
+    }
+    midiToSendToSampler.clear();
+    midiToSendToSampler.swapWith(futureSamplerMidi);
+
+    std::vector<juce::MidiBuffer> samplerMidiById(samplers.size());
+    for (const MidiMessageMetadata metadata : samplerMidiThisBlock)
+    {
+        int channelIndex = metadata.getMessage().getChannel() - 1;
+        if (channelIndex < 0 || static_cast<std::size_t>(channelIndex) >= samplers.size())
+            channelIndex = 0;
+        samplerMidiById[static_cast<std::size_t>(channelIndex)]
+            .addEvent(metadata.getMessage(), metadata.samplePosition);
+    }
+    for (std::size_t i = 0; i < samplers.size(); ++i)
+    {
+        samplers[i]->processBlock(buffer, samplerMidiById[i]);
+    }
 }
 
 //==============================================================================
@@ -587,22 +639,28 @@ TrackerController* PluginProcessor::getTrackerController()
 void PluginProcessor::allNotesOff()
 {
     midiToSend.clear();// remove anything that's hanging around. 
+    midiToSendToSampler.clear();
     for (int chan = 1; chan < 17; ++chan){
         midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
+        midiToSendToSampler.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
 }
-void PluginProcessor::sendMessageToMachine(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks)
+void PluginProcessor::sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks)
 {
-    channel ++; // channels come in 0-15 but we want 1-16
+    juce::MidiBuffer* targetBuffer = &midiToSend;
+    if (machineType == CommandType::Sampler)
+        targetBuffer = &midiToSendToSampler;
+
+    unsigned short channel = machineId + 1; // channels come in 0-15 but we want 1-16
     // offtick is an absolute tick from the start of time 
     // but we have a max horizon which is how far in the future we can set things 
     int offSample =  elapsedSamples +  (samplesPerTick * static_cast<int>(durInTicks)) % maxHorizon;
     // DBG("sendMessageToMachine note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
     // generate a note on and a note off 
     // note on is right now 
-    midiToSend.addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);
+    targetBuffer->addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);
     // note off is now + length 
-    midiToSend.addEvent(MidiMessage::noteOff((int)channel, (int)note, (uint8)velocity), offSample);
+    targetBuffer->addEvent(MidiMessage::noteOff((int)channel, (int)note, (uint8)velocity), offSample);
     // assert()
     outstandingNoteOffs ++ ;
 }
@@ -632,4 +690,5 @@ double PluginProcessor::getBPM()
 void PluginProcessor::clearPendingEvents()
 {
     midiToSend.clear();
+    midiToSendToSampler.clear();
 }

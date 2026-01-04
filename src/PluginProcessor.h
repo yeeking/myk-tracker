@@ -19,6 +19,7 @@
 #include "Sequencer.h"
 #include "SequencerEditor.h"
 #include "TrackerController.h"
+#include "SuperSamplerProcessor.h"
 
 
 //==============================================================================
@@ -40,7 +41,7 @@ public:
 
     // the MachineUtils interface 
     void allNotesOff() override;
-    void sendMessageToMachine(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
+    void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
     void sendQueuedMessages(long tick) override; 
     // the ClockAbs interface
     void setBPM(double bpm) override; 
@@ -96,6 +97,8 @@ private:
     /** as for the seqeditor, this is here for easy statefulness*/
     TrackerController trackerController;
     juce::MidiBuffer midiToSend; 
+    juce::MidiBuffer midiToSendToSampler;
+    std::vector<std::unique_ptr<SuperSamplerProcessor>> samplers;
 
 
     // unsigned long elapsedSamples;

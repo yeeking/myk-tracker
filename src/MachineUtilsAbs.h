@@ -1,6 +1,9 @@
 #pragma once 
 
 #include <map>
+#include <cstddef>
+
+enum class CommandType : std::size_t;
 
 class MachineUtilsAbs{
     public:
@@ -10,7 +13,7 @@ class MachineUtilsAbs{
         /** play a note - would generally trigger a note on now
          * and schedule a note off for later
          */
-        virtual void sendMessageToMachine(unsigned short channel, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
+        virtual void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
         /**
          * send any queued notes, e.g. note offs 
          * q'd by sendMessageToMachine
