@@ -28,6 +28,9 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
         case SequencerEditorMode::configuringSequence:
             viewMode = "Conf";
             break;
+        case SequencerEditorMode::machineConfig:
+            viewMode = "Mach";
+            break;
         case SequencerEditorMode::editingStep:
             viewMode = "Step";
             break;

@@ -368,6 +368,9 @@ juce::var PluginProcessor::getUiState()
         case SequencerEditorMode::configuringSequence:
             modeStr = "config";
             break;
+        case SequencerEditorMode::machineConfig:
+            modeStr = "machine";
+            break;
     }
     state->setProperty("mode", modeStr);
 
@@ -595,6 +598,8 @@ void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
         seqEditor.setEditMode(SequencerEditorMode::editingStep);
     else if (mode == "config")
         seqEditor.setEditMode(SequencerEditorMode::configuringSequence);
+    else if (mode == "machine")
+        seqEditor.setEditMode(SequencerEditorMode::machineConfig);
     else
         seqEditor.setEditMode(SequencerEditorMode::selectingSeqAndStep);
 
@@ -632,6 +637,55 @@ SequencerEditor* PluginProcessor::getSequenceEditor()
 TrackerController* PluginProcessor::getTrackerController()
 {
     return &trackerController;
+}
+
+std::size_t PluginProcessor::getSamplerCount() const
+{
+    return samplers.size();
+}
+
+juce::var PluginProcessor::getSamplerState(std::size_t samplerIndex) const
+{
+    const auto* sampler = getSamplerForIndex(samplerIndex);
+    if (sampler == nullptr)
+        return {};
+    return sampler->getSamplerState();
+}
+
+void PluginProcessor::samplerAddPlayer(std::size_t samplerIndex)
+{
+    if (auto* sampler = getSamplerForIndex(samplerIndex))
+        sampler->addSamplePlayerFromWeb();
+}
+
+void PluginProcessor::samplerRemovePlayer(std::size_t samplerIndex, int playerId)
+{
+    if (auto* sampler = getSamplerForIndex(samplerIndex))
+        sampler->removeSamplePlayer(playerId);
+}
+
+void PluginProcessor::samplerRequestLoad(std::size_t samplerIndex, int playerId)
+{
+    if (auto* sampler = getSamplerForIndex(samplerIndex))
+        sampler->requestSampleLoadFromWeb(playerId);
+}
+
+void PluginProcessor::samplerTrigger(std::size_t samplerIndex, int playerId)
+{
+    if (auto* sampler = getSamplerForIndex(samplerIndex))
+        sampler->triggerFromWeb(playerId);
+}
+
+void PluginProcessor::samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high)
+{
+    if (auto* sampler = getSamplerForIndex(samplerIndex))
+        sampler->setSampleRangeFromWeb(playerId, low, high);
+}
+
+void PluginProcessor::samplerSetGain(std::size_t samplerIndex, int playerId, float gain)
+{
+    if (auto* sampler = getSamplerForIndex(samplerIndex))
+        sampler->setGainFromUI(playerId, gain);
 }
 
 ////////////// MIDIUtils interface 
@@ -691,4 +745,18 @@ void PluginProcessor::clearPendingEvents()
 {
     midiToSend.clear();
     midiToSendToSampler.clear();
+}
+
+SuperSamplerProcessor* PluginProcessor::getSamplerForIndex(std::size_t samplerIndex)
+{
+    if (samplerIndex >= samplers.size())
+        return nullptr;
+    return samplers[samplerIndex].get();
+}
+
+const SuperSamplerProcessor* PluginProcessor::getSamplerForIndex(std::size_t samplerIndex) const
+{
+    if (samplerIndex >= samplers.size())
+        return nullptr;
+    return samplers[samplerIndex].get();
 }

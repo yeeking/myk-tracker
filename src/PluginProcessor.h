@@ -87,6 +87,14 @@ public:
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
     TrackerController* getTrackerController();
+    std::size_t getSamplerCount() const;
+    juce::var getSamplerState(std::size_t samplerIndex) const;
+    void samplerAddPlayer(std::size_t samplerIndex);
+    void samplerRemovePlayer(std::size_t samplerIndex, int playerId);
+    void samplerRequestLoad(std::size_t samplerIndex, int playerId);
+    void samplerTrigger(std::size_t samplerIndex, int playerId);
+    void samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high);
+    void samplerSetGain(std::size_t samplerIndex, int playerId, float gain);
     
 private:
     Sequencer sequencer;
@@ -122,6 +130,8 @@ private:
     juce::var serializeSequencerState();
     /** retrieve state from var  */
     void restoreSequencerState(const juce::var& stateVar);
+    SuperSamplerProcessor* getSamplerForIndex(std::size_t samplerIndex);
+    const SuperSamplerProcessor* getSamplerForIndex(std::size_t samplerIndex) const;
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };

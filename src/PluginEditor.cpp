@@ -13,6 +13,37 @@
 #include <algorithm>
 #include <cmath>
 
+namespace
+{
+std::string sanitizeLabel(const juce::String& input, size_t maxLen)
+{
+    auto trimmed = input.trim();
+    if (trimmed.isEmpty())
+        return {};
+
+    auto upper = trimmed.toUpperCase();
+    std::string out;
+    out.reserve(static_cast<size_t>(upper.length()));
+    for (auto ch : upper)
+    {
+        if (out.size() >= maxLen)
+            break;
+        if (ch == '\n' || ch == '\r')
+            continue;
+        if (ch < 32 || ch > 126)
+            continue;
+        out.push_back(static_cast<char>(ch));
+    }
+    return out;
+}
+
+std::string formatGain(float gain)
+{
+    juce::String text = juce::String(gain, 2);
+    return sanitizeLabel(text, 6);
+}
+} // namespace
+
 //==============================================================================
 PluginEditor::PluginEditor (PluginProcessor& p)
     : AudioProcessorEditor (&p),
@@ -39,6 +70,18 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     palette.lightColor = juce::Colour(0xFFDDF6E8);
     palette.ambientStrength = 0.32f;
     palette.lightDirection = { 0.2f, 0.45f, 1.0f };
+
+    samplerPalette.background = juce::Colour(0xFF03060B);
+    samplerPalette.cellIdle = juce::Colour(0xFF141A22);
+    samplerPalette.cellSelected = juce::Colour(0xFF00E8FF);
+    samplerPalette.cellAccent = juce::Colour(0xFF1E2F3D);
+    samplerPalette.cellDisabled = juce::Colour(0xFF0C1118);
+    samplerPalette.textPrimary = juce::Colour(0xFF4EF2C2);
+    samplerPalette.textMuted = juce::Colour(0xFF6B7C8F);
+    samplerPalette.glowActive = juce::Colour(0xFFFF5533);
+    samplerPalette.lightColor = juce::Colour(0xFFEAF6FF);
+    samplerPalette.ambientStrength = 0.32f;
+    samplerPalette.lightDirection = { 0.2f, 0.45f, 1.0f };
 
     TrackerUIComponent::Style style;
     style.background = palette.background;
@@ -130,13 +173,21 @@ void PluginEditor::timerCallback ()
           prepareSeqConfigView();
           break;
       }
+      case SequencerEditorMode::machineConfig:
+      {
+          prepareMachineConfigView();
+          break;
+      }
   }
-  const double bpmValue = audioProcessor.getBPM();
-  const int bpmInt = static_cast<int>(std::lround(bpmValue));
-  if (bpmInt != lastHudBpm)
+  if (seqEditor->getEditMode() != SequencerEditorMode::machineConfig)
   {
-      overlayState.text = "@BPM " + std::to_string(bpmInt);
-      lastHudBpm = bpmInt;
+      const double bpmValue = audioProcessor.getBPM();
+      const int bpmInt = static_cast<int>(std::lround(bpmValue));
+      if (bpmInt != lastHudBpm)
+      {
+          overlayState.text = "@BPM " + std::to_string(bpmInt);
+          lastHudBpm = bpmInt;
+      }
   }
 
   overlayState.color = palette.textPrimary;
@@ -148,7 +199,11 @@ void PluginEditor::timerCallback ()
   TrackerUIComponent::DragState dragState;
   dragState.panX = panOffsetX;
   dragState.panY = panOffsetY;
-  uiComponent.updateUIState(cellStates, overlayState, zoomState, dragState);
+  uiComponent.updateUIState(cellStates,
+                            overlayState,
+                            zoomState,
+                            dragState,
+                            samplerViewActive ? &samplerColumnWidths : nullptr);
 
   waitingForPaint = true; 
   if (updateSeqStrOnNextDraw || framesDrawn % 60 == 0){
@@ -162,6 +217,16 @@ void PluginEditor::timerCallback ()
 
 void PluginEditor::prepareSequenceView()
 {
+  samplerViewActive = false;
+  samplerColumnWidths.clear();
+  TrackerUIComponent::Style style;
+  style.background = palette.background;
+  style.lightColor = palette.lightColor;
+  style.defaultGlowColor = palette.gridPlayhead;
+  style.ambientStrength = palette.ambientStrength;
+  style.lightDirection = palette.lightDirection;
+  uiComponent.setStyle(style);
+  uiComponent.setCellSize(cellWidth, cellHeight);
   // sequencer->tick();
   std::vector<std::pair<int, int>> playHeads;
   for (size_t col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
@@ -179,6 +244,16 @@ void PluginEditor::prepareSequenceView()
 }
 void PluginEditor::prepareStepView()
 {
+    samplerViewActive = false;
+    samplerColumnWidths.clear();
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
     // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
     // std::vector<std::vector<std::string>> grid = step->toStringGrid();
     std::vector<std::pair<int, int>> playHeads;
@@ -200,6 +275,16 @@ void PluginEditor::prepareStepView()
 }
 void PluginEditor::prepareSeqConfigView()
 {
+    samplerViewActive = false;
+    samplerColumnWidths.clear();
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
     std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
     updateCellStates(grid,
                      rowsInUI - 1,
@@ -209,6 +294,65 @@ void PluginEditor::prepareSeqConfigView()
                      std::vector<std::pair<int, int>>(),
                      true,
                      Sequencer::notArmed);
+}
+
+void PluginEditor::prepareMachineConfigView()
+{
+    samplerViewActive = false;
+    samplerColumnWidths.clear();
+
+    const auto* sequence = sequencer->getSequence(seqEditor->getCurrentSequence());
+    const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
+    const int machineId = static_cast<int>(sequence->getMachineId());
+
+    if (machineType == CommandType::Sampler)
+    {
+        samplerViewActive = true;
+        activeSamplerIndex = audioProcessor.getSamplerCount() > 0
+            ? static_cast<std::size_t>(machineId) % audioProcessor.getSamplerCount()
+            : 0;
+        samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
+
+        TrackerUIComponent::Style style;
+        style.background = samplerPalette.background;
+        style.lightColor = samplerPalette.lightColor;
+        style.defaultGlowColor = samplerPalette.glowActive;
+        style.ambientStrength = samplerPalette.ambientStrength;
+        style.lightDirection = samplerPalette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(1.2f, 1.1f);
+
+        const auto samplerState = audioProcessor.getSamplerState(activeSamplerIndex);
+        if (samplerState.isObject())
+            refreshSamplerFromState(samplerState);
+        else
+        {
+            samplerPlayers.clear();
+            rebuildSamplerCells();
+        }
+        overlayState.text = "SAMPLER ID " + std::to_string(machineId);
+        overlayState.color = samplerPalette.textPrimary;
+        overlayState.glowColor = samplerPalette.glowActive;
+        overlayState.glowStrength = 0.35f;
+        return;
+    }
+
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
+
+    cellStates.assign(1, std::vector<TrackerUIComponent::CellState>(1, makeDefaultCell()));
+    if (machineType == CommandType::MidiNote)
+        overlayState.text = "CHANNEL " + std::to_string(machineId);
+    else if (machineType == CommandType::Log)
+        overlayState.text = "CHECK CONSOLE";
+    else
+        overlayState.text = "MACHINE";
 }
 
 void PluginEditor::prepareControlPanelView()
@@ -448,9 +592,342 @@ void PluginEditor::mouseDrag(const juce::MouseEvent& event)
     panOffsetY -= static_cast<float>(delta.y) * panScale;
 }
 
+void PluginEditor::refreshSamplerFromState(const juce::var& payload)
+{
+    if (! payload.isObject())
+        return;
+
+    const auto playersVar = payload.getProperty("players", juce::var());
+    if (! playersVar.isArray())
+        return;
+
+    const auto* playersArray = playersVar.getArray();
+    if (playersArray == nullptr)
+        return;
+
+    std::vector<SamplerPlayerState> nextPlayers;
+    nextPlayers.reserve(static_cast<std::size_t>(playersArray->size()));
+    for (const auto& entry : *playersArray)
+    {
+        auto* playerObj = entry.getDynamicObject();
+        if (playerObj == nullptr)
+            continue;
+
+        SamplerPlayerState st;
+        st.id = static_cast<int>(playerObj->getProperty("id"));
+        st.midiLow = static_cast<int>(playerObj->getProperty("midiLow"));
+        st.midiHigh = static_cast<int>(playerObj->getProperty("midiHigh"));
+        st.gain = static_cast<float>(double(playerObj->getProperty("gain")));
+        st.isPlaying = static_cast<bool>(playerObj->getProperty("isPlaying"));
+        st.status = playerObj->getProperty("status").toString();
+        st.fileName = playerObj->getProperty("fileName").toString();
+        nextPlayers.push_back(st);
+    }
+
+    samplerPlayers = std::move(nextPlayers);
+    rebuildSamplerCells();
+}
+
+void PluginEditor::rebuildSamplerCells()
+{
+    const size_t rows = samplerPlayers.size() + 1;
+    const size_t cols = 6;
+
+    if (rows == 0 || cols == 0)
+    {
+        cellStates.assign(1, std::vector<TrackerUIComponent::CellState>(1, makeDefaultCell()));
+        return;
+    }
+
+    samplerCursorRow = std::min(samplerCursorRow, rows - 1);
+    samplerCursorCol = std::min(samplerCursorCol, cols - 1);
+    if (samplerCursorRow == 0)
+        samplerCursorCol = 0;
+
+    samplerCellVisualStates.assign(cols, std::vector<SamplerCellVisualState>(rows));
+    samplerCellInfo.assign(cols, std::vector<SamplerCellInfo>(rows));
+    cellStates.assign(cols, std::vector<TrackerUIComponent::CellState>(rows));
+
+    for (size_t col = 0; col < cols; ++col)
+    {
+        for (size_t row = 0; row < rows; ++row)
+        {
+            SamplerCellInfo info{};
+            std::string text;
+            if (row == 0)
+            {
+                if (col == 0)
+                {
+                    info.action = SamplerAction::Add;
+                    info.playerIndex = -1;
+                    text = "ADD";
+                }
+                else
+                {
+                    info.action = SamplerAction::None;
+                }
+            }
+            else
+            {
+                const auto& player = samplerPlayers[row - 1];
+                info.playerIndex = static_cast<int>(row - 1);
+                switch (col)
+                {
+                    case 0:
+                        info.action = SamplerAction::Load;
+                        text = "LOAD";
+                        break;
+                    case 1:
+                        info.action = SamplerAction::Trigger;
+                        text = player.isPlaying ? "PLAY" : "TRIG";
+                        break;
+                    case 2:
+                        info.action = SamplerAction::Low;
+                        text = sanitizeLabel(juce::String(player.midiLow), 4);
+                        break;
+                    case 3:
+                        info.action = SamplerAction::High;
+                        text = sanitizeLabel(juce::String(player.midiHigh), 4);
+                        break;
+                    case 4:
+                        info.action = SamplerAction::Gain;
+                        text = formatGain(player.gain);
+                        break;
+                    case 5:
+                        info.action = SamplerAction::Waveform;
+                        text = sanitizeLabel(player.fileName.isNotEmpty() ? player.fileName : player.status, 18);
+                        break;
+                    default:
+                        info.action = SamplerAction::None;
+                        break;
+                }
+            }
+
+            samplerCellInfo[col][row] = info;
+            auto& visual = samplerCellVisualStates[col][row];
+            visual.isSelected = (row == samplerCursorRow && col == samplerCursorCol);
+            visual.isEditing = (samplerEditMode && visual.isSelected);
+            visual.isActive = (info.action == SamplerAction::Trigger && row > 0 && samplerPlayers[row - 1].isPlaying);
+            visual.isDisabled = (info.action == SamplerAction::None);
+            visual.glow = visual.isActive ? 1.0f : 0.0f;
+
+            TrackerUIComponent::CellState cell;
+            cell.text = text;
+            cell.fillColor = getSamplerCellColour(visual, info);
+            cell.textColor = getSamplerTextColour(visual, info);
+            cell.glowColor = samplerPalette.glowActive;
+            cell.glow = visual.glow;
+            cell.depthScale = getSamplerCellDepthScale(visual);
+            cell.drawOutline = visual.isSelected;
+            cell.outlineColor = samplerPalette.cellSelected;
+            cellStates[col][row] = cell;
+        }
+    }
+}
+
+void PluginEditor::handleSamplerAction(const SamplerCellInfo& info)
+{
+    if (info.action == SamplerAction::None)
+        return;
+
+    if (info.action == SamplerAction::Add)
+    {
+        audioProcessor.samplerAddPlayer(activeSamplerIndex);
+        return;
+    }
+
+    if (info.playerIndex < 0 || info.playerIndex >= static_cast<int>(samplerPlayers.size()))
+        return;
+
+    const int playerId = samplerPlayers[static_cast<size_t>(info.playerIndex)].id;
+    switch (info.action)
+    {
+        case SamplerAction::Load:
+            audioProcessor.samplerRequestLoad(activeSamplerIndex, playerId);
+            break;
+        case SamplerAction::Trigger:
+            audioProcessor.samplerTrigger(activeSamplerIndex, playerId);
+            break;
+        case SamplerAction::Low:
+        case SamplerAction::High:
+        case SamplerAction::Gain:
+            samplerEditMode = true;
+            samplerEditAction = info.action;
+            samplerEditPlayerIndex = info.playerIndex;
+            break;
+        default:
+            break;
+    }
+}
+
+void PluginEditor::adjustSamplerEditValue(int direction)
+{
+    if (samplerEditPlayerIndex < 0 || samplerEditPlayerIndex >= static_cast<int>(samplerPlayers.size()))
+        return;
+
+    const auto player = samplerPlayers[static_cast<size_t>(samplerEditPlayerIndex)];
+    if (samplerEditAction == SamplerAction::Low)
+    {
+        const int low = juce::jlimit(0, 127, player.midiLow + direction);
+        audioProcessor.samplerSetRange(activeSamplerIndex, player.id, low, player.midiHigh);
+    }
+    else if (samplerEditAction == SamplerAction::High)
+    {
+        const int high = juce::jlimit(0, 127, player.midiHigh + direction);
+        audioProcessor.samplerSetRange(activeSamplerIndex, player.id, player.midiLow, high);
+    }
+    else if (samplerEditAction == SamplerAction::Gain)
+    {
+        const float gain = juce::jlimit(0.0f, 2.0f, player.gain + direction * 0.05f);
+        audioProcessor.samplerSetGain(activeSamplerIndex, player.id, gain);
+    }
+}
+
+void PluginEditor::moveSamplerCursor(int deltaRow, int deltaCol)
+{
+    if (cellStates.empty() || cellStates[0].empty())
+        return;
+
+    const int maxRow = static_cast<int>(cellStates[0].size()) - 1;
+    const int maxCol = static_cast<int>(cellStates.size()) - 1;
+
+    int nextRow = juce::jlimit(0, maxRow, static_cast<int>(samplerCursorRow) + deltaRow);
+    int nextCol = juce::jlimit(0, maxCol, static_cast<int>(samplerCursorCol) + deltaCol);
+
+    if (nextRow == 0)
+        nextCol = 0;
+
+    samplerCursorRow = static_cast<size_t>(nextRow);
+    samplerCursorCol = static_cast<size_t>(nextCol);
+    rebuildSamplerCells();
+}
+
+juce::Colour PluginEditor::getSamplerCellColour(const SamplerCellVisualState& cell, const SamplerCellInfo& info) const
+{
+    if (cell.isDisabled)
+        return samplerPalette.cellDisabled;
+    if (cell.isEditing)
+        return samplerPalette.cellSelected;
+    if (cell.isSelected)
+        return samplerPalette.cellSelected;
+    if (cell.isActive)
+        return samplerPalette.cellAccent;
+    if (info.action == SamplerAction::Waveform)
+        return samplerPalette.cellIdle.brighter(0.2f);
+    return samplerPalette.cellIdle;
+}
+
+juce::Colour PluginEditor::getSamplerTextColour(const SamplerCellVisualState& cell, const SamplerCellInfo& info) const
+{
+    if (cell.isSelected)
+        return samplerPalette.cellSelected;
+    if (cell.isActive)
+        return samplerPalette.glowActive;
+    if (info.action == SamplerAction::Waveform)
+        return samplerPalette.textMuted;
+    return samplerPalette.textPrimary;
+}
+
+float PluginEditor::getSamplerCellDepthScale(const SamplerCellVisualState& cell) const
+{
+    if (cell.isEditing)
+        return 1.05f;
+    if (cell.isSelected)
+        return 1.02f;
+    return 1.0f;
+}
+
 
 bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
+    if (seqEditor->getEditMode() == SequencerEditorMode::machineConfig)
+    {
+        if (key.isKeyCode(juce::KeyPress::returnKey))
+        {
+            samplerEditMode = false;
+            samplerEditAction = SamplerAction::None;
+            samplerEditPlayerIndex = -1;
+            seqEditor->enterAtCursor();
+            return true;
+        }
+
+        const auto* sequence = sequencer->getSequence(seqEditor->getCurrentSequence());
+        const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
+        if (machineType == CommandType::Sampler)
+        {
+            if (samplerEditMode)
+            {
+                if (key == juce::KeyPress::escapeKey)
+                {
+                    samplerEditMode = false;
+                    samplerEditAction = SamplerAction::None;
+                    samplerEditPlayerIndex = -1;
+                    return true;
+                }
+                if (key.getKeyCode() == juce::KeyPress::leftKey || key.getKeyCode() == juce::KeyPress::downKey)
+                {
+                    adjustSamplerEditValue(-1);
+                    return true;
+                }
+                if (key.getKeyCode() == juce::KeyPress::rightKey || key.getKeyCode() == juce::KeyPress::upKey)
+                {
+                    adjustSamplerEditValue(1);
+                    return true;
+                }
+                return true;
+            }
+
+            const char samplerKey = static_cast<char>(key.getTextCharacter());
+            if (samplerKey == '=')
+            {
+                audioProcessor.samplerAddPlayer(activeSamplerIndex);
+                return true;
+            }
+            if (samplerKey == '-')
+            {
+                if (! samplerPlayers.empty())
+                {
+                    size_t playerIndex = samplerPlayers.size() - 1;
+                    if (samplerCursorRow > 0)
+                    {
+                        const size_t candidate = samplerCursorRow - 1;
+                        if (candidate < samplerPlayers.size())
+                            playerIndex = candidate;
+                    }
+                    audioProcessor.samplerRemovePlayer(activeSamplerIndex, samplerPlayers[playerIndex].id);
+                }
+                return true;
+            }
+
+            if (key.getKeyCode() == juce::KeyPress::leftKey)
+            {
+                moveSamplerCursor(0, -1);
+                return true;
+            }
+            if (key.getKeyCode() == juce::KeyPress::rightKey)
+            {
+                moveSamplerCursor(0, 1);
+                return true;
+            }
+            if (key.getKeyCode() == juce::KeyPress::upKey)
+            {
+                moveSamplerCursor(-1, 0);
+                return true;
+            }
+            if (key.getKeyCode() == juce::KeyPress::downKey)
+            {
+                moveSamplerCursor(1, 0);
+                return true;
+            }
+            if (key.getKeyCode() == juce::KeyPress::spaceKey)
+            {
+                if (samplerCursorCol < samplerCellInfo.size() && samplerCursorRow < samplerCellInfo[samplerCursorCol].size())
+                    handleSamplerAction(samplerCellInfo[samplerCursorCol][samplerCursorRow]);
+                return true;
+            }
+        }
+        return true;
+    }
 
     switch (key.getTextCharacter())
     {
@@ -509,8 +986,10 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
             break;
 
         case 'M':
-            audioProcessor.getSequencer()->toggleSequenceMute(seqEditor->getCurrentSequence());
-            // sequencer.toggleSequenceMute(seqEditor->getCurrentSequence());
+            samplerEditMode = false;
+            samplerEditAction = SamplerAction::None;
+            samplerEditPlayerIndex = -1;
+            seqEditor->gotoMachineConfigPage();
             break;
 
         // case juce::KeyPress::deleteKey:

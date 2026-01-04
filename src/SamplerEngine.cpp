@@ -1,5 +1,6 @@
 #include "SamplerEngine.h"
 #include "WaveformSVGRenderer.h"
+#include <algorithm>
 #include <sstream>
 
 SamplerEngine::SamplerEngine()
@@ -14,6 +15,20 @@ int SamplerEngine::addSamplePlayer()
     auto id = nextId++;
     players.push_back (std::make_unique<SamplePlayer> (id));
     return id;
+}
+
+bool SamplerEngine::removeSamplePlayer (int playerId)
+{
+    const std::lock_guard<std::mutex> lock (playerMutex);
+    auto it = std::find_if (players.begin(), players.end(),
+        [playerId](const std::unique_ptr<SamplePlayer>& player)
+        {
+            return player->getId() == playerId;
+        });
+    if (it == players.end())
+        return false;
+    players.erase (it);
+    return true;
 }
 
 void SamplerEngine::processBlock (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi)

@@ -60,7 +60,8 @@ public:
     void updateUIState(const CellGrid& cells,
                        const OverlayState& overlay,
                        const ZoomState& zoomState,
-                       const DragState& dragState);
+                       const DragState& dragState,
+                       const std::vector<float>* columnWidths = nullptr);
     void renderUI();
 
     void setViewportBounds(const juce::Rectangle<int>& bounds, int componentHeight, float renderingScale);
@@ -144,6 +145,7 @@ private:
 
     std::mutex stateMutex;
     CellGrid cellStates;
+    std::vector<float> columnWidths;
     bool textGeometryDirty = false;
 
     std::unique_ptr<juce::OpenGLShaderProgram> shaderProgram;

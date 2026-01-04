@@ -49,6 +49,7 @@ public:
     // but for simplicity in this demo
     void messageReceivedFromWebAPI(std::string msg);
     void addSamplePlayerFromWeb();
+    void removeSamplePlayer (int playerId);
     void sendSamplerStateToUI();
     void requestSampleLoadFromWeb (int playerId);
     juce::var getSamplerState() const;

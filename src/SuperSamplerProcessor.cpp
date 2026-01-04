@@ -213,6 +213,12 @@ void SuperSamplerProcessor::addSamplePlayerFromWeb()
     sendSamplerStateToUI();
 }
 
+void SuperSamplerProcessor::removeSamplePlayer (int playerId)
+{
+    if (sampler.removeSamplePlayer (playerId))
+        sendSamplerStateToUI();
+}
+
 void SuperSamplerProcessor::requestSampleLoadFromWeb (int playerId)
 {
     auto chooser = std::make_shared<juce::FileChooser> ("Select an audio file",

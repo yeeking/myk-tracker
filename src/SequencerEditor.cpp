@@ -63,6 +63,8 @@ void SequencerEditor::cycleEditMode()
   case SequencerEditorMode::configuringSequence:
     this->editSubMode = SequencerEditor::cycleSubModeRight(this->editSubMode);
     return;
+  case SequencerEditorMode::machineConfig:
+    return;
   }
 }
 /**
@@ -75,6 +77,8 @@ void SequencerEditor::cycleAtCursor()
   switch (editMode)
   {
   case SequencerEditorMode::configuringSequence:
+    break;
+  case SequencerEditorMode::machineConfig:
     break;
 
   case SequencerEditorMode::selectingSeqAndStep:
@@ -115,6 +119,8 @@ void SequencerEditor::resetAtCursor()
   case SequencerEditorMode::configuringSequence:
 
     break;
+  case SequencerEditorMode::machineConfig:
+    break;
   }
 }
 
@@ -143,6 +149,9 @@ void SequencerEditor::enterAtCursor()
     break;
 
   case SequencerEditorMode::editingStep:
+    editMode = SequencerEditorMode::selectingSeqAndStep;
+    break;
+  case SequencerEditorMode::machineConfig:
     editMode = SequencerEditorMode::selectingSeqAndStep;
     break;
   }
@@ -229,6 +238,10 @@ void SequencerEditor::incrementOctave()
   {
     break;
   }
+  case SequencerEditorMode::machineConfig:
+  {
+    break;
+  }
   }
 }
 /** decrease the octave offset applied when entering notes  */
@@ -260,6 +273,10 @@ void SequencerEditor::decrementOctave()
     break;
   }
   case SequencerEditorMode::configuringSequence:
+  {
+    break;
+  }
+  case SequencerEditorMode::machineConfig:
   {
     break;
   }
@@ -432,6 +449,8 @@ void SequencerEditor::moveCursorLeft()
     break;
     break;
   }
+  case SequencerEditorMode::machineConfig:
+    break;
   }
 }
 
@@ -469,6 +488,8 @@ void SequencerEditor::moveCursorRight()
       currentStep = sequencer->howManySteps(currentSequence) - 1;
     break;
   }
+  case SequencerEditorMode::machineConfig:
+    break;
   }
 }
 
@@ -517,6 +538,8 @@ void SequencerEditor::moveCursorUp()
       currentSeqParam = 0;
     break;
   }
+  case SequencerEditorMode::machineConfig:
+    break;
   }
 }
 
@@ -550,6 +573,8 @@ void SequencerEditor::moveCursorDown()
     }
     break;
   }
+  case SequencerEditorMode::machineConfig:
+    break;
   }
 }
 
@@ -563,6 +588,7 @@ void SequencerEditor::addRow()
     sequencer->extendSequence(getCurrentSequence());
     break;
   case SequencerEditorMode::editingStep:
+  {
     // add another row to the data at this step
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     // decrementStepData(data, sequencer->getSequenceType(currentSequence));
@@ -570,6 +596,11 @@ void SequencerEditor::addRow()
     newRow[Step::cmdInd] = sequencer->getSequence(currentSequence)->getMachineType();
     data.push_back(newRow);
     writeStepData(data);
+    break;
+  }
+  case SequencerEditorMode::configuringSequence:
+    break;
+  case SequencerEditorMode::machineConfig:
     break;
   }
 }
@@ -585,6 +616,7 @@ void SequencerEditor::removeRow()
       currentStep = sequencer->howManySteps(currentSequence) - 1;
     break;
   case SequencerEditorMode::editingStep:
+  {
     // add another row to the data at this step
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     if (data.size() > 1)
@@ -596,6 +628,11 @@ void SequencerEditor::removeRow()
     int rowsInStep = data.size();
     if (currentStepRow >= rowsInStep) // sequencer->howManySteps(currentSequence))
       currentStepRow = rowsInStep - 1;
+    break;
+  }
+  case SequencerEditorMode::configuringSequence:
+    break;
+  case SequencerEditorMode::machineConfig:
     break;
   }
 }
@@ -618,6 +655,8 @@ void SequencerEditor::incrementAtCursor()
     sequencer->incrementSeqParam(currentSequence, currentSeqParam);
     break;
   }
+  case SequencerEditorMode::machineConfig:
+    break;
   }
 }
 /** decrease the value at the current cursor position, e.g. increasing note number */
@@ -637,6 +676,8 @@ void SequencerEditor::decrementAtCursor()
     sequencer->decrementSeqParam(currentSequence, currentSeqParam);
     break;
   }
+  case SequencerEditorMode::machineConfig:
+    break;
   }
 }
 
@@ -936,6 +977,11 @@ void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
 void SequencerEditor::gotoSequenceConfigPage()
 {
   setEditMode(SequencerEditorMode::configuringSequence);
+}
+
+void SequencerEditor::gotoMachineConfigPage()
+{
+  setEditMode(SequencerEditorMode::machineConfig);
 }
 
 /** write the sent data to a sequence - 1D data version */

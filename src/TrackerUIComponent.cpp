@@ -293,12 +293,17 @@ void TrackerUIComponent::setCellSize(float width, float height)
 void TrackerUIComponent::updateUIState(const CellGrid& cells,
                                        const OverlayState& overlay,
                                        const ZoomState& zoom,
-                                       const DragState& drag)
+                                       const DragState& drag,
+                                       const std::vector<float>* newColumnWidths)
 {
     std::lock_guard<std::mutex> lock(stateMutex);
     overlayState = overlay;
     zoomState = zoom;
     dragState = drag;
+    if (newColumnWidths != nullptr)
+        columnWidths = *newColumnWidths;
+    else
+        columnWidths.clear();
 
     const size_t cols = cells.size();
     const size_t rows = (cols > 0) ? cells[0].size() : 0;
@@ -429,9 +434,11 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
     std::vector<OutlineEntry> outlines;
 
     CellGrid cellsCopy;
+    std::vector<float> columnWidthsCopy;
     {
         std::lock_guard<std::mutex> lock(stateMutex);
         cellsCopy = cellStates;
+        columnWidthsCopy = columnWidths;
     }
 
     if (cellsCopy.empty())
@@ -444,25 +451,44 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
 
     outlines.reserve(visibleCols * visibleRows);
 
-    const float stepX = cellWidth + cellGap;
     const float stepY = cellHeight + cellGap;
-    const float gridWidth = stepX * static_cast<float>(visibleCols);
-    const float gridHeight = stepY * static_cast<float>(visibleRows);
-    const float startX = -gridWidth * 0.5f + stepX * 0.5f;
-    const float startY = gridHeight * 0.5f - stepY * 0.5f;
-
+    std::vector<float> widthScales(visibleCols, 1.0f);
+    if (!columnWidthsCopy.empty())
+    {
+        for (size_t col = 0; col < visibleCols; ++col)
+        {
+            if (col < columnWidthsCopy.size() && columnWidthsCopy[col] > 0.0f)
+                widthScales[col] = columnWidthsCopy[col];
+        }
+    }
+    float gridWidth = 0.0f;
     for (size_t col = 0; col < visibleCols; ++col)
     {
+        gridWidth += cellWidth * widthScales[col];
+        if (col + 1 < visibleCols)
+            gridWidth += cellGap;
+    }
+    const float gridHeight = stepY * static_cast<float>(visibleRows);
+    const float startX = -gridWidth * 0.5f;
+    const float startY = gridHeight * 0.5f - stepY * 0.5f;
+
+    float cursorX = startX;
+    for (size_t col = 0; col < visibleCols; ++col)
+    {
+        const float widthScale = widthScales[col];
+        const float width = cellWidth * widthScale;
+        const float centerX = cursorX + width * 0.5f;
+        const float cursorOffset = width + cellGap;
         for (size_t row = 0; row < visibleRows; ++row)
         {
             const auto& cell = cellsCopy[col][row];
             const float depthScale = cell.depthScale;
             const float depth = cellDepth * depthScale;
 
-            const auto position = juce::Vector3D<float>(startX + static_cast<float>(col) * stepX,
+            const auto position = juce::Vector3D<float>(centerX,
                                                         startY - static_cast<float>(row) * stepY,
                                                         depth * 0.5f);
-            const auto scale = juce::Vector3D<float>(cellWidth, cellHeight, depth);
+            const auto scale = juce::Vector3D<float>(width, cellHeight, depth);
             const auto modelMatrix = getModelMatrix(position, scale);
             const auto colour = cell.fillColor;
             const float glow = cell.glow * glowPulse;
@@ -503,6 +529,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
             if (cell.drawOutline)
                 outlines.push_back(OutlineEntry{ modelMatrix, cell.outlineColor });
         }
+        cursorX += cursorOffset;
     }
 
     if (!outlines.empty())
@@ -566,9 +593,11 @@ void TrackerUIComponent::renderCellText(const juce::Matrix3D<float>& projectionM
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     CellGrid cellsCopy;
+    std::vector<float> columnWidthsCopy;
     {
         std::lock_guard<std::mutex> lock(stateMutex);
         cellsCopy = cellStates;
+        columnWidthsCopy = columnWidths;
     }
 
     if (cellsCopy.empty())
@@ -579,19 +608,38 @@ void TrackerUIComponent::renderCellText(const juce::Matrix3D<float>& projectionM
     if (visibleCols == 0 || visibleRows == 0)
         return;
 
-    const float textDepthOffset = 0.02f;
-    const float stepX = cellWidth + cellGap;
-    const float stepY = cellHeight + cellGap;
-    const float gridWidth = stepX * static_cast<float>(visibleCols);
-    const float gridHeight = stepY * static_cast<float>(visibleRows);
-    const float startX = -gridWidth * 0.5f + stepX * 0.5f;
-    const float startY = gridHeight * 0.5f - stepY * 0.5f;
-    const float targetHeight = cellHeight * 0.6f;
-    const float targetWidth = cellWidth * 0.9f;
-    const float padX = cellWidth * 0.08f;
+    std::vector<float> widthScales(visibleCols, 1.0f);
+    if (!columnWidthsCopy.empty())
+    {
+        for (size_t col = 0; col < visibleCols; ++col)
+        {
+            if (col < columnWidthsCopy.size() && columnWidthsCopy[col] > 0.0f)
+                widthScales[col] = columnWidthsCopy[col];
+        }
+    }
 
+    const float textDepthOffset = 0.02f;
+    const float stepY = cellHeight + cellGap;
+    float gridWidth = 0.0f;
     for (size_t col = 0; col < visibleCols; ++col)
     {
+        gridWidth += cellWidth * widthScales[col];
+        if (col + 1 < visibleCols)
+            gridWidth += cellGap;
+    }
+    const float gridHeight = stepY * static_cast<float>(visibleRows);
+    const float startX = -gridWidth * 0.5f;
+    const float startY = gridHeight * 0.5f - stepY * 0.5f;
+    const float targetHeight = cellHeight * 0.6f;
+    const float padXScale = 0.08f;
+
+    float cursorX = startX;
+    for (size_t col = 0; col < visibleCols; ++col)
+    {
+        const float widthScale = widthScales[col];
+        const float width = cellWidth * widthScale;
+        const float centerX = cursorX + width * 0.5f;
+        const float cursorOffset = width + cellGap;
         for (size_t row = 0; row < visibleRows; ++row)
         {
             const auto& cell = cellsCopy[col][row];
@@ -604,16 +652,17 @@ void TrackerUIComponent::renderCellText(const juce::Matrix3D<float>& projectionM
             const auto& mesh = meshIt->second;
 
             const float depth = cellDepth * cell.depthScale;
-            const float cellCenterX = startX + static_cast<float>(col) * stepX;
+            const float cellCenterX = centerX;
             const float cellCenterY = startY - static_cast<float>(row) * stepY;
             const float textZ = depth + textDepthOffset;
 
             const float textWidth = textGeomParams.advance * static_cast<float>(cell.text.size());
-            const float widthScale = (textWidth > 0.0f) ? (targetWidth / textWidth) : 1.0f;
+            const float targetWidth = width * 0.9f;
+            const float textWidthScale = (textWidth > 0.0f) ? (targetWidth / textWidth) : 1.0f;
             const float heightScale = targetHeight / textGeomParams.cellH;
-            const float scale = std::min(widthScale, heightScale);
+            const float scale = std::min(textWidthScale, heightScale);
             const float textHeightScaled = textGeomParams.cellH * scale;
-            const float baseX = cellCenterX - cellWidth * 0.5f + padX;
+            const float baseX = cellCenterX - width * 0.5f + width * padXScale;
             const float baseY = cellCenterY - textHeightScaled * 0.5f;
 
             const auto position = juce::Vector3D<float>(baseX, baseY, textZ);
@@ -654,6 +703,7 @@ void TrackerUIComponent::renderCellText(const juce::Matrix3D<float>& projectionM
 
             glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
         }
+        cursorX += cursorOffset;
     }
 
     glDepthMask(GL_TRUE);

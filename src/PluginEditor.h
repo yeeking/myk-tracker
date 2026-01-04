@@ -51,6 +51,58 @@ public:
     // void updateStringOnNextDraw();
     long framesDrawn; 
 private:
+    enum class SamplerAction
+    {
+        None,
+        Add,
+        Load,
+        Trigger,
+        Low,
+        High,
+        Gain,
+        Waveform
+    };
+
+    struct SamplerPlayerState
+    {
+        int id = 0;
+        int midiLow = 36;
+        int midiHigh = 60;
+        float gain = 1.0f;
+        bool isPlaying = false;
+        juce::String status;
+        juce::String fileName;
+    };
+
+    struct SamplerCellVisualState
+    {
+        bool isSelected = false;
+        bool isEditing = false;
+        bool isActive = false;
+        bool isDisabled = false;
+        float glow = 0.0f;
+    };
+
+    struct SamplerCellInfo
+    {
+        SamplerAction action = SamplerAction::None;
+        int playerIndex = -1;
+    };
+
+    struct SamplerPalette
+    {
+        juce::Colour background;
+        juce::Colour cellIdle;
+        juce::Colour cellSelected;
+        juce::Colour cellAccent;
+        juce::Colour cellDisabled;
+        juce::Colour textPrimary;
+        juce::Colour textMuted;
+        juce::Colour glowActive;
+        juce::Colour lightColor;
+        float ambientStrength = 0.32f;
+        juce::Vector3D<float> lightDirection { 0.2f, 0.45f, 1.0f };
+    };
     struct TrackerPalette
     {
         juce::Colour background;   // EFNY-style near-black
@@ -93,6 +145,7 @@ private:
     void prepareSequenceView();
     void prepareStepView();
     void prepareSeqConfigView();
+    void prepareMachineConfigView();
     void updateCellStates(const std::vector<std::vector<std::string>>& data,
                           size_t rowsToDisplay,
                           size_t colsToDisplay,
@@ -119,6 +172,14 @@ private:
     void moveDown(float amount);
     void moveLeft(float amount);
     void moveRight(float amount);
+    void refreshSamplerFromState(const juce::var& payload);
+    void rebuildSamplerCells();
+    void handleSamplerAction(const SamplerCellInfo& info);
+    void adjustSamplerEditValue(int direction);
+    void moveSamplerCursor(int deltaRow, int deltaCol);
+    juce::Colour getSamplerCellColour(const SamplerCellVisualState& cell, const SamplerCellInfo& info) const;
+    juce::Colour getSamplerTextColour(const SamplerCellVisualState& cell, const SamplerCellInfo& info) const;
+    float getSamplerCellDepthScale(const SamplerCellVisualState& cell) const;
 
     TrackerUIComponent::CellGrid cellStates;
     std::vector<std::vector<float>> playheadGlow;
@@ -135,6 +196,18 @@ private:
     float panOffsetX = 0.0f;
     float panOffsetY = 0.0f;
     TrackerPalette palette;
+    SamplerPalette samplerPalette;
+    std::vector<SamplerPlayerState> samplerPlayers;
+    std::vector<std::vector<SamplerCellVisualState>> samplerCellVisualStates;
+    std::vector<std::vector<SamplerCellInfo>> samplerCellInfo;
+    std::vector<float> samplerColumnWidths;
+    size_t samplerCursorRow = 0;
+    size_t samplerCursorCol = 0;
+    bool samplerEditMode = false;
+    SamplerAction samplerEditAction = SamplerAction::None;
+    int samplerEditPlayerIndex = -1;
+    std::size_t activeSamplerIndex = 0;
+    bool samplerViewActive = false;
 
     bool waitingForPaint;
     bool updateSeqStrOnNextDraw;

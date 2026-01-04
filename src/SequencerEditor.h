@@ -10,7 +10,8 @@ enum class SequencerEditorMode
   selectingSeqAndStep,
   // settingSeqLength,// deprecate as set length happens in selectedSeqAndStep mode now
   configuringSequence,
-  editingStep
+  editingStep,
+  machineConfig
 };
 
 /**
@@ -89,6 +90,8 @@ public:
   void decrementAtCursor();
   /** enter sequence configuration page */
   void gotoSequenceConfigPage();
+  /** enter machine configuration page */
+  void gotoMachineConfigPage();
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);
   static SequencerEditorSubMode cycleSubModeRight(SequencerEditorSubMode subMode);

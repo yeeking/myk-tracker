@@ -12,6 +12,7 @@ public:
     SamplerEngine();
 
     int addSamplePlayer();
+    bool removeSamplePlayer (int playerId);
 
     void processBlock (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi);
 
