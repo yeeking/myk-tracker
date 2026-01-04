@@ -1,6 +1,54 @@
 #pragma once
 
+#include <cstddef>
+#include <string>
+#include <vector>
+
 #include "Sequencer.h"
+
+namespace juce
+{
+class var;
+}
+
+enum class SamplerCellType
+{
+  None,
+  Add,
+  Load,
+  Trigger,
+  Low,
+  High,
+  Gain,
+  Waveform
+};
+
+struct SamplerCell
+{
+  SamplerCellType type = SamplerCellType::None;
+  int playerIndex = -1;
+  int playerId = -1;
+  std::string text;
+  bool isSelected = false;
+  bool isEditing = false;
+  bool isPlaying = false;
+  bool isDisabled = false;
+  float glow = 0.0f;
+};
+
+class SamplerHost
+{
+public:
+  virtual ~SamplerHost() = default;
+  virtual std::size_t getSamplerCount() const = 0;
+  virtual juce::var getSamplerState(std::size_t samplerIndex) const = 0;
+  virtual void samplerAddPlayer(std::size_t samplerIndex) = 0;
+  virtual void samplerRemovePlayer(std::size_t samplerIndex, int playerId) = 0;
+  virtual void samplerRequestLoad(std::size_t samplerIndex, int playerId) = 0;
+  virtual void samplerTrigger(std::size_t samplerIndex, int playerId) = 0;
+  virtual void samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high) = 0;
+  virtual void samplerSetGain(std::size_t samplerIndex, int playerId, float gain) = 0;
+};
 
 /**
  * Top level modes that dictate the main UI output
@@ -33,6 +81,7 @@ class SequencerEditor
 public:
   SequencerEditor(Sequencer *sequencer);
   void setSequencer(Sequencer *sequencer);
+  void setSamplerHost(SamplerHost *host);
   Sequencer *getSequencer();
   /** resets editor, e.g. when changing sequence*/
   void resetCursor();
@@ -92,6 +141,15 @@ public:
   void gotoSequenceConfigPage();
   /** enter machine configuration page */
   void gotoMachineConfigPage();
+
+  void refreshSamplerStateForCurrentSequence();
+  const std::vector<std::vector<SamplerCell>> &getSamplerCells() const;
+  void samplerAddPlayer();
+  void samplerRemovePlayer();
+  void samplerActivateCurrentCell();
+  void samplerAdjustCurrentCell(int direction);
+  void samplerCancelEdit();
+  bool isSamplerEditing() const;
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);
   static SequencerEditorSubMode cycleSubModeRight(SequencerEditorSubMode subMode);
@@ -150,7 +208,25 @@ public:
   bool isArmedForLiveMIDI();
   
 private:
+  struct SamplerPlayerState
+  {
+    int id = 0;
+    int midiLow = 36;
+    int midiHigh = 60;
+    float gain = 1.0f;
+    bool isPlaying = false;
+    std::string status;
+    std::string fileName;
+  };
+
+  bool isSamplerMachineForCurrentSequence() const;
+  std::size_t getActiveSamplerIndex() const;
+  void rebuildSamplerCells();
+  void moveSamplerCursor(int deltaRow, int deltaCol);
+  void adjustSamplerEditValue(int direction);
+
   Sequencer *sequencer;
+  SamplerHost *samplerHost = nullptr;
   /** which sequence*/
   size_t currentSequence;
   /** which step */
@@ -168,4 +244,12 @@ private:
   SequencerEditorSubMode editSubMode;
   double stepIncrement;
   double octave;
+  std::vector<SamplerPlayerState> samplerPlayers;
+  std::vector<float> samplerGlowLevels;
+  std::vector<std::vector<SamplerCell>> samplerCells;
+  std::size_t samplerCursorRow = 0;
+  std::size_t samplerCursorCol = 0;
+  bool samplerEditMode = false;
+  SamplerCellType samplerEditType = SamplerCellType::None;
+  int samplerEditPlayerIndex = -1;
 };

@@ -51,43 +51,6 @@ public:
     // void updateStringOnNextDraw();
     long framesDrawn; 
 private:
-    enum class SamplerAction
-    {
-        None,
-        Add,
-        Load,
-        Trigger,
-        Low,
-        High,
-        Gain,
-        Waveform
-    };
-
-    struct SamplerPlayerState
-    {
-        int id = 0;
-        int midiLow = 36;
-        int midiHigh = 60;
-        float gain = 1.0f;
-        bool isPlaying = false;
-        juce::String status;
-        juce::String fileName;
-    };
-
-    struct SamplerCellVisualState
-    {
-        bool isSelected = false;
-        bool isEditing = false;
-        bool isActive = false;
-        bool isDisabled = false;
-        float glow = 0.0f;
-    };
-
-    struct SamplerCellInfo
-    {
-        SamplerAction action = SamplerAction::None;
-        int playerIndex = -1;
-    };
 
     struct SamplerPalette
     {
@@ -126,9 +89,6 @@ private:
     const float cellWidth{2.0f};
     const float cellHeight{1.0f};
     
-    
-
-
     PluginProcessor& audioProcessor;
 
     // StringTable controlPanelTable;
@@ -172,14 +132,10 @@ private:
     void moveDown(float amount);
     void moveLeft(float amount);
     void moveRight(float amount);
-    void refreshSamplerFromState(const juce::var& payload);
-    void rebuildSamplerCells();
-    void handleSamplerAction(const SamplerCellInfo& info);
-    void adjustSamplerEditValue(int direction);
-    void moveSamplerCursor(int deltaRow, int deltaCol);
-    juce::Colour getSamplerCellColour(const SamplerCellVisualState& cell, const SamplerCellInfo& info) const;
-    juce::Colour getSamplerTextColour(const SamplerCellVisualState& cell, const SamplerCellInfo& info) const;
-    float getSamplerCellDepthScale(const SamplerCellVisualState& cell) const;
+    void updateSamplerCellStates(const std::vector<std::vector<SamplerCell>>& cells);
+    juce::Colour getSamplerCellColour(const SamplerCell& cell) const;
+    juce::Colour getSamplerTextColour(const SamplerCell& cell) const;
+    float getSamplerCellDepthScale(const SamplerCell& cell) const;
 
     TrackerUIComponent::CellGrid cellStates;
     std::vector<std::vector<float>> playheadGlow;
@@ -197,16 +153,7 @@ private:
     float panOffsetY = 0.0f;
     TrackerPalette palette;
     SamplerPalette samplerPalette;
-    std::vector<SamplerPlayerState> samplerPlayers;
-    std::vector<std::vector<SamplerCellVisualState>> samplerCellVisualStates;
-    std::vector<std::vector<SamplerCellInfo>> samplerCellInfo;
     std::vector<float> samplerColumnWidths;
-    size_t samplerCursorRow = 0;
-    size_t samplerCursorCol = 0;
-    bool samplerEditMode = false;
-    SamplerAction samplerEditAction = SamplerAction::None;
-    int samplerEditPlayerIndex = -1;
-    std::size_t activeSamplerIndex = 0;
     bool samplerViewActive = false;
 
     bool waitingForPaint;

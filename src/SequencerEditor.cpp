@@ -1,6 +1,40 @@
 #include "SequencerEditor.h"
+#include "SequencerCommands.h"
+#include <JuceHeader.h>
+#include <algorithm>
 #include <cmath> // fmod
 #include <assert.h>
+
+namespace
+{
+std::string sanitizeLabel(const juce::String &input, size_t maxLen)
+{
+  auto trimmed = input.trim();
+  if (trimmed.isEmpty())
+    return {};
+
+  auto upper = trimmed.toUpperCase();
+  std::string out;
+  out.reserve(static_cast<size_t>(upper.length()));
+  for (auto ch : upper)
+  {
+    if (out.size() >= maxLen)
+      break;
+    if (ch == '\n' || ch == '\r')
+      continue;
+    if (ch < 32 || ch > 126)
+      continue;
+    out.push_back(static_cast<char>(ch));
+  }
+  return out;
+}
+
+std::string formatGain(float gain)
+{
+  juce::String text = juce::String(gain, 2);
+  return sanitizeLabel(text, 6);
+}
+} // namespace
 
 SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer},
                                                          currentSequence{0},
@@ -19,6 +53,10 @@ void SequencerEditor::setSequencer(Sequencer *_sequencer)
 {
   this->sequencer = _sequencer;
 }
+void SequencerEditor::setSamplerHost(SamplerHost *host)
+{
+  samplerHost = host;
+}
 Sequencer *SequencerEditor::getSequencer()
 {
   return this->sequencer;
@@ -34,6 +72,9 @@ void SequencerEditor::resetCursor()
   editMode = SequencerEditorMode::selectingSeqAndStep;
   editSubMode = SequencerEditorSubMode::editCol1;
   stepIncrement = 0.5f;
+  samplerEditMode = false;
+  samplerEditType = SamplerCellType::None;
+  samplerEditPlayerIndex = -1;
 }
 
 SequencerEditorMode SequencerEditor::getEditMode() const
@@ -47,6 +88,8 @@ SequencerEditorSubMode SequencerEditor::getEditSubMode() const
 void SequencerEditor::setEditMode(SequencerEditorMode mode)
 {
   this->editMode = mode;
+  if (mode != SequencerEditorMode::machineConfig)
+    samplerCancelEdit();
 }
 /** cycle through the edit modes in the sequence:
  * settingSeqLength (start mode)
@@ -79,6 +122,8 @@ void SequencerEditor::cycleAtCursor()
   case SequencerEditorMode::configuringSequence:
     break;
   case SequencerEditorMode::machineConfig:
+    if (isSamplerMachineForCurrentSequence())
+      samplerActivateCurrentCell();
     break;
 
   case SequencerEditorMode::selectingSeqAndStep:
@@ -120,6 +165,14 @@ void SequencerEditor::resetAtCursor()
 
     break;
   case SequencerEditorMode::machineConfig:
+    // if (!isSamplerMachineForCurrentSequence())
+    //   break;
+    // if (samplerEditMode)
+    // {
+    //   adjustSamplerEditValue(-1);
+    //   break;
+    // }
+    // moveSamplerCursor(-1, 0);
     break;
   }
 }
@@ -152,6 +205,9 @@ void SequencerEditor::enterAtCursor()
     editMode = SequencerEditorMode::selectingSeqAndStep;
     break;
   case SequencerEditorMode::machineConfig:
+    samplerEditMode = false;
+    samplerEditType = SamplerCellType::None;
+    samplerEditPlayerIndex = -1;
     editMode = SequencerEditorMode::selectingSeqAndStep;
     break;
   }
@@ -423,9 +479,6 @@ void SequencerEditor::moveCursorLeft()
   }
   case SequencerEditorMode::editingStep:
   {
-    // std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
-    // decrementStepData(data, sequencer->getSequenceType(currentSequence));
-    // writeStepData(data);
     // move left to previous column in the step data
     if (currentStepCol == 0)
       return;
@@ -447,11 +500,20 @@ void SequencerEditor::moveCursorLeft()
     if (currentStep >= sequencer->howManySteps(currentSequence))
       currentStep = sequencer->howManySteps(currentSequence) - 1;
     break;
-    break;
   }
   case SequencerEditorMode::machineConfig:
+  {
+    if (!isSamplerMachineForCurrentSequence())
+      break;
+    if (samplerEditMode)
+    {
+      adjustSamplerEditValue(-1);
+      break;
+    }
+    moveSamplerCursor(0, -1);
     break;
   }
+  }// end sw
 }
 
 void SequencerEditor::moveCursorRight()
@@ -489,7 +551,17 @@ void SequencerEditor::moveCursorRight()
     break;
   }
   case SequencerEditorMode::machineConfig:
+  {
+    if (!isSamplerMachineForCurrentSequence())
+      break;
+    if (samplerEditMode)
+    {
+      adjustSamplerEditValue(1);
+      break;
+    }
+    moveSamplerCursor(0, 1);
     break;
+  }
   }
 }
 
@@ -539,6 +611,14 @@ void SequencerEditor::moveCursorUp()
     break;
   }
   case SequencerEditorMode::machineConfig:
+    if (!isSamplerMachineForCurrentSequence())
+      break;
+    if (samplerEditMode)
+    {
+      adjustSamplerEditValue(1);
+      break;
+    }
+    moveSamplerCursor(-1, 0);
     break;
   }
 }
@@ -574,7 +654,17 @@ void SequencerEditor::moveCursorDown()
     break;
   }
   case SequencerEditorMode::machineConfig:
+  {
+    if (!isSamplerMachineForCurrentSequence())
+      break;
+    if (samplerEditMode)
+    {
+      adjustSamplerEditValue(-1);
+      break;
+    }
+    moveSamplerCursor(1, 0);
     break;
+  }
   }
 }
 
@@ -601,6 +691,8 @@ void SequencerEditor::addRow()
   case SequencerEditorMode::configuringSequence:
     break;
   case SequencerEditorMode::machineConfig:
+    if (isSamplerMachineForCurrentSequence())
+      samplerAdjustCurrentCell(-1);
     break;
   }
 }
@@ -982,6 +1074,9 @@ void SequencerEditor::gotoSequenceConfigPage()
 void SequencerEditor::gotoMachineConfigPage()
 {
   setEditMode(SequencerEditorMode::machineConfig);
+  samplerEditMode = false;
+  samplerEditType = SamplerCellType::None;
+  samplerEditPlayerIndex = -1;
 }
 
 /** write the sent data to a sequence - 1D data version */
@@ -1020,4 +1115,351 @@ bool SequencerEditor::isArmedForLiveMIDI()
   if (this->armedSequence == Sequencer::notArmed)
     return false;
   return true;
+}
+
+bool SequencerEditor::isSamplerMachineForCurrentSequence() const
+{
+  if (sequencer == nullptr){
+    DBG("isSamplerMachineForCurrentSequence no sequencerrr ");
+    return false; 
+  }
+  
+  const auto *sequence = sequencer->getSequence(currentSequence);
+  if (sequence == nullptr){
+        DBG("isSamplerMachineForCurrentSequence no sequence... ");
+    return false; 
+  }
+  const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
+  return machineType == CommandType::Sampler;
+}
+
+std::size_t SequencerEditor::getActiveSamplerIndex() const
+{
+  if (samplerHost == nullptr)
+    return 0;
+  const auto count = samplerHost->getSamplerCount();
+  if (count == 0)
+    return 0;
+  const auto *sequence = sequencer->getSequence(currentSequence);
+  if (sequence == nullptr)
+    return 0;
+  const int machineId = static_cast<int>(sequence->getMachineId());
+  const std::size_t safeId = machineId < 0 ? 0u : static_cast<std::size_t>(machineId);
+  return safeId % count;
+}
+
+void SequencerEditor::refreshSamplerStateForCurrentSequence()
+{
+  if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
+  {
+    samplerPlayers.clear();
+    samplerGlowLevels.clear();
+    samplerCells.assign(1, std::vector<SamplerCell>(1));
+    return;
+  }
+
+  const auto samplerState = samplerHost->getSamplerState(getActiveSamplerIndex());
+  if (!samplerState.isObject())
+  {
+    samplerPlayers.clear();
+    samplerGlowLevels.clear();
+    rebuildSamplerCells();
+    return;
+  }
+
+  const auto playersVar = samplerState.getProperty("players", juce::var());
+  if (!playersVar.isArray())
+  {
+    samplerPlayers.clear();
+    samplerGlowLevels.clear();
+    rebuildSamplerCells();
+    return;
+  }
+
+  const auto *playersArray = playersVar.getArray();
+  if (playersArray == nullptr)
+  {
+    samplerPlayers.clear();
+    samplerGlowLevels.clear();
+    rebuildSamplerCells();
+    return;
+  }
+
+  std::vector<SamplerPlayerState> nextPlayers;
+  nextPlayers.reserve(static_cast<std::size_t>(playersArray->size()));
+  for (const auto &entry : *playersArray)
+  {
+    auto *playerObj = entry.getDynamicObject();
+    if (playerObj == nullptr)
+      continue;
+
+    SamplerPlayerState st;
+    st.id = static_cast<int>(playerObj->getProperty("id"));
+    st.midiLow = static_cast<int>(playerObj->getProperty("midiLow"));
+    st.midiHigh = static_cast<int>(playerObj->getProperty("midiHigh"));
+    st.gain = static_cast<float>(double(playerObj->getProperty("gain")));
+    st.isPlaying = static_cast<bool>(playerObj->getProperty("isPlaying"));
+    st.status = playerObj->getProperty("status").toString().toStdString();
+    st.fileName = playerObj->getProperty("fileName").toString().toStdString();
+    nextPlayers.push_back(st);
+  }
+
+  std::vector<float> nextGlow;
+  nextGlow.reserve(nextPlayers.size());
+  for (const auto &player : nextPlayers)
+  {
+    float glow = 0.0f;
+    for (std::size_t i = 0; i < samplerPlayers.size(); ++i)
+    {
+      if (samplerPlayers[i].id == player.id && i < samplerGlowLevels.size())
+      {
+        glow = samplerGlowLevels[i];
+        break;
+      }
+    }
+    if (player.isPlaying)
+      glow = 1.0f;
+    else
+      glow *= 0.85f;
+    if (glow < 0.02f)
+      glow = 0.0f;
+    nextGlow.push_back(glow);
+  }
+
+  samplerPlayers = std::move(nextPlayers);
+  samplerGlowLevels = std::move(nextGlow);
+  rebuildSamplerCells();
+}
+
+const std::vector<std::vector<SamplerCell>> &SequencerEditor::getSamplerCells() const
+{
+  return samplerCells;
+}
+
+void SequencerEditor::samplerAddPlayer()
+{
+  if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
+    return;
+  samplerHost->samplerAddPlayer(getActiveSamplerIndex());
+}
+
+void SequencerEditor::samplerRemovePlayer()
+{
+  if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
+    return;
+  if (samplerPlayers.empty())
+    return;
+  std::size_t playerIndex = samplerPlayers.size() - 1;
+  if (samplerCursorRow > 0)
+  {
+    const std::size_t candidate = samplerCursorRow - 1;
+    if (candidate < samplerPlayers.size())
+      playerIndex = candidate;
+  }
+  samplerHost->samplerRemovePlayer(getActiveSamplerIndex(), samplerPlayers[playerIndex].id);
+}
+
+void SequencerEditor::samplerActivateCurrentCell()
+{
+  if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
+    return;
+  if (samplerCells.empty() || samplerCells[0].empty())
+    return;
+  if (samplerCursorCol >= samplerCells.size() || samplerCursorRow >= samplerCells[samplerCursorCol].size())
+    return;
+
+  const auto &cell = samplerCells[samplerCursorCol][samplerCursorRow];
+  switch (cell.type)
+  {
+  case SamplerCellType::None:
+    break;
+  case SamplerCellType::Add:
+    samplerAddPlayer();
+    break;
+  case SamplerCellType::Load:
+    samplerHost->samplerRequestLoad(getActiveSamplerIndex(), cell.playerId);
+    break;
+  case SamplerCellType::Trigger:
+    samplerHost->samplerTrigger(getActiveSamplerIndex(), cell.playerId);
+    break;
+  case SamplerCellType::Low:
+  case SamplerCellType::High:
+  case SamplerCellType::Gain:
+    samplerEditMode = true;
+    samplerEditType = cell.type;
+    samplerEditPlayerIndex = cell.playerIndex;
+    break;
+  case SamplerCellType::Waveform:
+    break;
+  }
+}
+
+void SequencerEditor::samplerAdjustCurrentCell(int direction)
+{
+  if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
+    return;
+  if (samplerEditMode)
+  {
+    adjustSamplerEditValue(direction);
+    return;
+  }
+  if (samplerCells.empty() || samplerCells[0].empty())
+    return;
+  if (samplerCursorCol >= samplerCells.size() || samplerCursorRow >= samplerCells[samplerCursorCol].size())
+    return;
+
+  const auto &cell = samplerCells[samplerCursorCol][samplerCursorRow];
+  if (cell.type == SamplerCellType::Low || cell.type == SamplerCellType::High || cell.type == SamplerCellType::Gain)
+  {
+    samplerEditType = cell.type;
+    samplerEditPlayerIndex = cell.playerIndex;
+    adjustSamplerEditValue(direction);
+  }
+}
+
+void SequencerEditor::samplerCancelEdit()
+{
+  samplerEditMode = false;
+  samplerEditType = SamplerCellType::None;
+  samplerEditPlayerIndex = -1;
+}
+
+bool SequencerEditor::isSamplerEditing() const
+{
+  return samplerEditMode;
+}
+
+void SequencerEditor::rebuildSamplerCells()
+{
+  const std::size_t rows = samplerPlayers.size() + 1;
+  const std::size_t cols = 6;
+
+  if (rows == 0 || cols == 0)
+  {
+    samplerCells.assign(1, std::vector<SamplerCell>(1));
+    return;
+  }
+
+  samplerCursorRow = std::min(samplerCursorRow, rows - 1);
+  samplerCursorCol = std::min(samplerCursorCol, cols - 1);
+  if (samplerCursorRow == 0)
+    samplerCursorCol = 0;
+
+  samplerCells.assign(cols, std::vector<SamplerCell>(rows));
+
+  for (std::size_t col = 0; col < cols; ++col)
+  {
+    for (std::size_t row = 0; row < rows; ++row)
+    {
+      SamplerCell cell;
+      if (row == 0)
+      {
+        if (col == 0)
+        {
+          cell.type = SamplerCellType::Add;
+          cell.text = "ADD";
+        }
+        else
+        {
+          cell.type = SamplerCellType::None;
+        }
+      }
+      else
+      {
+        const auto &player = samplerPlayers[row - 1];
+        cell.playerIndex = static_cast<int>(row - 1);
+        cell.playerId = player.id;
+        switch (col)
+        {
+        case 0:
+          cell.type = SamplerCellType::Load;
+          cell.text = "LOAD";
+          break;
+        case 1:
+          cell.type = SamplerCellType::Trigger;
+          cell.text = player.isPlaying ? "PLAY" : "TRIG";
+          break;
+        case 2:
+          cell.type = SamplerCellType::Low;
+          cell.text = sanitizeLabel(juce::String(player.midiLow), 4);
+          break;
+        case 3:
+          cell.type = SamplerCellType::High;
+          cell.text = sanitizeLabel(juce::String(player.midiHigh), 4);
+          break;
+        case 4:
+          cell.type = SamplerCellType::Gain;
+          cell.text = formatGain(player.gain);
+          break;
+        case 5:
+          cell.type = SamplerCellType::Waveform;
+          if (!player.fileName.empty())
+            cell.text = sanitizeLabel(juce::String(player.fileName), 18);
+          else
+            cell.text = sanitizeLabel(juce::String(player.status), 18);
+          break;
+        default:
+          cell.type = SamplerCellType::None;
+          break;
+        }
+        cell.isPlaying = player.isPlaying;
+      }
+
+      cell.isSelected = (row == samplerCursorRow && col == samplerCursorCol);
+      cell.isEditing = (samplerEditMode && cell.isSelected && cell.type == samplerEditType);
+      cell.isDisabled = (cell.type == SamplerCellType::None);
+
+      if (row > 0 && row - 1 < samplerGlowLevels.size())
+        cell.glow = samplerGlowLevels[row - 1];
+
+      samplerCells[col][row] = std::move(cell);
+    }
+  }
+}
+
+void SequencerEditor::moveSamplerCursor(int deltaRow, int deltaCol)
+{
+  DBG("moveSamplerCursor > cols " << deltaCol << " rows " << deltaRow);
+  if (samplerCells.empty() || samplerCells[0].empty())
+    return;
+
+  const int maxRow = static_cast<int>(samplerCells[0].size()) - 1;
+  const int maxCol = static_cast<int>(samplerCells.size()) - 1;
+
+  int nextRow = juce::jlimit(0, maxRow, static_cast<int>(samplerCursorRow) + deltaRow);
+  int nextCol = juce::jlimit(0, maxCol, static_cast<int>(samplerCursorCol) + deltaCol);
+
+  if (nextRow == 0)
+    nextCol = 0;
+
+  samplerCursorRow = static_cast<std::size_t>(nextRow);
+  samplerCursorCol = static_cast<std::size_t>(nextCol);
+  rebuildSamplerCells();
+}
+
+void SequencerEditor::adjustSamplerEditValue(int direction)
+{
+  if (samplerEditPlayerIndex < 0 || samplerEditPlayerIndex >= static_cast<int>(samplerPlayers.size()))
+    return;
+  if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
+    return;
+
+  const auto player = samplerPlayers[static_cast<std::size_t>(samplerEditPlayerIndex)];
+  const auto samplerIndex = getActiveSamplerIndex();
+
+  if (samplerEditType == SamplerCellType::Low)
+  {
+    const int low = juce::jlimit(0, 127, player.midiLow + direction);
+    samplerHost->samplerSetRange(samplerIndex, player.id, low, player.midiHigh);
+  }
+  else if (samplerEditType == SamplerCellType::High)
+  {
+    const int high = juce::jlimit(0, 127, player.midiHigh + direction);
+    samplerHost->samplerSetRange(samplerIndex, player.id, player.midiLow, high);
+  }
+  else if (samplerEditType == SamplerCellType::Gain)
+  {
+    const float gain = juce::jlimit(0.0f, 2.0f, player.gain + direction * 0.05f);
+    samplerHost->samplerSetGain(samplerIndex, player.id, gain);
+  }
 }

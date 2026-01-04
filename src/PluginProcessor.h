@@ -28,7 +28,8 @@
 class PluginProcessor  :    public MachineUtilsAbs, 
                             public ClockAbs, 
                             public juce::AudioProcessor, 
-                            public juce::ChangeBroadcaster
+                            public juce::ChangeBroadcaster,
+                            public SamplerHost
 
                             #if JucePlugin_Enable_ARA
                              , public juce::AudioProcessorARAExtension
@@ -87,14 +88,14 @@ public:
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
     TrackerController* getTrackerController();
-    std::size_t getSamplerCount() const;
-    juce::var getSamplerState(std::size_t samplerIndex) const;
-    void samplerAddPlayer(std::size_t samplerIndex);
-    void samplerRemovePlayer(std::size_t samplerIndex, int playerId);
-    void samplerRequestLoad(std::size_t samplerIndex, int playerId);
-    void samplerTrigger(std::size_t samplerIndex, int playerId);
-    void samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high);
-    void samplerSetGain(std::size_t samplerIndex, int playerId, float gain);
+    std::size_t getSamplerCount() const override;
+    juce::var getSamplerState(std::size_t samplerIndex) const override;
+    void samplerAddPlayer(std::size_t samplerIndex) override;
+    void samplerRemovePlayer(std::size_t samplerIndex, int playerId) override;
+    void samplerRequestLoad(std::size_t samplerIndex, int playerId) override;
+    void samplerTrigger(std::size_t samplerIndex, int playerId) override;
+    void samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high) override;
+    void samplerSetGain(std::size_t samplerIndex, int playerId, float gain) override;
     
 private:
     Sequencer sequencer;

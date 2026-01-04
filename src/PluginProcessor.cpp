@@ -39,6 +39,7 @@ PluginProcessor::PluginProcessor()
     {
         samplers.push_back(std::make_unique<SuperSamplerProcessor>());
     }
+    seqEditor.setSamplerHost(this);
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
@@ -469,6 +470,23 @@ juce::var PluginProcessor::serializeSequencerState()
         modeStr = uiState.getProperty("mode", "sequence").toString();
     root->setProperty("mode", modeStr);
 
+    juce::Array<juce::var> samplerStates;
+    for (auto& sampler : samplers)
+    {
+        juce::MemoryBlock samplerState;
+        if (sampler != nullptr)
+        {
+            sampler->getStateInformation(samplerState);
+            const auto encoded = juce::Base64::toBase64(samplerState.getData(), samplerState.getSize());
+            samplerStates.add(encoded);
+        }
+        else
+        {
+            samplerStates.add(juce::String());
+        }
+    }
+    root->setProperty("samplers", samplerStates);
+
     return root.get();
 }
 
@@ -602,6 +620,28 @@ void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
         seqEditor.setEditMode(SequencerEditorMode::machineConfig);
     else
         seqEditor.setEditMode(SequencerEditorMode::selectingSeqAndStep);
+
+    const auto samplersVar = stateVar.getProperty("samplers", juce::var());
+    if (samplersVar.isArray())
+    {
+        const auto& samplerArray = *samplersVar.getArray();
+        const auto samplerCount = juce::jmin<std::size_t>(samplerArray.size(), samplers.size());
+        for (std::size_t i = 0; i < samplerCount; ++i)
+        {
+            const auto encoded = samplerArray[static_cast<int>(i)].toString();
+            if (encoded.isEmpty())
+                continue;
+            juce::MemoryBlock samplerState;
+            juce::MemoryOutputStream stream(samplerState, false);
+            if (! juce::Base64::convertFromBase64(stream, encoded))
+                continue;
+            if (samplers[i] != nullptr)
+            {
+                samplers[i]->setStateInformation(samplerState.getData(),
+                                                 static_cast<int>(samplerState.getSize()));
+            }
+        }
+    }
 
     // syncSequenceStrings();
     
