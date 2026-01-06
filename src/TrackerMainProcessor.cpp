@@ -9,6 +9,7 @@
 
 #include "TrackerMainProcessor.h"
 #include "TrackerMainUI.h"
+#include <cmath>
 
 //==============================================================================
 TrackerMainProcessor::TrackerMainProcessor()
@@ -188,18 +189,99 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const int blockSizeSamples = getBlockSize();
     int blockStartSample = elapsedSamples;
     int blockEndSample = (elapsedSamples + blockSizeSamples) % maxHorizon;
-    const int samplesPerTickInt = static_cast<int>(samplesPerTick);
-    for (int i = 0; i < blockSizeSamples; ++i){
-        // weird but since juce midi sample offsets are int not unsigned long, 
-        // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
-        // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
-        elapsedSamples = (elapsedSamples + 1) % maxHorizon;
-        if (samplesPerTickInt > 0 && (elapsedSamples % samplesPerTickInt) == 0){
-            // tick is from the clockabs class and it keeps track of the absolute tick 
-            this->tick(); 
-            // this will cause any pending messages to be added to 'midiToSend'
-            // and trigger any sample players
-            sequencer.tick();
+    bool usingHostClock = false;
+
+    #if JUCE_MAJOR_VERSION >= 5
+    juce::AudioPlayHead::CurrentPositionInfo posInfo;
+    auto* playHead = getPlayHead();
+    if (playHead != nullptr && playHead->getCurrentPosition(posInfo)
+        && posInfo.bpm > 0.0 && posInfo.ppqPosition >= 0.0)
+    {
+        const bool hostPlaying = posInfo.isPlaying;
+        if (hostPlaying != hostWasPlaying)
+        {
+            pendingHostBeatReset = hostPlaying;
+            hostWasPlaying = hostPlaying;
+        }
+
+        if (!hostPlaying)
+        {
+            // Host transport stopped: stop the sequencer and skip internal clocking.
+            sequencer.stop();
+            hostPpqValid = false;
+            usingHostClock = true;
+        }
+        else
+        {
+            // Host sync: derive tick timing from PPQ so transport changes are handled in real time.
+            usingHostClock = true;
+            sequencer.play();
+            setBPM(posInfo.bpm);
+
+            const double ticksPerQuarter = 8.0;
+            const double samplesPerTickDouble = getSampleRate() * (60.0 / posInfo.bpm) / ticksPerQuarter;
+            double tickPosition = posInfo.ppqPosition * ticksPerQuarter;
+            double tickPhase = std::fmod(tickPosition, 1.0);
+            if (tickPhase < 0.0)
+                tickPhase += 1.0;
+
+            if (!hostPpqValid || posInfo.ppqPosition < lastHostPpqPosition)
+            {
+                // Transport restarted or jumped; re-sync tick phase from the new PPQ position.
+                hostPpqValid = true;
+            }
+            lastHostPpqPosition = posInfo.ppqPosition;
+
+            const double phaseEpsilon = 1.0e-6;
+            long long tickIndex = static_cast<long long>(std::floor(tickPosition));
+            double sampleOffsetToNextTick = 0.0;
+            if (tickPhase > phaseEpsilon)
+            {
+                ++tickIndex;
+                sampleOffsetToNextTick = (1.0 - tickPhase) * samplesPerTickDouble;
+            }
+
+            const long long ticksPerQuarterInt = static_cast<long long>(ticksPerQuarter);
+            for (double offset = sampleOffsetToNextTick; offset < blockSizeSamples; offset += samplesPerTickDouble, ++tickIndex)
+            {
+                const int tickSampleOffset = static_cast<int>(offset);
+                elapsedSamples = (blockStartSample + tickSampleOffset) % maxHorizon;
+                if (pendingHostBeatReset && ticksPerQuarterInt > 0 && (tickIndex % ticksPerQuarterInt) == 0)
+                {
+                    // Reset tracker timing on the first host beat after transport starts.
+                    resetTicks();
+                    sequencer.rewindAtNextZero();
+                    pendingHostBeatReset = false;
+                }
+                // tick is from the clockabs class and it keeps track of the absolute tick 
+                this->tick(); 
+                // this will cause any pending messages to be added to 'midiToSend'
+                // and trigger any sample players
+                sequencer.tick();
+            }
+            elapsedSamples = blockEndSample;
+        }
+    }
+    #endif
+
+    if (!usingHostClock)
+    {
+        hostPpqValid = false;
+        hostWasPlaying = false;
+        pendingHostBeatReset = false;
+        const int samplesPerTickInt = static_cast<int>(samplesPerTick);
+        for (int i = 0; i < blockSizeSamples; ++i){
+            // weird but since juce midi sample offsets are int not unsigned long, 
+            // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
+            // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
+            elapsedSamples = (elapsedSamples + 1) % maxHorizon;
+            if (samplesPerTickInt > 0 && (elapsedSamples % samplesPerTickInt) == 0){
+                // tick is from the clockabs class and it keeps track of the absolute tick 
+                this->tick(); 
+                // this will cause any pending messages to be added to 'midiToSend'
+                // and trigger any sample players
+                sequencer.tick();
+            }
         }
     }
     // to get sample-accurate midi as opposed to block-accurate midi (!)

@@ -615,7 +615,9 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
         glDepthMask(GL_FALSE);
         glEnable(GL_POLYGON_OFFSET_LINE);
         glPolygonOffset(-2.0f, -2.0f);
-        glLineWidth(1.8f);
+        // glLineWidth(1.8f);
+        glLineWidth(3.0f);
+        
         openGLContext->extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, frontEdgeIndexBuffer);
 
         if (shaderUniforms->ambientStrength != nullptr)

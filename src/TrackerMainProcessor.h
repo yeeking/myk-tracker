@@ -116,6 +116,10 @@ private:
     int elapsedSamples;
     int maxHorizon;   
     unsigned int samplesPerTick; 
+    double lastHostPpqPosition {0.0};
+    bool hostPpqValid {false};
+    bool hostWasPlaying {false};
+    bool pendingHostBeatReset {false};
     std::atomic<double> bpm; 
     int outstandingNoteOffs;
     /** configure plugin params */
