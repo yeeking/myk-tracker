@@ -109,11 +109,11 @@ bool SuperSamplePlayer::acceptsNote (int midiNote) const noexcept
 
 void SuperSamplePlayer::trigger()
 {
-        DBG("SamplePlayer trigger ");
+        // DBG("SamplePlayer trigger ");
 
     if (sampleBuffer.getNumSamples() > 0)
     {
-        DBG("SamplePlayer triggered ");
+        // DBG("SamplePlayer triggered ");
         playHead = 0;
         state.isPlaying = true;
     }

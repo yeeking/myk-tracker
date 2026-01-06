@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <unordered_set>
 
 using namespace juce::gl;
@@ -50,6 +51,46 @@ const char* fragmentShaderSource = R"(
     }
 )";
 
+const char* vertexShaderSourceES = R"(
+    #version 300 es
+    in vec3 position;
+    in vec3 normal;
+    uniform mat4 projectionMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 modelMatrix;
+    out vec3 vNormal;
+
+    void main()
+    {
+        vec4 worldNormal = modelMatrix * vec4(normal, 0.0);
+        vNormal = normalize(worldNormal.xyz);
+        gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+    }
+)";
+
+const char* fragmentShaderSourceES = R"(
+    #version 300 es
+    precision mediump float;
+    in vec3 vNormal;
+    uniform vec4 cellColor;
+    uniform float cellGlow;
+    uniform vec3 lightDirection;
+    uniform vec3 lightColor;
+    uniform float ambientStrength;
+    uniform vec3 glowColor;
+    out vec4 fragColor;
+
+    void main()
+    {
+        vec3 normal = normalize(vNormal);
+        vec3 lightDir = normalize(lightDirection);
+        float diff = max(dot(normal, lightDir), 0.0);
+        vec3 litColor = cellColor.rgb * (ambientStrength + diff * lightColor);
+        vec3 glow = glowColor * cellGlow;
+        fragColor = vec4(litColor + glow, cellColor.a);
+    }
+)";
+
 const char* textVertexShaderSource = R"(
     attribute vec3 position;
     uniform mat4 projectionMatrix;
@@ -71,6 +112,34 @@ const char* textFragmentShaderSource = R"(
     {
         vec3 color = textColor.rgb + glowColor * glowStrength;
         gl_FragColor = vec4(color, textColor.a);
+    }
+)";
+
+const char* textVertexShaderSourceES = R"(
+    #version 300 es
+    in vec3 position;
+    uniform mat4 projectionMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 modelMatrix;
+
+    void main()
+    {
+        gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+    }
+)";
+
+const char* textFragmentShaderSourceES = R"(
+    #version 300 es
+    precision mediump float;
+    uniform vec4 textColor;
+    uniform float glowStrength;
+    uniform vec3 glowColor;
+    out vec4 fragColor;
+
+    void main()
+    {
+        vec3 color = textColor.rgb + glowColor * glowStrength;
+        fragColor = vec4(color, textColor.a);
     }
 )";
 
@@ -157,12 +226,20 @@ void TrackerUIComponent::initOpenGL(int width, int height)
     if (openGLContext == nullptr)
         return;
 
+    const char* glVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    const bool isGLES = glVersion != nullptr && std::strstr(glVersion, "OpenGL ES") != nullptr;
+    DBG("OpenGL version: " << (glVersion != nullptr ? glVersion : "unknown"));
+    const char* activeVertexShaderSource = isGLES ? vertexShaderSourceES : vertexShaderSource;
+    const char* activeFragmentShaderSource = isGLES ? fragmentShaderSourceES : fragmentShaderSource;
+    const char* activeTextVertexShaderSource = isGLES ? textVertexShaderSourceES : textVertexShaderSource;
+    const char* activeTextFragmentShaderSource = isGLES ? textFragmentShaderSourceES : textFragmentShaderSource;
+
     viewport.bounds = juce::Rectangle<int>(0, 0, width, height);
     viewport.componentHeight = height;
 
     shaderProgram = std::make_unique<juce::OpenGLShaderProgram>(*openGLContext);
-    if (shaderProgram->addVertexShader(vertexShaderSource)
-        && shaderProgram->addFragmentShader(fragmentShaderSource)
+    if (shaderProgram->addVertexShader(activeVertexShaderSource)
+        && shaderProgram->addFragmentShader(activeFragmentShaderSource)
         && shaderProgram->link())
     {
         shaderAttributes = std::make_unique<ShaderAttributes>();
@@ -188,8 +265,8 @@ void TrackerUIComponent::initOpenGL(int width, int height)
     }
 
     textShaderProgram = std::make_unique<juce::OpenGLShaderProgram>(*openGLContext);
-    if (textShaderProgram->addVertexShader(textVertexShaderSource)
-        && textShaderProgram->addFragmentShader(textFragmentShaderSource)
+    if (textShaderProgram->addVertexShader(activeTextVertexShaderSource)
+        && textShaderProgram->addFragmentShader(activeTextFragmentShaderSource)
         && textShaderProgram->link())
     {
         textShaderAttributes = std::make_unique<TextShaderAttributes>();

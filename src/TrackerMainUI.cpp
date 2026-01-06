@@ -617,11 +617,13 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         return true; 
     }
 
+    // deal with with the user pressing a key when the sequencer is stopped. 
     if (!audioProcessor.getSequencer()->isPlaying())
     {
         const char ch = static_cast<char>(key.getTextCharacter());
         const std::map<char, double> key_to_note = MachineUtilsAbs::getKeyboardToMidiNotes(0);
         const auto it = key_to_note.find(ch);
+        // this block of code deals
         if (it != key_to_note.end())
         {
             const size_t seqIndex = seqEditor->getCurrentSequence();
@@ -632,12 +634,9 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                 auto data = sequence->getStepData(stepIndex);
                 const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
                 double note = it->second + (12 * seqEditor->getCurrentOctave());
-                DBG("keypressed sending note " << note);
+                
                 seqEditor->samplerLearnNote(static_cast<int>(note));
                 auto context = sequence->getReadOnlyContext();
-                DBG("sequence context machineType=" << context.machineType
-                    << " machineId=" << context.machineId
-                    << " triggerProb=" << context.triggerProbability);
                 bool useDefaults = data.empty();
                 if (data.empty())
                 {
@@ -667,11 +666,9 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
 
                 CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
             }
-            // also let the note go through to the sequence
-            // so do not return here.
-            // return true;
+
         }
-    }
+    }// end dealing with user pressing a key when sequencer is stopped.
 
     if (seqEditor->getEditMode() == SequencerEditorMode::machineConfig)
     {

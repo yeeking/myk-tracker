@@ -210,7 +210,7 @@ void SuperSamplerProcessor::setStateInformation (const void* data, int sizeInByt
 
 void SuperSamplerProcessor::messageReceivedFromWebAPI(std::string msg)
 {
-    DBG("PluginProcess received a message " << msg);
+    // DBG("PluginProcess received a message " << msg);
     broadcastMessage ("Got your message " + msg);
 }
 
@@ -282,7 +282,7 @@ void SuperSamplerProcessor::setGainFromUI (int playerId, float gain)
 
 void SuperSamplerProcessor::sendSamplerStateToUI()
 {
-    DBG("sendSamplerStateToUI");
+    // DBG("sendSamplerStateToUI");
     auto payload = toVar();
     juce::MessageManager::callAsync ([this, payload]()
     {
@@ -358,12 +358,12 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
                 for (auto& player : players)
                 {
                     if (player->acceptsNote (note)){
-                        DBG("Player playing a note " << note);
+                        // DBG("Player playing a note " << note);
                         player->triggerNote (note);
                     }
-                    else{
-                        DBG("Player rejects note " << note);
-                    }
+                    // else{
+                    //     DBG("Player rejects note " << note);
+                    // }
                 }
             }
         }
@@ -491,7 +491,7 @@ bool SuperSamplerProcessor::trigger (int playerId)
     const std::lock_guard<std::mutex> lock (playerMutex);
     if (auto* player = getPlayer (playerId))
     {
-        DBG("SuperSamplerProcessor::trigger: playing sampler " << playerId);
+        // DBG("SuperSamplerProcessor::trigger: playing sampler " << playerId);
         player->trigger();
         return true;
     }

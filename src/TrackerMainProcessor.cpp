@@ -171,7 +171,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     bool receivedMidi = false; 
     for (const MidiMessageMetadata metadata : midiMessages){
         if (metadata.getMessage().isNoteOn()) {
-            DBG("Got a note " << metadata.getMessage().getNoteNumber());
+            // DBG("Got a note " << metadata.getMessage().getNoteNumber());
             // add a note to the current sequence 
             // and move it on a step 
 
@@ -294,11 +294,11 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     // and the buffer and they can write audio into it
     for (std::size_t i = 0; i < samplers.size(); ++i)
     {
-        if (samplerMidiById[i].getNumEvents() > 0){
-            DBG("processblock on sampler engine " << i << " events " << samplerMidiById[i].getNumEvents());
-            for (const auto metadata : samplerMidiById[i])
-                DBG(metadata.getMessage().getDescription());
-        }
+        // if (samplerMidiById[i].getNumEvents() > 0){
+        //     DBG("processblock on sampler engine " << i << " events " << samplerMidiById[i].getNumEvents());
+        //     for (const auto metadata : samplerMidiById[i])
+        //         DBG(metadata.getMessage().getDescription());
+        // }
         samplers[i]->processBlock(buffer, samplerMidiById[i]);
     }
 }

@@ -1158,13 +1158,13 @@ bool SequencerEditor::isArmedForLiveMIDI()
 bool SequencerEditor::isSamplerMachineForCurrentSequence() const
 {
   if (sequencer == nullptr){
-    DBG("isSamplerMachineForCurrentSequence no sequencerrr ");
+    // DBG("isSamplerMachineForCurrentSequence no sequencerrr ");
     return false; 
   }
   
   const auto *sequence = sequencer->getSequence(currentSequence);
   if (sequence == nullptr){
-        DBG("isSamplerMachineForCurrentSequence no sequence... ");
+        // DBG("isSamplerMachineForCurrentSequence no sequence... ");
     return false; 
   }
   const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
@@ -1530,7 +1530,7 @@ void SequencerEditor::rebuildSamplerCells()
 
 void SequencerEditor::moveSamplerCursor(int deltaRow, int deltaCol)
 {
-  DBG("moveSamplerCursor > cols " << deltaCol << " rows " << deltaRow);
+  // DBG("moveSamplerCursor > cols " << deltaCol << " rows " << deltaRow);
   if (samplerCells.empty() || samplerCells[0].empty())
     return;
 
