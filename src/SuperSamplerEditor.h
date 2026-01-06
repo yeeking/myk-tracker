@@ -2,6 +2,7 @@
 
 #include "SuperSamplerProcessor.h"
 #include "TrackerUIComponent.h"
+#include "Palette.h"
 #include <JuceHeader.h>
 #include <mutex>
 #include <vector>
@@ -73,27 +74,12 @@ private:
         int playerIndex = -1;
     };
 
-    struct Palette
-    {
-        juce::Colour background;
-        juce::Colour cellIdle;
-        juce::Colour cellSelected;
-        juce::Colour cellAccent;
-        juce::Colour cellDisabled;
-        juce::Colour textPrimary;
-        juce::Colour textMuted;
-        juce::Colour glowActive;
-        juce::Colour lightColor;
-        float ambientStrength = 0.32f;
-        juce::Vector3D<float> lightDirection { 0.2f, 0.45f, 1.0f };
-    };
-
     SuperSamplerProcessor& processorRef;
 
     juce::OpenGLContext openGLContext;
     TrackerUIComponent uiComponent;
 
-    Palette palette{};
+    SamplerPalette palette{};
 
     std::vector<PlayerUIState> players;
     std::vector<std::vector<CellVisualState>> cellVisualStates;

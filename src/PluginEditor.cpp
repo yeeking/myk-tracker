@@ -26,32 +26,6 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     waitingForPaint{false},
     updateSeqStrOnNextDraw{false}
 {
-    palette.background = juce::Colour(0xFF02040A);
-    palette.gridEmpty = juce::Colour(0xFF1B2024);
-    palette.gridNote = juce::Colour(0xFF00F6FF);
-    palette.gridPlayhead = juce::Colour(0xFFFF3B2F);
-    palette.gridSelected = juce::Colour(0xFF29E0FF);
-    palette.textPrimary = juce::Colour(0xFF3DE6C0);
-    palette.textWarning = juce::Colour(0xFFFF5A3C);
-    palette.textBackground = juce::Colours::transparentBlack;
-    palette.statusOk = juce::Colour(0xFF19FF6A);
-    palette.borderNeon = juce::Colour(0xFF0F5F4B);
-    palette.lightColor = juce::Colour(0xFFDDF6E8);
-    palette.ambientStrength = 0.32f;
-    palette.lightDirection = { 0.2f, 0.45f, 1.0f };
-
-    samplerPalette.background = juce::Colour(0xFF03060B);
-    samplerPalette.cellIdle = juce::Colour(0xFF141A22);
-    samplerPalette.cellSelected = juce::Colour(0xFF00E8FF);
-    samplerPalette.cellAccent = juce::Colour(0xFF1E2F3D);
-    samplerPalette.cellDisabled = juce::Colour(0xFF0C1118);
-    samplerPalette.textPrimary = juce::Colour(0xFF4EF2C2);
-    samplerPalette.textMuted = juce::Colour(0xFF6B7C8F);
-    samplerPalette.glowActive = juce::Colour(0xFFFF5533);
-    samplerPalette.lightColor = juce::Colour(0xFFEAF6FF);
-    samplerPalette.ambientStrength = 0.32f;
-    samplerPalette.lightDirection = { 0.2f, 0.45f, 1.0f };
-
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;
@@ -463,7 +437,7 @@ TrackerUIComponent::CellState PluginEditor::makeDefaultCell() const
 juce::Colour PluginEditor::getCellColour(const CellVisualFlags& cell) const
 {
     if (cell.isSelected && cell.hasNote)
-        return juce::Colours::red.withAlpha(0.6f);
+        return PaletteDefaults::errorRed.withAlpha(0.6f);
     if (cell.isSelected)
         return palette.gridSelected;
     if (cell.isArmed)
@@ -588,9 +562,9 @@ juce::Colour PluginEditor::getSamplerCellColour(const SamplerCell& cell) const
     if (cell.isDisabled)
         return samplerPalette.cellDisabled;
     if (cell.isEditing)
-        return juce::Colours::red.withAlpha(0.6f);
+        return PaletteDefaults::errorRed.withAlpha(0.6f);
     if (cell.isSelected)
-        return juce::Colours::red.withAlpha(0.6f);
+        return PaletteDefaults::errorRed.withAlpha(0.6f);
     if (cell.type == SamplerCellType::Trigger && cell.isPlaying)
         return samplerPalette.cellAccent;
     if (cell.type == SamplerCellType::Waveform)

@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 #include "Segment14Geometry.h"
+#include "Palette.h"
 
 class TrackerUIComponent
 {
@@ -13,10 +14,10 @@ public:
     struct CellState
     {
         std::string text;
-        juce::Colour fillColor { juce::Colours::black };
-        juce::Colour textColor { juce::Colours::white };
-        juce::Colour glowColor { juce::Colours::black };
-        juce::Colour outlineColor { juce::Colours::black };
+        juce::Colour fillColor { PaletteDefaults::cellFill };
+        juce::Colour textColor { PaletteDefaults::cellText };
+        juce::Colour glowColor { PaletteDefaults::cellGlow };
+        juce::Colour outlineColor { PaletteDefaults::cellOutline };
         float glow = 0.0f;
         float depthScale = 1.0f;
         bool drawOutline = false;
@@ -27,8 +28,8 @@ public:
     struct OverlayState
     {
         std::string text;
-        juce::Colour color { juce::Colours::white };
-        juce::Colour glowColor { juce::Colours::white };
+        juce::Colour color { PaletteDefaults::overlayText };
+        juce::Colour glowColor { PaletteDefaults::overlayGlow };
         float glowStrength = 0.35f;
     };
 
@@ -45,11 +46,11 @@ public:
 
     struct Style
     {
-        juce::Colour background { 0xFF02040A };
-        juce::Colour lightColor { 0xFFDDF6E8 };
-        juce::Colour defaultGlowColor { 0xFFFF3B2F };
-        float ambientStrength = 0.32f;
-        juce::Vector3D<float> lightDirection { 0.2f, 0.45f, 1.0f };
+        juce::Colour background { TrackerPalette{}.background };
+        juce::Colour lightColor { TrackerPalette{}.lightColor };
+        juce::Colour defaultGlowColor { TrackerPalette{}.gridPlayhead };
+        float ambientStrength = TrackerPalette{}.ambientStrength;
+        juce::Vector3D<float> lightDirection { TrackerPalette{}.lightDirection };
     };
 
     explicit TrackerUIComponent(juce::OpenGLContext& context);

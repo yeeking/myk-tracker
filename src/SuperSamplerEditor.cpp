@@ -38,16 +38,6 @@ SuperSamplerEditor::SuperSamplerEditor (SuperSamplerProcessor& p)
       processorRef (p),
       uiComponent(openGLContext)
 {
-    palette.background = juce::Colour(0xFF03060B);
-    palette.cellIdle = juce::Colour(0xFF141A22);
-    palette.cellSelected = juce::Colour(0xFF00E8FF);
-    palette.cellAccent = juce::Colour(0xFF1E2F3D);
-    palette.cellDisabled = juce::Colour(0xFF0C1118);
-    palette.textPrimary = juce::Colour(0xFF4EF2C2);
-    palette.textMuted = juce::Colour(0xFF6B7C8F);
-    palette.glowActive = juce::Colour(0xFFFF5533);
-    palette.lightColor = juce::Colour(0xFFEAF6FF);
-
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;
