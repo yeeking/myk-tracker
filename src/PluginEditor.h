@@ -20,6 +20,7 @@
 //==============================================================================
 /**
 */
+// Main plugin UI that renders the tracker and handles input.
 class PluginEditor  : public juce::AudioProcessorEditor,
                       public juce::OpenGLRenderer,
                       public juce::Timer,

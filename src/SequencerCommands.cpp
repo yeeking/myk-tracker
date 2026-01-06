@@ -20,6 +20,7 @@ Command::Command(const std::string& name, const std::string& shortName, const st
 
 
 /** handy wrapper for generating random numbers */
+// Simple RNG wrapper for sequencer command probability checks.
 class RandomNumberGenerator {
 private:
     static std::mt19937 gen; // Mersenne Twister random number generator

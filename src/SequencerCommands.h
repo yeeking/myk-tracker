@@ -71,6 +71,7 @@ enum class CommandType : std::size_t {
 /** Static class to manage objects and data relating to running of commands e.g. 
  * the MachineUtilsAbs object which allows commands to send MIDI 
  * and the ClockAbs object which allows commands to know about time  */ 
+// Static registry/executor for sequencer commands and machine routing.
 class CommandProcessor {
 public:
     static void assignMasterClock(ClockAbs* masterClock);

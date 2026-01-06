@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 
+// Helper for generating simple waveform SVGs for UI display.
 struct WaveformSVGRenderer
 {
     static juce::String generateBlankWaveformSVG()

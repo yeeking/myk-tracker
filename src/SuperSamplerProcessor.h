@@ -10,6 +10,7 @@ class SuperSamplePlayer;
 
 
 //==============================================================================
+// Audio processor that hosts multiple sample players and exposes sampler controls.
 class SuperSamplerProcessor final : public juce::AudioProcessor
 {
 public:

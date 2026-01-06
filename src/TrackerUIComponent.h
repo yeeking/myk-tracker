@@ -8,6 +8,7 @@
 #include "Segment14Geometry.h"
 #include "Palette.h"
 
+// OpenGL-backed renderer for the tracker grid and overlay.
 class TrackerUIComponent
 {
 public:

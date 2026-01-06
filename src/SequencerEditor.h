@@ -12,6 +12,7 @@ namespace juce
 class var;
 }
 
+// Interface for routing sampler actions from the editor to the host processor.
 class SamplerHost
 {
 public:
@@ -52,6 +53,7 @@ enum class SequencerEditorSubMode
  * to sequences. For example, select sequemce, select step, enter data
  * Used to build editing interfaces for a sequencer
  */
+// State machine for sequencer editing and sampler configuration.
 class SequencerEditor
 {
 public:

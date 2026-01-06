@@ -25,6 +25,7 @@
 //==============================================================================
 /**
 */
+// Main plugin processor that owns the sequencer, samplers, and timing.
 class PluginProcessor  :    public MachineUtilsAbs, 
                             public ClockAbs, 
                             public juce::AudioProcessor, 

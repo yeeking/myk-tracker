@@ -30,6 +30,7 @@
  * and data[2] is the first note
  * 
 */
+// Single sequencer step with data rows and a trigger callback.
 class Step{
   
   public:
@@ -113,6 +114,7 @@ class Sequencer;
  **/
 enum class SequenceType {midiNote, drumMidi, chordMidi, samplePlayer, transposer, lengthChanger, tickChanger};
 
+// Sequencer track with steps, playback state, and machine config.
 class Sequence{
   public:
     /** param index for */
@@ -274,6 +276,7 @@ class Sequence{
 };
 
 /** represents a sequencer which is used to store a grid of data and to step through it */
+// Multi-track sequencer that owns sequences and advances them over time.
 class Sequencer  {
     public:
     /** armed (MIDI recording) channel will be set to this if nothing is armed */
@@ -412,7 +415,5 @@ class Sequencer  {
 
 
 };
-
-
 
 

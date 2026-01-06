@@ -5,6 +5,7 @@
 
 enum class CommandType : std::size_t;
 
+// Abstract interface for sending machine events from commands.
 class MachineUtilsAbs{
     public:
         MachineUtilsAbs() {}

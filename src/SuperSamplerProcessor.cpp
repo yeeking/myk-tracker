@@ -175,7 +175,8 @@ bool SuperSamplerProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* SuperSamplerProcessor::createEditor()
 {
-    return new SuperSamplerEditor (*this);
+    return new GenericAudioProcessorEditor(*this);
+    // return new SuperSamplerEditor (*this);
 }
 
 //==============================================================================

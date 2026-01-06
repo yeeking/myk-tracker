@@ -1,5 +1,6 @@
 #pragma once 
 
+// Abstract clock interface used by the sequencer for timing.
 class ClockAbs{
     public:
     ClockAbs() : currentTick{0} {}

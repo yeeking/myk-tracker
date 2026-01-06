@@ -6,6 +6,7 @@
 #include <cmath>
 #include <initializer_list>
 
+// Geometry builder for 14-segment display meshes.
 class Segment14Geometry
 {
 public:

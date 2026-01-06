@@ -8,6 +8,7 @@
 #include <mutex>
 #include <vector>
 
+// Dedicated sampler UI for the standalone sampler processor.
 class SuperSamplerEditor final : public juce::AudioProcessorEditor,
                            public juce::OpenGLRenderer,
                            public juce::Timer,

@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 
+// Color palette for sampler-focused UI screens.
 struct SamplerPalette
 {
     juce::Colour background { 0xFF03060B };
@@ -17,6 +18,7 @@ struct SamplerPalette
     juce::Vector3D<float> lightDirection { 0.2f, 0.45f, 1.0f };
 };
 
+// Color palette for the tracker UI screens.
 struct TrackerPalette
 {
     juce::Colour background { 0xFF02040A };
