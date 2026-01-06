@@ -289,14 +289,42 @@ void SuperSamplerEditor::rebuildCellLayout()
             visual.isDisabled = (info.action == Action::None);
             visual.glow = visual.isActive ? 1.0f : 0.0f;
 
+            UIBox box;
+            box.text = text;
+            box.isSelected = visual.isSelected;
+            box.isEditing = visual.isEditing;
+            box.isActive = visual.isActive;
+            box.isDisabled = visual.isDisabled;
+            box.glow = visual.glow;
+            switch (info.action)
+            {
+                case Action::Add:
+                case Action::Load:
+                case Action::Trigger:
+                    box.kind = UIBox::Kind::SamplerAction;
+                    break;
+                case Action::Low:
+                case Action::High:
+                case Action::Gain:
+                    box.kind = UIBox::Kind::SamplerValue;
+                    break;
+                case Action::Waveform:
+                    box.kind = UIBox::Kind::SamplerWaveform;
+                    break;
+                case Action::None:
+                default:
+                    box.kind = UIBox::Kind::None;
+                    break;
+            }
+
             TrackerUIComponent::CellState cell;
             cell.text = text;
-            cell.fillColor = getCellColour(visual, info);
-            cell.textColor = getTextColour(visual, info);
+            cell.fillColor = getCellColour(box);
+            cell.textColor = getTextColour(box);
             cell.glowColor = palette.glowActive;
-            cell.glow = visual.glow;
-            cell.depthScale = getCellDepthScale(visual);
-            cell.drawOutline = visual.isSelected;
+            cell.glow = box.glow;
+            cell.depthScale = getCellDepthScale(box);
+            cell.drawOutline = box.isSelected;
             cell.outlineColor = palette.cellSelected;
             cellStates[col][row] = cell;
         }
@@ -465,7 +493,7 @@ void SuperSamplerEditor::moveCursor(int deltaRow, int deltaCol)
     rebuildCellLayout();
 }
 
-juce::Colour SuperSamplerEditor::getCellColour(const CellVisualState& cell, const CellInfo& info) const
+juce::Colour SuperSamplerEditor::getCellColour(const UIBox& cell) const
 {
     if (cell.isDisabled)
         return palette.cellDisabled;
@@ -475,23 +503,23 @@ juce::Colour SuperSamplerEditor::getCellColour(const CellVisualState& cell, cons
         return palette.cellSelected;
     if (cell.isActive)
         return palette.cellAccent;
-    if (info.action == Action::Waveform)
+    if (cell.kind == UIBox::Kind::SamplerWaveform)
         return palette.cellIdle.brighter(0.2f);
     return palette.cellIdle;
 }
 
-juce::Colour SuperSamplerEditor::getTextColour(const CellVisualState& cell, const CellInfo& info) const
+juce::Colour SuperSamplerEditor::getTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
         return palette.cellSelected;
     if (cell.isActive)
         return palette.glowActive;
-    if (info.action == Action::Waveform)
+    if (cell.kind == UIBox::Kind::SamplerWaveform)
         return palette.textMuted;
     return palette.textPrimary;
 }
 
-float SuperSamplerEditor::getCellDepthScale(const CellVisualState& cell) const
+float SuperSamplerEditor::getCellDepthScale(const UIBox& cell) const
 {
     if (cell.isEditing)
         return 1.05f;

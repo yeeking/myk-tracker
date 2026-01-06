@@ -176,14 +176,13 @@ void PluginEditor::prepareSequenceView()
     std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
     playHeads.push_back(std::move(colRow));
   }
-  updateCellStates(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(),
-                   rowsInUI - 1,
-                   6,
-                   seqEditor->getCurrentSequence(),
-                   seqEditor->getCurrentStep(),
-                   playHeads,
-                   true,
-                   seqEditor->getArmedSequence());
+  const auto boxes = buildBoxesFromGrid(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(),
+                                        seqEditor->getCurrentSequence(),
+                                        seqEditor->getCurrentStep(),
+                                        playHeads,
+                                        true,
+                                        seqEditor->getArmedSequence());
+  updateCellStates(boxes, rowsInUI - 1, 6);
 }
 void PluginEditor::prepareStepView()
 {
@@ -207,14 +206,13 @@ void PluginEditor::prepareStepView()
         }
     }
     std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-    updateCellStates(grid,
-                     rowsInUI - 1,
-                     6,
-                     seqEditor->getCurrentStepCol(),
-                     seqEditor->getCurrentStepRow(),
-                     playHeads,
-                     true,
-                     Sequencer::notArmed);
+    const auto boxes = buildBoxesFromGrid(grid,
+                                          seqEditor->getCurrentStepCol(),
+                                          seqEditor->getCurrentStepRow(),
+                                          playHeads,
+                                          true,
+                                          Sequencer::notArmed);
+    updateCellStates(boxes, rowsInUI - 1, 6);
 }
 void PluginEditor::prepareSeqConfigView()
 {
@@ -229,14 +227,13 @@ void PluginEditor::prepareSeqConfigView()
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
     std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
-    updateCellStates(grid,
-                     rowsInUI - 1,
-                     6,
-                     seqEditor->getCurrentSequence(),
-                     seqEditor->getCurrentSeqParam(),
-                     std::vector<std::pair<int, int>>(),
-                     true,
-                     Sequencer::notArmed);
+    const auto boxes = buildBoxesFromGrid(grid,
+                                          seqEditor->getCurrentSequence(),
+                                          seqEditor->getCurrentSeqParam(),
+                                          std::vector<std::pair<int, int>>(),
+                                          true,
+                                          Sequencer::notArmed);
+    updateCellStates(boxes, rowsInUI - 1, 6);
 }
 
 void PluginEditor::prepareMachineConfigView()
@@ -263,7 +260,10 @@ void PluginEditor::prepareMachineConfigView()
         uiComponent.setCellSize(1.2f, 1.1f);
 
         seqEditor->refreshSamplerStateForCurrentSequence();
-        updateSamplerCellStates(seqEditor->getSamplerCells());
+        const auto& boxes = seqEditor->getSamplerCells();
+        const size_t rows = boxes.empty() ? 1 : boxes[0].size();
+        const size_t cols = boxes.empty() ? 1 : boxes.size();
+        updateCellStates(boxes, rows, cols);
         overlayState.text = "SAMPLER ID " + std::to_string(machineId);
         overlayState.color = samplerPalette.textPrimary;
         overlayState.glowColor = samplerPalette.glowActive;
@@ -298,20 +298,57 @@ void PluginEditor::prepareControlPanelView()
     //     std::vector<std::pair<int, int>>(), false); 
 }
 
-void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>& data,
+std::vector<std::vector<UIBox>> PluginEditor::buildBoxesFromGrid(const std::vector<std::vector<std::string>>& data,
+                                                                 size_t cursorCol,
+                                                                 size_t cursorRow,
+                                                                 const std::vector<std::pair<int, int>>& highlightCells,
+                                                                 bool showCursor,
+                                                                 size_t armedSeq) const
+{
+    std::vector<std::vector<UIBox>> boxes;
+    const size_t cols = data.size();
+    const size_t rows = (cols > 0) ? data[0].size() : 0;
+    if (cols == 0 || rows == 0)
+        return boxes;
+
+    if (cursorCol >= cols) cursorCol = cols - 1;
+    if (cursorRow >= rows) cursorRow = rows - 1;
+
+    boxes.assign(cols, std::vector<UIBox>(rows));
+    for (size_t col = 0; col < cols; ++col)
+    {
+        for (size_t row = 0; row < rows; ++row)
+        {
+            UIBox box;
+            box.kind = UIBox::Kind::TrackerCell;
+            box.text = data[col][row];
+            box.hasNote = !box.text.empty() && box.text != "----" && box.text != "-";
+            box.isSelected = showCursor && col == cursorCol && row == cursorRow;
+            box.isArmed = (armedSeq != Sequencer::notArmed) && col == armedSeq;
+            for (const auto& cell : highlightCells)
+            {
+                if (static_cast<size_t>(cell.first) == col && static_cast<size_t>(cell.second) == row)
+                {
+                    box.isHighlighted = true;
+                    break;
+                }
+            }
+            boxes[col][row] = std::move(box);
+        }
+    }
+
+    return boxes;
+}
+
+void PluginEditor::updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                                     size_t rowsToDisplay,
-                                    size_t colsToDisplay,
-                                    size_t cursorCol,
-                                    size_t cursorRow,
-                                    const std::vector<std::pair<int, int>>& highlightCells,
-                                    bool showCursor,
-                                    size_t armedSeq)
+                                    size_t colsToDisplay)
 {
     if (rowsToDisplay == 0 || colsToDisplay == 0)
         return;
 
-    const size_t maxCols = data.size();
-    const size_t maxRows = (maxCols > 0) ? data[0].size() : 0;
+    const size_t maxCols = boxes.size();
+    const size_t maxRows = (maxCols > 0) ? boxes[0].size() : 0;
     if (maxCols == 0 || maxRows == 0)
     {
         cellStates.assign(colsToDisplay, std::vector<TrackerUIComponent::CellState>(rowsToDisplay, makeDefaultCell()));
@@ -325,9 +362,27 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
         return;
     }
 
-    // Clamp the cursor to the data bounds so view switches don't leave us with an invalid window.
-    if (cursorCol >= maxCols) cursorCol = maxCols - 1;
-    if (cursorRow >= maxRows) cursorRow = maxRows - 1;
+    size_t cursorCol = 0;
+    size_t cursorRow = 0;
+    bool foundCursor = false;
+    for (size_t col = 0; col < maxCols && !foundCursor; ++col)
+    {
+        for (size_t row = 0; row < maxRows; ++row)
+        {
+            if (boxes[col][row].isSelected)
+            {
+                cursorCol = col;
+                cursorRow = row;
+                foundCursor = true;
+                break;
+            }
+        }
+    }
+    if (!foundCursor)
+    {
+        cursorCol = std::min(cursorCol, maxCols - 1);
+        cursorRow = std::min(cursorRow, maxRows - 1);
+    }
 
     size_t nextStartCol = lastStartCol;
     size_t nextStartRow = lastStartRow;
@@ -368,45 +423,23 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<std::string>>&
             const size_t row = nextStartRow + displayRow;
             const bool rowInRange = row < maxRows;
 
-            const std::string cellValue = (colInRange && rowInRange) ? data[col][row] : "";
-            const bool hasNote = !cellValue.empty() && cellValue != "----" && cellValue != "-";
-
-            bool isHighlighted = false;
+            UIBox box;
             if (colInRange && rowInRange)
-            {
-                for (const auto& cell : highlightCells)
-                {
-                    if (static_cast<size_t>(cell.first) == col && static_cast<size_t>(cell.second) == row)
-                    {
-                        isHighlighted = true;
-                        break;
-                    }
-                }
-            }
-
-            const bool isSelected = showCursor && col == cursorCol && row == cursorRow;
-            const bool isArmed = (armedSeq != Sequencer::notArmed) && col == armedSeq;
+                box = boxes[col][row];
 
             const float previousGlow = reuseGlow ? playheadGlow[displayCol][displayRow] : 0.0f;
-            // decay by a constant 
-            // const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow - glowDecayStep);
-            // decay using a scalar 
-            const float glowValue = isHighlighted ? 1.0f : std::max(0.0f, previousGlow * glowDecayScalar);
-
-            CellVisualFlags flags;
-            flags.hasNote = hasNote;
-            flags.isActivePlayhead = isHighlighted;
-            flags.isSelected = isSelected;
-            flags.isArmed = isArmed;
+            const float glowValue = samplerViewActive
+                ? box.glow
+                : (box.isHighlighted ? 1.0f : std::max(0.0f, previousGlow * glowDecayScalar));
 
             auto cell = makeDefaultCell();
-            cell.text = cellValue;
-            cell.fillColor = getCellColour(flags);
-            cell.textColor = getTextColour(flags);
-            cell.glowColor = palette.gridPlayhead;
+            cell.text = box.text;
+            cell.fillColor = samplerViewActive ? getSamplerCellColour(box) : getCellColour(box);
+            cell.textColor = samplerViewActive ? getSamplerTextColour(box) : getTextColour(box);
+            cell.glowColor = samplerViewActive ? samplerPalette.glowActive : palette.gridPlayhead;
             cell.glow = glowValue;
-            cell.depthScale = getCellDepthScale(flags);
-            cell.drawOutline = hasNote;
+            cell.depthScale = samplerViewActive ? getSamplerCellDepthScale(box) : getCellDepthScale(box);
+            cell.drawOutline = samplerViewActive ? box.isSelected : box.hasNote;
             cell.outlineColor = palette.gridNote;
 
             cellStates[displayCol][displayRow] = cell;
@@ -434,7 +467,7 @@ TrackerUIComponent::CellState PluginEditor::makeDefaultCell() const
 }
 
 /** select colour based on cell state  */
-juce::Colour PluginEditor::getCellColour(const CellVisualFlags& cell) const
+juce::Colour PluginEditor::getCellColour(const UIBox& cell) const
 {
     if (cell.isSelected && cell.hasNote)
         return PaletteDefaults::errorRed.withAlpha(0.6f);
@@ -446,7 +479,7 @@ juce::Colour PluginEditor::getCellColour(const CellVisualFlags& cell) const
     return palette.gridEmpty;
 }
 
-juce::Colour PluginEditor::getTextColour(const CellVisualFlags& cell) const
+juce::Colour PluginEditor::getTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
         return palette.gridSelected;
@@ -457,11 +490,11 @@ juce::Colour PluginEditor::getTextColour(const CellVisualFlags& cell) const
     return palette.textPrimary;
 }
 
-float PluginEditor::getCellDepthScale(const CellVisualFlags& cell) const
+float PluginEditor::getCellDepthScale(const UIBox& cell) const
 {
     float scale = 1.0f;
     if (cell.hasNote) scale = 1.3f;
-    if (cell.isActivePlayhead) scale = 1.8f;
+    if (cell.isHighlighted) scale = 1.8f;
     if (cell.isSelected) scale = 1.6f;
     if (cell.isArmed) scale = 1.2f;
     return scale;
@@ -526,38 +559,7 @@ void PluginEditor::mouseDrag(const juce::MouseEvent& event)
     panOffsetY -= static_cast<float>(delta.y) * panScale;
 }
 
-void PluginEditor::updateSamplerCellStates(const std::vector<std::vector<SamplerCell>>& cells)
-{
-    if (cells.empty() || cells[0].empty())
-    {
-        cellStates.assign(1, std::vector<TrackerUIComponent::CellState>(1, makeDefaultCell()));
-        return;
-    }
-
-    const size_t cols = cells.size();
-    const size_t rows = cells[0].size();
-
-    cellStates.assign(cols, std::vector<TrackerUIComponent::CellState>(rows));
-    for (size_t col = 0; col < cols; ++col)
-    {
-        for (size_t row = 0; row < rows; ++row)
-        {
-            const auto& info = cells[col][row];
-            TrackerUIComponent::CellState cell;
-            cell.text = info.text;
-            cell.fillColor = getSamplerCellColour(info);
-            cell.textColor = getSamplerTextColour(info);
-            cell.glowColor = samplerPalette.glowActive;
-            cell.glow = info.glow;
-            cell.depthScale = getSamplerCellDepthScale(info);
-            cell.drawOutline = info.isSelected;
-            cell.outlineColor = palette.gridNote;
-            cellStates[col][row] = cell;
-        }
-    }
-}
-
-juce::Colour PluginEditor::getSamplerCellColour(const SamplerCell& cell) const
+juce::Colour PluginEditor::getSamplerCellColour(const UIBox& cell) const
 {
     if (cell.isDisabled)
         return samplerPalette.cellDisabled;
@@ -565,25 +567,25 @@ juce::Colour PluginEditor::getSamplerCellColour(const SamplerCell& cell) const
         return PaletteDefaults::errorRed.withAlpha(0.6f);
     if (cell.isSelected)
         return PaletteDefaults::errorRed.withAlpha(0.6f);
-    if (cell.type == SamplerCellType::Trigger && cell.isPlaying)
+    if (cell.kind == UIBox::Kind::SamplerAction && cell.isActive)
         return samplerPalette.cellAccent;
-    if (cell.type == SamplerCellType::Waveform)
+    if (cell.kind == UIBox::Kind::SamplerWaveform)
         return samplerPalette.cellIdle.brighter(0.2f);
     return samplerPalette.cellIdle;
 }
 
-juce::Colour PluginEditor::getSamplerTextColour(const SamplerCell& cell) const
+juce::Colour PluginEditor::getSamplerTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
         return palette.gridSelected;
-    if (cell.type == SamplerCellType::Trigger && cell.isPlaying)
+    if (cell.kind == UIBox::Kind::SamplerAction && cell.isActive)
         return samplerPalette.glowActive;
-    if (cell.type == SamplerCellType::Waveform)
+    if (cell.kind == UIBox::Kind::SamplerWaveform)
         return samplerPalette.textMuted;
     return samplerPalette.textPrimary;
 }
 
-float PluginEditor::getSamplerCellDepthScale(const SamplerCell& cell) const
+float PluginEditor::getSamplerCellDepthScale(const UIBox& cell) const
 {
     if (cell.isEditing)
         return 1.05f;

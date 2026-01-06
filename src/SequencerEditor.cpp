@@ -73,8 +73,8 @@ void SequencerEditor::resetCursor()
   editSubMode = SequencerEditorSubMode::editCol1;
   stepIncrement = 0.5f;
   samplerEditMode = false;
-  samplerEditType = SamplerCellType::None;
-  samplerEditPlayerIndex = -1;
+  samplerEditCol = 0;
+  samplerEditRow = 0;
 }
 
 SequencerEditorMode SequencerEditor::getEditMode() const
@@ -205,9 +205,7 @@ void SequencerEditor::enterAtCursor()
     editMode = SequencerEditorMode::selectingSeqAndStep;
     break;
   case SequencerEditorMode::machineConfig:
-    samplerEditMode = false;
-    samplerEditType = SamplerCellType::None;
-    samplerEditPlayerIndex = -1;
+    samplerCancelEdit();
     editMode = SequencerEditorMode::selectingSeqAndStep;
     break;
   }
@@ -748,6 +746,8 @@ void SequencerEditor::incrementAtCursor()
     break;
   }
   case SequencerEditorMode::machineConfig:
+    if (isSamplerMachineForCurrentSequence())
+      samplerAdjustCurrentCell(1);
     break;
   }
 }
@@ -769,6 +769,8 @@ void SequencerEditor::decrementAtCursor()
     break;
   }
   case SequencerEditorMode::machineConfig:
+    if (isSamplerMachineForCurrentSequence())
+      samplerAdjustCurrentCell(-1);
     break;
   }
 }
@@ -1074,9 +1076,7 @@ void SequencerEditor::gotoSequenceConfigPage()
 void SequencerEditor::gotoMachineConfigPage()
 {
   setEditMode(SequencerEditorMode::machineConfig);
-  samplerEditMode = false;
-  samplerEditType = SamplerCellType::None;
-  samplerEditPlayerIndex = -1;
+  samplerCancelEdit();
 }
 
 /** write the sent data to a sequence - 1D data version */
@@ -1154,7 +1154,7 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
   {
     samplerPlayers.clear();
     samplerGlowLevels.clear();
-    samplerCells.assign(1, std::vector<SamplerCell>(1));
+    samplerCells.assign(1, std::vector<UIBox>(1));
     return;
   }
 
@@ -1231,7 +1231,7 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
   rebuildSamplerCells();
 }
 
-const std::vector<std::vector<SamplerCell>> &SequencerEditor::getSamplerCells() const
+const std::vector<std::vector<UIBox>> &SequencerEditor::getSamplerCells() const
 {
   return samplerCells;
 }
@@ -1269,29 +1269,8 @@ void SequencerEditor::samplerActivateCurrentCell()
     return;
 
   const auto &cell = samplerCells[samplerCursorCol][samplerCursorRow];
-  switch (cell.type)
-  {
-  case SamplerCellType::None:
-    break;
-  case SamplerCellType::Add:
-    samplerAddPlayer();
-    break;
-  case SamplerCellType::Load:
-    samplerHost->samplerRequestLoad(getActiveSamplerIndex(), cell.playerId);
-    break;
-  case SamplerCellType::Trigger:
-    samplerHost->samplerTrigger(getActiveSamplerIndex(), cell.playerId);
-    break;
-  case SamplerCellType::Low:
-  case SamplerCellType::High:
-  case SamplerCellType::Gain:
-    samplerEditMode = true;
-    samplerEditType = cell.type;
-    samplerEditPlayerIndex = cell.playerIndex;
-    break;
-  case SamplerCellType::Waveform:
-    break;
-  }
+  if (cell.onActivate)
+    cell.onActivate();
 }
 
 void SequencerEditor::samplerAdjustCurrentCell(int direction)
@@ -1309,19 +1288,19 @@ void SequencerEditor::samplerAdjustCurrentCell(int direction)
     return;
 
   const auto &cell = samplerCells[samplerCursorCol][samplerCursorRow];
-  if (cell.type == SamplerCellType::Low || cell.type == SamplerCellType::High || cell.type == SamplerCellType::Gain)
+  if (cell.onAdjust)
   {
-    samplerEditType = cell.type;
-    samplerEditPlayerIndex = cell.playerIndex;
-    adjustSamplerEditValue(direction);
+    samplerEditCol = samplerCursorCol;
+    samplerEditRow = samplerCursorRow;
+    cell.onAdjust(direction);
   }
 }
 
 void SequencerEditor::samplerCancelEdit()
 {
   samplerEditMode = false;
-  samplerEditType = SamplerCellType::None;
-  samplerEditPlayerIndex = -1;
+  samplerEditCol = 0;
+  samplerEditRow = 0;
 }
 
 bool SequencerEditor::isSamplerEditing() const
@@ -1336,7 +1315,7 @@ void SequencerEditor::rebuildSamplerCells()
 
   if (rows == 0 || cols == 0)
   {
-    samplerCells.assign(1, std::vector<SamplerCell>(1));
+    samplerCells.assign(1, std::vector<UIBox>(1));
     return;
   }
 
@@ -1345,69 +1324,125 @@ void SequencerEditor::rebuildSamplerCells()
   if (samplerCursorRow == 0)
     samplerCursorCol = 0;
 
-  samplerCells.assign(cols, std::vector<SamplerCell>(rows));
+  samplerEditRow = std::min(samplerEditRow, rows - 1);
+  samplerEditCol = std::min(samplerEditCol, cols - 1);
+
+  samplerCells.assign(cols, std::vector<UIBox>(rows));
 
   for (std::size_t col = 0; col < cols; ++col)
   {
     for (std::size_t row = 0; row < rows; ++row)
     {
-      SamplerCell cell;
+      UIBox cell;
       if (row == 0)
       {
         if (col == 0)
         {
-          cell.type = SamplerCellType::Add;
+          cell.kind = UIBox::Kind::SamplerAction;
           cell.text = "ADD";
+          cell.onActivate = [this]()
+          {
+            samplerAddPlayer();
+          };
         }
         else
         {
-          cell.type = SamplerCellType::None;
+          cell.kind = UIBox::Kind::None;
         }
       }
       else
       {
         const auto &player = samplerPlayers[row - 1];
-        cell.playerIndex = static_cast<int>(row - 1);
-        cell.playerId = player.id;
+        const int playerId = player.id;
         switch (col)
         {
         case 0:
-          cell.type = SamplerCellType::Load;
+          cell.kind = UIBox::Kind::SamplerAction;
           cell.text = "LOAD";
+          cell.onActivate = [this, playerId]()
+          {
+            if (samplerHost != nullptr)
+              samplerHost->samplerRequestLoad(getActiveSamplerIndex(), playerId);
+          };
           break;
         case 1:
-          cell.type = SamplerCellType::Trigger;
+          cell.kind = UIBox::Kind::SamplerAction;
           cell.text = player.isPlaying ? "PLAY" : "TRIG";
+          cell.isActive = player.isPlaying;
+          cell.onActivate = [this, playerId]()
+          {
+            if (samplerHost != nullptr)
+              samplerHost->samplerTrigger(getActiveSamplerIndex(), playerId);
+          };
           break;
         case 2:
-          cell.type = SamplerCellType::Low;
+          cell.kind = UIBox::Kind::SamplerValue;
           cell.text = sanitizeLabel(juce::String(player.midiLow), 4);
+          cell.onActivate = [this, col, row]()
+          {
+            samplerEditMode = true;
+            samplerEditCol = col;
+            samplerEditRow = row;
+          };
+          cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
+          {
+            if (samplerHost == nullptr)
+              return;
+            const int nextLow = juce::jlimit(0, 127, low + direction);
+            samplerHost->samplerSetRange(getActiveSamplerIndex(), playerId, nextLow, high);
+          };
           break;
         case 3:
-          cell.type = SamplerCellType::High;
+          cell.kind = UIBox::Kind::SamplerValue;
           cell.text = sanitizeLabel(juce::String(player.midiHigh), 4);
+          cell.onActivate = [this, col, row]()
+          {
+            samplerEditMode = true;
+            samplerEditCol = col;
+            samplerEditRow = row;
+          };
+          cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
+          {
+            if (samplerHost == nullptr)
+              return;
+            const int nextHigh = juce::jlimit(0, 127, high + direction);
+            samplerHost->samplerSetRange(getActiveSamplerIndex(), playerId, low, nextHigh);
+          };
           break;
         case 4:
-          cell.type = SamplerCellType::Gain;
+          cell.kind = UIBox::Kind::SamplerValue;
           cell.text = formatGain(player.gain);
+          cell.onActivate = [this, col, row]()
+          {
+            samplerEditMode = true;
+            samplerEditCol = col;
+            samplerEditRow = row;
+          };
+          cell.onAdjust = [this, playerId, gain = player.gain](int direction)
+          {
+            if (samplerHost == nullptr)
+              return;
+            const float nextGain = juce::jlimit(0.0f, 2.0f, gain + direction * 0.05f);
+            samplerHost->samplerSetGain(getActiveSamplerIndex(), playerId, nextGain);
+          };
           break;
         case 5:
-          cell.type = SamplerCellType::Waveform;
+          cell.kind = UIBox::Kind::SamplerWaveform;
           if (!player.fileName.empty())
             cell.text = sanitizeLabel(juce::String(player.fileName), 18);
           else
             cell.text = sanitizeLabel(juce::String(player.status), 18);
           break;
         default:
-          cell.type = SamplerCellType::None;
+          cell.kind = UIBox::Kind::None;
           break;
         }
-        cell.isPlaying = player.isPlaying;
+        cell.isActive = player.isPlaying;
       }
 
       cell.isSelected = (row == samplerCursorRow && col == samplerCursorCol);
-      cell.isEditing = (samplerEditMode && cell.isSelected && cell.type == samplerEditType);
-      cell.isDisabled = (cell.type == SamplerCellType::None);
+      cell.isEditing = (samplerEditMode && cell.isSelected && row == samplerEditRow && col == samplerEditCol);
+      cell.isDisabled = (cell.kind == UIBox::Kind::None);
 
       if (row > 0 && row - 1 < samplerGlowLevels.size())
         cell.glow = samplerGlowLevels[row - 1];
@@ -1439,27 +1474,14 @@ void SequencerEditor::moveSamplerCursor(int deltaRow, int deltaCol)
 
 void SequencerEditor::adjustSamplerEditValue(int direction)
 {
-  if (samplerEditPlayerIndex < 0 || samplerEditPlayerIndex >= static_cast<int>(samplerPlayers.size()))
+  if (!samplerEditMode)
     return;
-  if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
+  if (samplerEditCol >= samplerCells.size())
+    return;
+  if (samplerEditRow >= samplerCells[samplerEditCol].size())
     return;
 
-  const auto player = samplerPlayers[static_cast<std::size_t>(samplerEditPlayerIndex)];
-  const auto samplerIndex = getActiveSamplerIndex();
-
-  if (samplerEditType == SamplerCellType::Low)
-  {
-    const int low = juce::jlimit(0, 127, player.midiLow + direction);
-    samplerHost->samplerSetRange(samplerIndex, player.id, low, player.midiHigh);
-  }
-  else if (samplerEditType == SamplerCellType::High)
-  {
-    const int high = juce::jlimit(0, 127, player.midiHigh + direction);
-    samplerHost->samplerSetRange(samplerIndex, player.id, player.midiLow, high);
-  }
-  else if (samplerEditType == SamplerCellType::Gain)
-  {
-    const float gain = juce::jlimit(0.0f, 2.0f, player.gain + direction * 0.05f);
-    samplerHost->samplerSetGain(samplerIndex, player.id, gain);
-  }
+  const auto &cell = samplerCells[samplerEditCol][samplerEditRow];
+  if (cell.onAdjust)
+    cell.onAdjust(direction);
 }

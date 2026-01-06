@@ -5,36 +5,12 @@
 #include <vector>
 
 #include "Sequencer.h"
+#include "UIBox.h"
 
 namespace juce
 {
 class var;
 }
-
-enum class SamplerCellType
-{
-  None,
-  Add,
-  Load,
-  Trigger,
-  Low,
-  High,
-  Gain,
-  Waveform
-};
-
-struct SamplerCell
-{
-  SamplerCellType type = SamplerCellType::None;
-  int playerIndex = -1;
-  int playerId = -1;
-  std::string text;
-  bool isSelected = false;
-  bool isEditing = false;
-  bool isPlaying = false;
-  bool isDisabled = false;
-  float glow = 0.0f;
-};
 
 class SamplerHost
 {
@@ -143,7 +119,7 @@ public:
   void gotoMachineConfigPage();
 
   void refreshSamplerStateForCurrentSequence();
-  const std::vector<std::vector<SamplerCell>> &getSamplerCells() const;
+  const std::vector<std::vector<UIBox>> &getSamplerCells() const;
   void samplerAddPlayer();
   void samplerRemovePlayer();
   void samplerActivateCurrentCell();
@@ -246,10 +222,10 @@ private:
   double octave;
   std::vector<SamplerPlayerState> samplerPlayers;
   std::vector<float> samplerGlowLevels;
-  std::vector<std::vector<SamplerCell>> samplerCells;
+  std::vector<std::vector<UIBox>> samplerCells;
   std::size_t samplerCursorRow = 0;
   std::size_t samplerCursorCol = 0;
   bool samplerEditMode = false;
-  SamplerCellType samplerEditType = SamplerCellType::None;
-  int samplerEditPlayerIndex = -1;
+  std::size_t samplerEditCol = 0;
+  std::size_t samplerEditRow = 0;
 };

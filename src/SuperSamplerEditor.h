@@ -3,6 +3,7 @@
 #include "SuperSamplerProcessor.h"
 #include "TrackerUIComponent.h"
 #include "Palette.h"
+#include "UIBox.h"
 #include <JuceHeader.h>
 #include <mutex>
 #include <vector>
@@ -113,7 +114,7 @@ private:
     void adjustEditValue(int direction);
     void moveCursor(int deltaRow, int deltaCol);
 
-    juce::Colour getCellColour(const CellVisualState& cell, const CellInfo& info) const;
-    juce::Colour getTextColour(const CellVisualState& cell, const CellInfo& info) const;
-    float getCellDepthScale(const CellVisualState& cell) const;
+    juce::Colour getCellColour(const UIBox& cell) const;
+    juce::Colour getTextColour(const UIBox& cell) const;
+    float getCellDepthScale(const UIBox& cell) const;
 };

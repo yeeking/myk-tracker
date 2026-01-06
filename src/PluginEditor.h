@@ -16,6 +16,7 @@
 #include "TrackerController.h"
 #include "TrackerUIComponent.h"
 #include "Palette.h"
+#include "UIBox.h"
 //==============================================================================
 /**
 */
@@ -76,36 +77,28 @@ private:
     void prepareStepView();
     void prepareSeqConfigView();
     void prepareMachineConfigView();
-    void updateCellStates(const std::vector<std::vector<std::string>>& data,
+    void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                           size_t rowsToDisplay,
-                          size_t colsToDisplay,
-                          size_t cursorCol,
-                          size_t cursorRow,
-                          const std::vector<std::pair<int, int>>& highlightCells,
-                          bool showCursor,
-                          size_t armedSeq);
-
-    struct CellVisualFlags
-    {
-        bool hasNote = false;
-        bool isActivePlayhead = false;
-        bool isSelected = false;
-        bool isArmed = false;
-    };
+                          size_t colsToDisplay);
 
     TrackerUIComponent::CellState makeDefaultCell() const;
-    juce::Colour getCellColour(const CellVisualFlags& cell) const;
-    juce::Colour getTextColour(const CellVisualFlags& cell) const;
-    float getCellDepthScale(const CellVisualFlags& cell) const;
+    juce::Colour getCellColour(const UIBox& cell) const;
+    juce::Colour getTextColour(const UIBox& cell) const;
+    float getCellDepthScale(const UIBox& cell) const;
     void adjustZoom(float delta);
     void moveUp(float amount);
     void moveDown(float amount);
     void moveLeft(float amount);
     void moveRight(float amount);
-    void updateSamplerCellStates(const std::vector<std::vector<SamplerCell>>& cells);
-    juce::Colour getSamplerCellColour(const SamplerCell& cell) const;
-    juce::Colour getSamplerTextColour(const SamplerCell& cell) const;
-    float getSamplerCellDepthScale(const SamplerCell& cell) const;
+    std::vector<std::vector<UIBox>> buildBoxesFromGrid(const std::vector<std::vector<std::string>>& data,
+                                                       size_t cursorCol,
+                                                       size_t cursorRow,
+                                                       const std::vector<std::pair<int, int>>& highlightCells,
+                                                       bool showCursor,
+                                                       size_t armedSeq) const;
+    juce::Colour getSamplerCellColour(const UIBox& cell) const;
+    juce::Colour getSamplerTextColour(const UIBox& cell) const;
+    float getSamplerCellDepthScale(const UIBox& cell) const;
 
     TrackerUIComponent::CellGrid cellStates;
     std::vector<std::vector<float>> playheadGlow;
