@@ -12,23 +12,20 @@ namespace juce
 class var;
 }
 
+class MachineInterface;
 class Sequence;
 enum class SequenceType;
+enum class CommandType : std::size_t;
 struct Parameter;
 
-// Interface for routing sampler actions from the editor to the host processor.
-class SamplerHost
+// Interface for machine access from the editor.
+class MachineHost
 {
 public:
-  virtual ~SamplerHost() = default;
-  virtual std::size_t getSamplerCount() const = 0;
-  virtual juce::var getSamplerState(std::size_t samplerIndex) const = 0;
-  virtual void samplerAddPlayer(std::size_t samplerIndex) = 0;
-  virtual void samplerRemovePlayer(std::size_t samplerIndex, int playerId) = 0;
-  virtual void samplerRequestLoad(std::size_t samplerIndex, int playerId) = 0;
-  virtual void samplerTrigger(std::size_t samplerIndex, int playerId) = 0;
-  virtual void samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high) = 0;
-  virtual void samplerSetGain(std::size_t samplerIndex, int playerId, float gain) = 0;
+  virtual ~MachineHost() = default;
+  virtual std::size_t getMachineCount(CommandType type) const = 0;
+  virtual MachineInterface* getMachine(CommandType type, std::size_t index) = 0;
+  virtual const MachineInterface* getMachine(CommandType type, std::size_t index) const = 0;
 };
 
 // Abstract interface for editor-facing sequencer access.
@@ -94,7 +91,7 @@ class SequencerEditor
 public:
   SequencerEditor(SequencerAbs *_sequencer);
   void setSequencer(SequencerAbs *sequencer);
-  void setSamplerHost(SamplerHost *host);
+  void setMachineHost(MachineHost *host);
   SequencerAbs *getSequencer();
   /** resets editor, e.g. when changing sequence*/
   void resetCursor();
@@ -155,14 +152,13 @@ public:
   /** enter machine configuration page */
   void gotoMachineConfigPage();
 
-  void refreshSamplerStateForCurrentSequence();
-  const std::vector<std::vector<UIBox>> &getSamplerCells() const;
-  void samplerAddPlayer();
-  void samplerRemovePlayer();
-  void samplerActivateCurrentCell();
-  void samplerAdjustCurrentCell(int direction);
-  void samplerCancelEdit();
-  bool isSamplerEditing() const;
+  void refreshMachineStateForCurrentSequence();
+  const std::vector<std::vector<UIBox>> &getMachineCells() const;
+  void machineAddEntry();
+  void machineRemoveEntry();
+  void machineActivateCurrentCell();
+  void machineAdjustCurrentCell(int direction);
+  void machineLearnNote(int midiNote);
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);
   static SequencerEditorSubMode cycleSubModeRight(SequencerEditorSubMode subMode);
@@ -221,30 +217,16 @@ public:
   size_t getArmedSequence();
   /** return true if you have armed a sequence  */
   bool isArmedForLiveMIDI();
-  void samplerLearnNote(int midiNote);
   
 private:
-  struct SamplerPlayerState
-  {
-    int id = 0;
-    int midiLow = 36;
-    int midiHigh = 60;
-    float gain = 1.0f;
-    bool isPlaying = false;
-    float vuDb = -60.0f;
-    std::string status;
-    std::string fileName;
-  };
-
-  bool isSamplerMachineForCurrentSequence() const;
-  std::size_t getActiveSamplerIndex() const;
-  void rebuildSamplerCells();
-  void moveSamplerCursor(int deltaRow, int deltaCol);
-  void adjustSamplerEditValue(int direction);
-  void toggleSamplerLearn(int playerId);
+  bool isMachineUiForCurrentSequence() const;
+  std::size_t getActiveMachineIndex(CommandType type) const;
+  MachineInterface* getActiveMachine(CommandType type) const;
+  void rebuildMachineCells();
+  void moveMachineCursor(int deltaRow, int deltaCol);
 
   SequencerAbs *sequencer;
-  SamplerHost *samplerHost = nullptr;
+  MachineHost *machineHost = nullptr;
   /** which sequence*/
   size_t currentSequence;
   /** which step */
@@ -262,13 +244,10 @@ private:
   SequencerEditorSubMode editSubMode;
   double stepIncrement;
   double octave;
-  std::vector<SamplerPlayerState> samplerPlayers;
-  std::vector<float> samplerGlowLevels;
-  std::vector<std::vector<UIBox>> samplerCells;
-  std::size_t samplerCursorRow = 0;
-  std::size_t samplerCursorCol = 0;
-  bool samplerEditMode = false;
-  std::size_t samplerEditCol = 0;
-  std::size_t samplerEditRow = 0;
-  int learningSamplerPlayerId = -1;
+  std::vector<std::vector<UIBox>> machineCells;
+  std::size_t machineCursorRow = 0;
+  std::size_t machineCursorCol = 0;
+  bool machineEditMode = false;
+  std::size_t machineEditCol = 0;
+  std::size_t machineEditRow = 0;
 };

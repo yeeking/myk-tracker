@@ -123,14 +123,16 @@ void TrackerMainUI::timerCallback ()
           break;
       }
   }
-  if (seqEditor->getEditMode() != SequencerEditorMode::machineConfig)
-  {
+    if (seqEditor->getEditMode() != SequencerEditorMode::machineConfig)
+    {
       const double bpmValue = audioProcessor.getBPM();
       const int bpmInt = static_cast<int>(std::lround(bpmValue));
-      if (bpmInt != lastHudBpm)
+      const bool internalClock = audioProcessor.isInternalClockEnabled();
+      if (bpmInt != lastHudBpm || internalClock != lastHudInternalClock)
       {
-          overlayState.text = "@BPM " + std::to_string(bpmInt);
+          overlayState.text = "@BPM " + std::to_string(bpmInt) + (internalClock ? " INT" : " HOST");
           lastHudBpm = bpmInt;
+          lastHudInternalClock = internalClock;
       }
   }
 
@@ -260,15 +262,39 @@ void TrackerMainUI::prepareMachineConfigView()
         uiComponent.setStyle(style);
         uiComponent.setCellSize(1.2f, 1.1f);
 
-        seqEditor->refreshSamplerStateForCurrentSequence();
-        const auto& boxes = seqEditor->getSamplerCells();
+        seqEditor->refreshMachineStateForCurrentSequence();
+        const auto& boxes = seqEditor->getMachineCells();
         const size_t rows = boxes.empty() ? 1 : boxes[0].size();
         const size_t cols = boxes.empty() ? 1 : boxes.size();
         updateCellStates(boxes, rows, cols);
-        overlayState.text = "SAMPLER ID " + std::to_string(machineId);
+        overlayState.text = "SAMPLER ID " + std::to_string(machineId)
+                            + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
         overlayState.color = samplerPalette.textPrimary;
         overlayState.glowColor = samplerPalette.glowActive;
         overlayState.glowStrength = 0.35f;
+        return;
+    }
+    if (machineType == CommandType::Arpeggiator)
+    {
+        TrackerUIComponent::Style style;
+        style.background = palette.background;
+        style.lightColor = palette.lightColor;
+        style.defaultGlowColor = palette.gridPlayhead;
+        style.ambientStrength = palette.ambientStrength;
+        style.lightDirection = palette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(cellWidth, cellHeight);
+
+        seqEditor->refreshMachineStateForCurrentSequence();
+        const auto& boxes = seqEditor->getMachineCells();
+        const size_t rows = boxes.empty() ? 1 : boxes[0].size();
+        const size_t cols = boxes.empty() ? 1 : boxes.size();
+        updateCellStates(boxes, rows, cols);
+        overlayState.text = "ARP ID " + std::to_string(machineId)
+                            + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
+        overlayState.color = palette.textPrimary;
+        overlayState.glowColor = palette.gridPlayhead;
+        overlayState.glowStrength = 0.25f;
         return;
     }
 
@@ -283,11 +309,12 @@ void TrackerMainUI::prepareMachineConfigView()
 
     cellStates.assign(1, std::vector<TrackerUIComponent::CellState>(1, makeDefaultCell()));
     if (machineType == CommandType::MidiNote)
-        overlayState.text = "CHANNEL " + std::to_string(machineId);
+        overlayState.text = "CHANNEL " + std::to_string(machineId)
+                            + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
     else if (machineType == CommandType::Log)
-        overlayState.text = "CHECK CONSOLE";
+        overlayState.text = std::string("CHECK CONSOLE") + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
     else
-        overlayState.text = "MACHINE";
+        overlayState.text = std::string("MACHINE") + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
 }
 
 void TrackerMainUI::prepareControlPanelView()
@@ -616,6 +643,16 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         }
         return true; 
     }
+    if (key.getModifiers().isShiftDown())
+    {
+        const juce::juce_wchar ch = key.getTextCharacter();
+        if (ch == 'C' || ch == 'c')
+        {
+            const bool enabled = audioProcessor.isInternalClockEnabled();
+            audioProcessor.setInternalClockEnabled(!enabled);
+            return true;
+        }
+    }
 
     // deal with with the user pressing a key when the sequencer is stopped. 
     if (!audioProcessor.getSequencer()->isPlaying())
@@ -635,7 +672,7 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                 const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
                 double note = it->second + (12 * seqEditor->getCurrentOctave());
                 
-                seqEditor->samplerLearnNote(static_cast<int>(note));
+                seqEditor->machineLearnNote(static_cast<int>(note));
                 auto context = sequence->getReadOnlyContext();
                 bool useDefaults = data.empty();
                 if (data.empty())
@@ -686,29 +723,21 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
 
         const auto* sequence = sequencer->getSequence(seqEditor->getCurrentSequence());
         const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-        if (machineType == CommandType::Sampler)
+        if (machineType == CommandType::Sampler || machineType == CommandType::Arpeggiator)
         {
-            // if (key == juce::KeyPress::escapeKey)
-            // {
-            //     seqEditor->samplerCancelEdit();
-            //     return true;
-            // }
-            // if (key.isKeyCode(juce::KeyPress::returnKey))
-            // {
-
-            //     return true;
-            // }
-
             const char samplerKey = static_cast<char>(key.getTextCharacter());
-            if (samplerKey == '=')
+            if (machineType == CommandType::Sampler)
             {
-                seqEditor->samplerAddPlayer();
-                return true;
-            }
-            if (samplerKey == '-')
-            {
-                seqEditor->samplerRemovePlayer();
-                return true;
+                if (samplerKey == '=')
+                {
+                    seqEditor->machineAddEntry();
+                    return true;
+                }
+                if (samplerKey == '-')
+                {
+                    seqEditor->machineRemoveEntry();
+                    return true;
+                }
             }
             if (samplerKey == '[')
             {

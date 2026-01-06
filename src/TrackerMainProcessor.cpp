@@ -40,7 +40,12 @@ TrackerMainProcessor::TrackerMainProcessor()
     {
         samplers.push_back(std::make_unique<SuperSamplerProcessor>());
     }
-    seqEditor.setSamplerHost(this);
+    arpeggiators.reserve(4);
+    for (int i = 0; i < 4; ++i)
+    {
+        arpeggiators.push_back(std::make_unique<ArpeggiatorMachine>());
+    }
+    seqEditor.setMachineHost(this);
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
@@ -128,6 +133,10 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     {
         sampler->prepareToPlay(sampleRate, samplesPerBlock);
     }
+    for (auto& arp : arpeggiators)
+    {
+        arp->prepareToPlay(sampleRate, samplesPerBlock);
+    }
 }
 
 void TrackerMainProcessor::releaseResources()
@@ -137,6 +146,10 @@ void TrackerMainProcessor::releaseResources()
     for (auto& sampler : samplers)
     {
         sampler->releaseResources();
+    }
+    for (auto& arp : arpeggiators)
+    {
+        arp->releaseResources();
     }
 }
 
@@ -190,81 +203,91 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     int blockStartSample = elapsedSamples;
     int blockEndSample = (elapsedSamples + blockSizeSamples) % maxHorizon;
     bool usingHostClock = false;
+    const bool useInternalClock = internalClockEnabled.load(std::memory_order_relaxed);
 
-    #if JUCE_MAJOR_VERSION >= 5
-    juce::AudioPlayHead::CurrentPositionInfo posInfo;
-    auto* playHead = getPlayHead();
-    if (playHead != nullptr && playHead->getCurrentPosition(posInfo)
-        && posInfo.bpm > 0.0 && posInfo.ppqPosition >= 0.0)
+    if (!useInternalClock)
     {
-        const bool hostPlaying = posInfo.isPlaying;
-        if (hostPlaying != hostWasPlaying)
+        #if JUCE_MAJOR_VERSION >= 5
+        juce::AudioPlayHead::CurrentPositionInfo posInfo;
+        auto* playHead = getPlayHead();
+        if (playHead != nullptr && playHead->getCurrentPosition(posInfo)
+            && posInfo.bpm > 0.0 && posInfo.ppqPosition >= 0.0)
         {
-            pendingHostBeatReset = hostPlaying;
-            hostWasPlaying = hostPlaying;
-        }
-
-        if (!hostPlaying)
-        {
-            // Host transport stopped: stop the sequencer and skip internal clocking.
-            sequencer.stop();
-            hostPpqValid = false;
-            usingHostClock = true;
-        }
-        else
-        {
-            // Host sync: derive tick timing from PPQ so transport changes are handled in real time.
-            usingHostClock = true;
-            sequencer.play();
-            setBPM(posInfo.bpm);
-
-            const double ticksPerQuarter = 8.0;
-            const double samplesPerTickDouble = getSampleRate() * (60.0 / posInfo.bpm) / ticksPerQuarter;
-            double tickPosition = posInfo.ppqPosition * ticksPerQuarter;
-            double tickPhase = std::fmod(tickPosition, 1.0);
-            if (tickPhase < 0.0)
-                tickPhase += 1.0;
-
-            if (!hostPpqValid || posInfo.ppqPosition < lastHostPpqPosition)
+            const bool hostPlaying = posInfo.isPlaying;
+            if (hostPlaying != hostWasPlaying)
             {
-                // Transport restarted or jumped; re-sync tick phase from the new PPQ position.
-                hostPpqValid = true;
-            }
-            lastHostPpqPosition = posInfo.ppqPosition;
-
-            const double phaseEpsilon = 1.0e-6;
-            long long tickIndex = static_cast<long long>(std::floor(tickPosition));
-            double sampleOffsetToNextTick = 0.0;
-            if (tickPhase > phaseEpsilon)
-            {
-                ++tickIndex;
-                sampleOffsetToNextTick = (1.0 - tickPhase) * samplesPerTickDouble;
+                pendingHostBeatReset = hostPlaying;
+                hostWasPlaying = hostPlaying;
             }
 
-            const long long ticksPerQuarterInt = static_cast<long long>(ticksPerQuarter);
-            for (double offset = sampleOffsetToNextTick; offset < blockSizeSamples; offset += samplesPerTickDouble, ++tickIndex)
+            if (!hostPlaying)
             {
-                const int tickSampleOffset = static_cast<int>(offset);
-                elapsedSamples = (blockStartSample + tickSampleOffset) % maxHorizon;
-                if (pendingHostBeatReset && ticksPerQuarterInt > 0 && (tickIndex % ticksPerQuarterInt) == 0)
+                // Host transport stopped: stop the sequencer and skip internal clocking.
+                sequencer.stop();
+                hostPpqValid = false;
+                usingHostClock = true;
+            }
+            else
+            {
+                // Host sync: derive tick timing from PPQ so transport changes are handled in real time.
+                usingHostClock = true;
+                sequencer.play();
+                setBPM(posInfo.bpm);
+
+                const double ticksPerQuarter = 8.0;
+                const double samplesPerTickDouble = getSampleRate() * (60.0 / posInfo.bpm) / ticksPerQuarter;
+                double tickPosition = posInfo.ppqPosition * ticksPerQuarter;
+                double tickPhase = std::fmod(tickPosition, 1.0);
+                if (tickPhase < 0.0)
+                    tickPhase += 1.0;
+
+                if (!hostPpqValid || posInfo.ppqPosition < lastHostPpqPosition)
                 {
-                    // Reset tracker timing on the first host beat after transport starts.
-                    resetTicks();
-                    sequencer.rewindAtNextZero();
-                    pendingHostBeatReset = false;
+                    // Transport restarted or jumped; re-sync tick phase from the new PPQ position.
+                    hostPpqValid = true;
                 }
-                // tick is from the clockabs class and it keeps track of the absolute tick 
-                this->tick(); 
-                // this will cause any pending messages to be added to 'midiToSend'
-                // and trigger any sample players
-                sequencer.tick();
-            }
-            elapsedSamples = blockEndSample;
-        }
-    }
-    #endif
+                lastHostPpqPosition = posInfo.ppqPosition;
 
-    if (!usingHostClock)
+                const double phaseEpsilon = 1.0e-6;
+                long long tickIndex = static_cast<long long>(std::floor(tickPosition));
+                double sampleOffsetToNextTick = 0.0;
+                if (tickPhase > phaseEpsilon)
+                {
+                    ++tickIndex;
+                    sampleOffsetToNextTick = (1.0 - tickPhase) * samplesPerTickDouble;
+                }
+
+                const long long ticksPerQuarterInt = static_cast<long long>(ticksPerQuarter);
+                for (double offset = sampleOffsetToNextTick; offset < blockSizeSamples; offset += samplesPerTickDouble, ++tickIndex)
+                {
+                    const int tickSampleOffset = static_cast<int>(offset);
+                    elapsedSamples = (blockStartSample + tickSampleOffset) % maxHorizon;
+                    if (pendingHostBeatReset && ticksPerQuarterInt > 0 && (tickIndex % ticksPerQuarterInt) == 0)
+                    {
+                        // Reset tracker timing on the first host beat after transport starts.
+                        resetTicks();
+                        sequencer.rewindAtNextZero();
+                        pendingHostBeatReset = false;
+                    }
+                    // tick is from the clockabs class and it keeps track of the absolute tick 
+                    this->tick(); 
+                    // this will cause any pending messages to be added to 'midiToSend'
+                    // and trigger any sample players
+                    sequencer.tick();
+                }
+                elapsedSamples = blockEndSample;
+            }
+        }
+        #endif
+    }
+    else
+    {
+        hostPpqValid = false;
+        hostWasPlaying = false;
+        pendingHostBeatReset = false;
+    }
+
+    if (!usingHostClock && useInternalClock)
     {
         hostPpqValid = false;
         hostWasPlaying = false;
@@ -284,6 +307,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             }
         }
     }
+    hostClockActive.store(usingHostClock, std::memory_order_relaxed);
     // to get sample-accurate midi as opposed to block-accurate midi (!)
     // now add any midi that should have occurred within this block
     // to the outgoing midibuffer 
@@ -382,6 +406,12 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         //         DBG(metadata.getMessage().getDescription());
         // }
         samplers[i]->processBlock(buffer, samplerMidiById[i]);
+    }
+
+    juce::MidiBuffer emptyMidi;
+    for (auto& arp : arpeggiators)
+    {
+        arp->processBlock(buffer, emptyMidi);
     }
 }
 
@@ -596,6 +626,23 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     }
     root->setProperty("samplers", samplerStates);
 
+    juce::Array<juce::var> arpeggiatorStates;
+    for (auto& arp : arpeggiators)
+    {
+        juce::MemoryBlock arpState;
+        if (arp != nullptr)
+        {
+            arp->getStateInformation(arpState);
+            const auto encoded = juce::Base64::toBase64(arpState.getData(), arpState.getSize());
+            arpeggiatorStates.add(encoded);
+        }
+        else
+        {
+            arpeggiatorStates.add(juce::String());
+        }
+    }
+    root->setProperty("arpeggiators", arpeggiatorStates);
+
     return root.get();
 }
 
@@ -752,6 +799,28 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         }
     }
 
+    const auto arpsVar = stateVar.getProperty("arpeggiators", juce::var());
+    if (arpsVar.isArray())
+    {
+        const auto& arpArray = *arpsVar.getArray();
+        const auto arpCount = juce::jmin<std::size_t>(static_cast<std::size_t>(arpArray.size()), arpeggiators.size());
+        for (std::size_t i = 0; i < arpCount; ++i)
+        {
+            const auto encoded = arpArray[static_cast<int>(i)].toString();
+            if (encoded.isEmpty())
+                continue;
+            juce::MemoryBlock arpState;
+            juce::MemoryOutputStream stream(arpState, false);
+            if (! juce::Base64::convertFromBase64(stream, encoded))
+                continue;
+            if (arpeggiators[i] != nullptr)
+            {
+                arpeggiators[i]->setStateInformation(arpState.getData(),
+                                                     static_cast<int>(arpState.getSize()));
+            }
+        }
+    }
+
     // syncSequenceStrings();
     
     sequencer.updateSeqStringGrid();
@@ -788,53 +857,43 @@ TrackerController* TrackerMainProcessor::getTrackerController()
     return &trackerController;
 }
 
-std::size_t TrackerMainProcessor::getSamplerCount() const
+std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
 {
-    return samplers.size();
+    switch (type)
+    {
+        case CommandType::Sampler:
+            return samplers.size();
+        case CommandType::Arpeggiator:
+            return arpeggiators.size();
+        default:
+            return 0;
+    }
 }
 
-juce::var TrackerMainProcessor::getSamplerState(std::size_t samplerIndex) const
+MachineInterface* TrackerMainProcessor::getMachine(CommandType type, std::size_t index)
 {
-    const auto* sampler = getSamplerForIndex(samplerIndex);
-    if (sampler == nullptr)
-        return {};
-    return sampler->getSamplerState();
+    switch (type)
+    {
+        case CommandType::Sampler:
+            return getSamplerForIndex(index);
+        case CommandType::Arpeggiator:
+            return getArpeggiatorForIndex(index);
+        default:
+            return nullptr;
+    }
 }
 
-void TrackerMainProcessor::samplerAddPlayer(std::size_t samplerIndex)
+const MachineInterface* TrackerMainProcessor::getMachine(CommandType type, std::size_t index) const
 {
-    if (auto* sampler = getSamplerForIndex(samplerIndex))
-        sampler->addSamplePlayerFromWeb();
-}
-
-void TrackerMainProcessor::samplerRemovePlayer(std::size_t samplerIndex, int playerId)
-{
-    if (auto* sampler = getSamplerForIndex(samplerIndex))
-        sampler->removeSamplePlayer(playerId);
-}
-
-void TrackerMainProcessor::samplerRequestLoad(std::size_t samplerIndex, int playerId)
-{
-    if (auto* sampler = getSamplerForIndex(samplerIndex))
-        sampler->requestSampleLoadFromWeb(playerId);
-}
-
-void TrackerMainProcessor::samplerTrigger(std::size_t samplerIndex, int playerId)
-{
-    if (auto* sampler = getSamplerForIndex(samplerIndex))
-        sampler->triggerFromWeb(playerId);
-}
-
-void TrackerMainProcessor::samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high)
-{
-    if (auto* sampler = getSamplerForIndex(samplerIndex))
-        sampler->setSampleRangeFromWeb(playerId, low, high);
-}
-
-void TrackerMainProcessor::samplerSetGain(std::size_t samplerIndex, int playerId, float gain)
-{
-    if (auto* sampler = getSamplerForIndex(samplerIndex))
-        sampler->setGainFromUI(playerId, gain);
+    switch (type)
+    {
+        case CommandType::Sampler:
+            return getSamplerForIndex(index);
+        case CommandType::Arpeggiator:
+            return getArpeggiatorForIndex(index);
+        default:
+            return nullptr;
+    }
 }
 
 ////////////// MIDIUtils interface 
@@ -850,6 +909,34 @@ void TrackerMainProcessor::allNotesOff()
 }
 void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks)
 {
+    auto enqueueMidiNote = [this](juce::MidiBuffer& targetBuffer,
+                                  unsigned short channel,
+                                  unsigned short outNote,
+                                  unsigned short outVelocity,
+                                  unsigned short outDurTicks)
+    {
+        const int samplesPerTickInt = static_cast<int>(samplesPerTick);
+        const int offsetSamples = (samplesPerTickInt * static_cast<int>(outDurTicks)) % maxHorizon;
+        const int offSample = elapsedSamples + offsetSamples;
+        targetBuffer.addEvent(MidiMessage::noteOn((int)channel, (int)outNote, (uint8)outVelocity), elapsedSamples);
+        targetBuffer.addEvent(MidiMessage::noteOff((int)channel, (int)outNote, (uint8)outVelocity), offSample);
+        outstandingNoteOffs++;
+    };
+
+    if (machineType == CommandType::Arpeggiator)
+    {
+        if (auto* arp = getArpeggiatorForIndex(static_cast<std::size_t>(machineId)))
+        {
+            MachineNoteEvent outEvent;
+            if (arp->handleIncomingNote(note, velocity, durInTicks, outEvent))
+            {
+                const unsigned short channel = machineId + 1;
+                enqueueMidiNote(midiToSend, channel, outEvent.note, outEvent.velocity, outEvent.durationTicks);
+            }
+        }
+        return;
+    }
+
     juce::MidiBuffer* targetBuffer = &midiToSend;
     if (machineType == CommandType::Sampler)
         targetBuffer = &midiToSendToSampler;
@@ -857,17 +944,7 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
     unsigned short channel = machineId + 1; // channels come in 0-15 but we want 1-16
     // offtick is an absolute tick from the start of time 
     // but we have a max horizon which is how far in the future we can set things 
-    const int samplesPerTickInt = static_cast<int>(samplesPerTick);
-    const int offsetSamples = (samplesPerTickInt * static_cast<int>(durInTicks)) % maxHorizon;
-    const int offSample = elapsedSamples + offsetSamples;
-    // DBG("sendMessageToMachine note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
-    // generate a note on and a note off 
-    // note on is right now 
-    targetBuffer->addEvent(MidiMessage::noteOn((int)channel, (int)note, (uint8)velocity), elapsedSamples);
-    // note off is now + length 
-    targetBuffer->addEvent(MidiMessage::noteOff((int)channel, (int)note, (uint8)velocity), offSample);
-    // assert()
-    outstandingNoteOffs ++ ;
+    enqueueMidiNote(*targetBuffer, channel, note, velocity, durInTicks);
 }
 void TrackerMainProcessor::sendQueuedMessages(long tick)
 {
@@ -892,6 +969,21 @@ double TrackerMainProcessor::getBPM()
     return bpm.load(std::memory_order_relaxed);
 }
 
+void TrackerMainProcessor::setInternalClockEnabled(bool enabled)
+{
+    internalClockEnabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool TrackerMainProcessor::isInternalClockEnabled() const
+{
+    return internalClockEnabled.load(std::memory_order_relaxed);
+}
+
+bool TrackerMainProcessor::isHostClockActive() const
+{
+    return hostClockActive.load(std::memory_order_relaxed);
+}
+
 
 void TrackerMainProcessor::clearPendingEvents()
 {
@@ -899,16 +991,34 @@ void TrackerMainProcessor::clearPendingEvents()
     midiToSendToSampler.clear();
 }
 
-SuperSamplerProcessor* TrackerMainProcessor::getSamplerForIndex(std::size_t samplerIndex)
+MachineInterface* TrackerMainProcessor::getSamplerForIndex(std::size_t samplerIndex)
 {
-    if (samplerIndex >= samplers.size())
+    if (samplers.empty())
         return nullptr;
-    return samplers[samplerIndex].get();
+    const std::size_t safeIndex = samplerIndex % samplers.size();
+    return samplers[safeIndex].get();
 }
 
-const SuperSamplerProcessor* TrackerMainProcessor::getSamplerForIndex(std::size_t samplerIndex) const
+const MachineInterface* TrackerMainProcessor::getSamplerForIndex(std::size_t samplerIndex) const
 {
-    if (samplerIndex >= samplers.size())
+    if (samplers.empty())
         return nullptr;
-    return samplers[samplerIndex].get();
+    const std::size_t safeIndex = samplerIndex % samplers.size();
+    return samplers[safeIndex].get();
+}
+
+ArpeggiatorMachine* TrackerMainProcessor::getArpeggiatorForIndex(std::size_t machineIndex)
+{
+    if (arpeggiators.empty())
+        return nullptr;
+    const std::size_t safeIndex = machineIndex % arpeggiators.size();
+    return arpeggiators[safeIndex].get();
+}
+
+const ArpeggiatorMachine* TrackerMainProcessor::getArpeggiatorForIndex(std::size_t machineIndex) const
+{
+    if (arpeggiators.empty())
+        return nullptr;
+    const std::size_t safeIndex = machineIndex % arpeggiators.size();
+    return arpeggiators[safeIndex].get();
 }

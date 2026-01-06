@@ -20,6 +20,7 @@
 #include "SequencerEditor.h"
 #include "TrackerController.h"
 #include "SuperSamplerProcessor.h"
+#include "ArpeggiatorMachine.h"
 
 
 //==============================================================================
@@ -30,7 +31,7 @@ class TrackerMainProcessor  :    public MachineUtilsAbs,
                             public ClockAbs, 
                             public juce::AudioProcessor, 
                             public juce::ChangeBroadcaster,
-                            public SamplerHost
+                            public MachineHost
 
                             #if JucePlugin_Enable_ARA
                              , public juce::AudioProcessorARAExtension
@@ -48,6 +49,9 @@ public:
     // the ClockAbs interface
     void setBPM(double bpm) override; 
     double getBPM() override; 
+    void setInternalClockEnabled(bool enabled);
+    bool isInternalClockEnabled() const;
+    bool isHostClockActive() const;
     
 
     //==============================================================================
@@ -89,14 +93,9 @@ public:
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
     TrackerController* getTrackerController();
-    std::size_t getSamplerCount() const override;
-    juce::var getSamplerState(std::size_t samplerIndex) const override;
-    void samplerAddPlayer(std::size_t samplerIndex) override;
-    void samplerRemovePlayer(std::size_t samplerIndex, int playerId) override;
-    void samplerRequestLoad(std::size_t samplerIndex, int playerId) override;
-    void samplerTrigger(std::size_t samplerIndex, int playerId) override;
-    void samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high) override;
-    void samplerSetGain(std::size_t samplerIndex, int playerId, float gain) override;
+    std::size_t getMachineCount(CommandType type) const override;
+    MachineInterface* getMachine(CommandType type, std::size_t index) override;
+    const MachineInterface* getMachine(CommandType type, std::size_t index) const override;
     
 private:
     Sequencer sequencer;
@@ -108,7 +107,8 @@ private:
     TrackerController trackerController;
     juce::MidiBuffer midiToSend; 
     juce::MidiBuffer midiToSendToSampler;
-    std::vector<std::unique_ptr<SuperSamplerProcessor>> samplers;
+    std::vector<std::unique_ptr<MachineInterface>> samplers;
+    std::vector<std::unique_ptr<ArpeggiatorMachine>> arpeggiators;
 
 
     // unsigned long elapsedSamples;
@@ -120,6 +120,8 @@ private:
     bool hostPpqValid {false};
     bool hostWasPlaying {false};
     bool pendingHostBeatReset {false};
+    std::atomic<bool> internalClockEnabled { true };
+    std::atomic<bool> hostClockActive { false };
     std::atomic<double> bpm; 
     int outstandingNoteOffs;
     /** configure plugin params */
@@ -136,8 +138,10 @@ private:
     juce::var serializeSequencerState();
     /** retrieve state from var  */
     void restoreSequencerState(const juce::var& stateVar);
-    SuperSamplerProcessor* getSamplerForIndex(std::size_t samplerIndex);
-    const SuperSamplerProcessor* getSamplerForIndex(std::size_t samplerIndex) const;
+    MachineInterface* getSamplerForIndex(std::size_t samplerIndex);
+    const MachineInterface* getSamplerForIndex(std::size_t samplerIndex) const;
+    ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex);
+    const ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex) const;
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackerMainProcessor)
 };

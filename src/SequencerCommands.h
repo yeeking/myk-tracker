@@ -64,6 +64,7 @@ enum class CommandType : std::size_t {
     MidiNote = 0,
     Log = 1,
     Sampler = 2,
+    Arpeggiator = 3,
 };
 
 

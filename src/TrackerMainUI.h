@@ -110,6 +110,7 @@ private:
     size_t lastStartRow = 0;
     TrackerUIComponent::OverlayState overlayState;
     int lastHudBpm = -1;
+    bool lastHudInternalClock = true;
     float zoomLevel = 1.0f;
     juce::Point<int> lastDragPosition;
     float panOffsetX = 0.0f;

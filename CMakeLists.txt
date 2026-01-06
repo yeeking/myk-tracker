@@ -41,6 +41,7 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
     src/SuperSamplePlayer.cpp
 #    src/SuperSamplerEditor.cpp
     src/SuperSamplerProcessor.cpp
+    src/ArpeggiatorMachine.cpp
 )
 
     

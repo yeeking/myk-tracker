@@ -6,6 +6,43 @@
 #include <sstream>
 #include <thread>
 
+namespace
+{
+std::string sanitizeLabel(const juce::String& input, size_t maxLen)
+{
+    auto trimmed = input.trim();
+    if (trimmed.isEmpty())
+        return {};
+
+    auto upper = trimmed.toUpperCase();
+    std::string out;
+    out.reserve(static_cast<size_t>(upper.length()));
+    for (auto ch : upper)
+    {
+        if (out.size() >= maxLen)
+            break;
+        if (ch == '\n' || ch == '\r')
+            continue;
+        if (ch < 32 || ch > 126)
+            continue;
+        out.push_back(static_cast<char>(ch));
+    }
+    return out;
+}
+
+std::string formatGain(float gain)
+{
+    juce::String text = juce::String(gain, 2);
+    return sanitizeLabel(text, 6);
+}
+
+float vuDbToGlow(float db)
+{
+    const float gain = juce::Decibels::decibelsToGain(db, -60.0f);
+    return juce::jlimit(0.0f, 1.0f, gain);
+}
+} // namespace
+
 //==============================================================================
 SuperSamplerProcessor::SuperSamplerProcessor()
      : AudioProcessor (BusesProperties()
@@ -165,6 +202,236 @@ void SuperSamplerProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // }
 
     processSamplerBlock (buffer, midiMessages);
+}
+
+std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineUiContext& context)
+{
+    const auto samplerState = getSamplerState();
+    if (!samplerState.isObject())
+    {
+        uiPlayers.clear();
+        uiGlowLevels.clear();
+        learningPlayerId = -1;
+        return { { UIBox{} } };
+    }
+
+    const auto playersVar = samplerState.getProperty("players", juce::var());
+    if (!playersVar.isArray())
+    {
+        uiPlayers.clear();
+        uiGlowLevels.clear();
+        learningPlayerId = -1;
+        return { { UIBox{} } };
+    }
+
+    const auto* playersArray = playersVar.getArray();
+    if (playersArray == nullptr)
+    {
+        uiPlayers.clear();
+        uiGlowLevels.clear();
+        learningPlayerId = -1;
+        return { { UIBox{} } };
+    }
+
+    std::vector<UiPlayerState> nextPlayers;
+    nextPlayers.reserve(static_cast<std::size_t>(playersArray->size()));
+    for (const auto& entry : *playersArray)
+    {
+        auto* playerObj = entry.getDynamicObject();
+        if (playerObj == nullptr)
+            continue;
+
+        UiPlayerState st;
+        st.id = static_cast<int>(playerObj->getProperty("id"));
+        st.midiLow = static_cast<int>(playerObj->getProperty("midiLow"));
+        st.midiHigh = static_cast<int>(playerObj->getProperty("midiHigh"));
+        st.gain = static_cast<float>(double(playerObj->getProperty("gain")));
+        st.isPlaying = static_cast<bool>(playerObj->getProperty("isPlaying"));
+        const auto vuVar = playerObj->getProperty("vuDb");
+        st.vuDb = vuVar.isVoid() ? -60.0f : static_cast<float>(double(vuVar));
+        st.status = playerObj->getProperty("status").toString().toStdString();
+        st.fileName = playerObj->getProperty("fileName").toString().toStdString();
+        nextPlayers.push_back(st);
+    }
+
+    std::vector<float> nextGlow;
+    nextGlow.reserve(nextPlayers.size());
+    bool learningStillValid = false;
+    for (const auto& player : nextPlayers)
+    {
+        if (player.id == learningPlayerId)
+            learningStillValid = true;
+        float glow = 0.0f;
+        for (std::size_t i = 0; i < uiPlayers.size(); ++i)
+        {
+            if (uiPlayers[i].id == player.id && i < uiGlowLevels.size())
+            {
+                glow = uiGlowLevels[i];
+                break;
+            }
+        }
+        const float targetGlow = vuDbToGlow(player.vuDb);
+        glow = std::max(targetGlow, glow * 0.85f);
+        if (glow < 0.02f)
+            glow = 0.0f;
+        nextGlow.push_back(glow);
+    }
+
+    uiPlayers = std::move(nextPlayers);
+    uiGlowLevels = std::move(nextGlow);
+    if (!learningStillValid)
+        learningPlayerId = -1;
+
+    const std::size_t rows = uiPlayers.size() + 1;
+    const std::size_t cols = 7;
+    if (rows == 0 || cols == 0)
+        return { { UIBox{} } };
+
+    std::vector<std::vector<UIBox>> cells(cols, std::vector<UIBox>(rows));
+    for (std::size_t col = 0; col < cols; ++col)
+    {
+        for (std::size_t row = 0; row < rows; ++row)
+        {
+            UIBox cell;
+            const bool learnDisabled = context.disableLearning;
+            if (row == 0)
+            {
+                if (col == 0)
+                {
+                    cell.kind = UIBox::Kind::SamplerAction;
+                    cell.text = "ADD";
+                    cell.onActivate = [this]()
+                    {
+                        addEntry();
+                    };
+                }
+                else
+                {
+                    cell.kind = UIBox::Kind::None;
+                }
+            }
+            else
+            {
+                const auto& player = uiPlayers[row - 1];
+                const int playerId = player.id;
+                switch (col)
+                {
+                case 0:
+                    cell.kind = UIBox::Kind::SamplerAction;
+                    cell.text = "LOAD";
+                    cell.onActivate = [this, playerId]()
+                    {
+                        requestSampleLoadFromWeb(playerId);
+                    };
+                    break;
+                case 1:
+                    cell.kind = UIBox::Kind::SamplerAction;
+                    cell.text = player.isPlaying ? "PLAY" : "TRIG";
+                    cell.isActive = player.isPlaying;
+                    cell.onActivate = [this, playerId]()
+                    {
+                        triggerFromWeb(playerId);
+                    };
+                    break;
+                case 2:
+                    cell.kind = UIBox::Kind::SamplerAction;
+                    cell.text = "LerN";
+                    cell.isActive = (playerId == learningPlayerId);
+                    cell.isDisabled = learnDisabled;
+                    cell.onActivate = [this, playerId, learnDisabled]()
+                    {
+                        if (learnDisabled)
+                            return;
+                        if (learningPlayerId == playerId)
+                            learningPlayerId = -1;
+                        else
+                            learningPlayerId = playerId;
+                    };
+                    break;
+                case 3:
+                    cell.kind = UIBox::Kind::SamplerValue;
+                    cell.text = sanitizeLabel(juce::String(player.midiLow), 4);
+                    cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
+                    {
+                        const int nextLow = juce::jlimit(0, 127, low + direction);
+                        setSampleRangeFromWeb(playerId, nextLow, high);
+                    };
+                    break;
+                case 4:
+                    cell.kind = UIBox::Kind::SamplerValue;
+                    cell.text = sanitizeLabel(juce::String(player.midiHigh), 4);
+                    cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
+                    {
+                        const int nextHigh = juce::jlimit(0, 127, high + direction);
+                        setSampleRangeFromWeb(playerId, low, nextHigh);
+                    };
+                    break;
+                case 5:
+                    cell.kind = UIBox::Kind::SamplerValue;
+                    cell.text = formatGain(player.gain);
+                    cell.onAdjust = [this, playerId, gain = player.gain](int direction)
+                    {
+                        const float nextGain = juce::jlimit(0.0f, 2.0f, gain + direction * 0.05f);
+                        setGainFromUI(playerId, nextGain);
+                    };
+                    break;
+                case 6:
+                    cell.kind = UIBox::Kind::SamplerWaveform;
+                    if (!player.fileName.empty())
+                        cell.text = sanitizeLabel(juce::String(player.fileName), 18);
+                    else
+                        cell.text = sanitizeLabel(juce::String(player.status), 18);
+                    break;
+                default:
+                    cell.kind = UIBox::Kind::None;
+                    break;
+                }
+                if (col == 1)
+                    cell.isActive = player.isPlaying;
+            }
+
+            if (row > 0 && row - 1 < uiGlowLevels.size())
+                cell.glow = uiGlowLevels[row - 1];
+
+            if (cell.kind == UIBox::Kind::None)
+                cell.isDisabled = true;
+
+            cells[col][row] = std::move(cell);
+        }
+    }
+
+    return cells;
+}
+
+bool SuperSamplerProcessor::handleIncomingNote(unsigned short note,
+                                               unsigned short velocity,
+                                               unsigned short durationTicks,
+                                               MachineNoteEvent& outEvent)
+{
+    juce::ignoreUnused(note, velocity, durationTicks, outEvent);
+    return false;
+}
+
+void SuperSamplerProcessor::applyLearnedNote(int midiNote)
+{
+    if (learningPlayerId < 0)
+        return;
+    const int clampedNote = juce::jlimit(0, 127, midiNote);
+    setSampleRangeFromWeb(learningPlayerId, clampedNote, clampedNote);
+}
+
+void SuperSamplerProcessor::addEntry()
+{
+    addSamplePlayerFromWeb();
+}
+
+void SuperSamplerProcessor::removeEntry(int entryIndex)
+{
+    if (entryIndex < 0)
+        return;
+    if (static_cast<std::size_t>(entryIndex) >= uiPlayers.size())
+        return;
+    removeSamplePlayer(uiPlayers[static_cast<std::size_t>(entryIndex)].id);
 }
 
 //==============================================================================

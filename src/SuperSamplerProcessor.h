@@ -6,12 +6,14 @@
 #include <string>
 #include <vector>
 
+#include "MachineInterface.h"
+
 class SuperSamplePlayer;
 
 
 //==============================================================================
 // Audio processor that hosts multiple sample players and exposes sampler controls.
-class SuperSamplerProcessor final : public juce::AudioProcessor
+class SuperSamplerProcessor final : public juce::AudioProcessor, public MachineInterface
 {
 public:
     //==============================================================================
@@ -66,7 +68,28 @@ public:
     void triggerFromWeb (int playerId);
     void setGainFromUI (int playerId, float gain);
 
+    std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
+    bool handleIncomingNote(unsigned short note,
+                            unsigned short velocity,
+                            unsigned short durationTicks,
+                            MachineNoteEvent& outEvent) override;
+    void applyLearnedNote(int midiNote) override;
+    void addEntry() override;
+    void removeEntry(int entryIndex) override;
+
 private:
+    struct UiPlayerState
+    {
+        int id = 0;
+        int midiLow = 0;
+        int midiHigh = 127;
+        float gain = 1.0f;
+        bool isPlaying = false;
+        float vuDb = -60.0f;
+        std::string status;
+        std::string fileName;
+    };
+
     juce::AudioProcessorValueTreeState apvts;
     juce::File lastSampleDirectory;
 
@@ -95,6 +118,10 @@ private:
     juce::AudioFormatManager formatManager;
     std::string vuJson;
     mutable juce::SpinLock vuLock;
+
+    std::vector<UiPlayerState> uiPlayers;
+    std::vector<float> uiGlowLevels;
+    int learningPlayerId { -1 };
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuperSamplerProcessor)
