@@ -39,7 +39,7 @@ target_sources(myk-tracker-plug
     src/TrackerUIComponent.cpp
 src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp
     src/SuperSamplePlayer.cpp
-    src/SuperSamplerEditor.cpp
+#    src/SuperSamplerEditor.cpp
     src/SuperSamplerProcessor.cpp
 )
 

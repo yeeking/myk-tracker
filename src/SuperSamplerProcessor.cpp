@@ -1,5 +1,5 @@
 #include "SuperSamplerProcessor.h"
-#include "SuperSamplerEditor.h"
+// #include "SuperSamplerEditor.h"
 #include "SuperSamplePlayer.h"
 #include "WaveformSVGRenderer.h"
 #include <algorithm>
@@ -286,8 +286,8 @@ void SuperSamplerProcessor::sendSamplerStateToUI()
     auto payload = toVar();
     juce::MessageManager::callAsync ([this, payload]()
     {
-        if (auto* editor = dynamic_cast<SuperSamplerEditor*> (getActiveEditor()))
-            editor->updateUIFromProcessor (payload);
+        // if (auto* editor = dynamic_cast<SuperSamplerEditor*> (getActiveEditor()))
+            // editor->updateUIFromProcessor (payload);
     });
 }
 
@@ -323,8 +323,8 @@ void SuperSamplerProcessor::broadcastMessage (const juce::String& msg)
 
     juce::MessageManager::callAsync ([this, payload]()
     {
-        if (auto* editor = dynamic_cast<SuperSamplerEditor*> (getActiveEditor()))
-            editor->updateUIFromProcessor (payload);
+        // if (auto* editor = dynamic_cast<SuperSamplerEditor*> (getActiveEditor()))
+            // editor->updateUIFromProcessor (payload);
     });
 }
 
