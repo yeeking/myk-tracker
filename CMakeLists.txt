@@ -18,7 +18,7 @@ juce_add_plugin(myk-tracker-plug
     IS_SYNTH FALSE                       # Is this a synth or an effect?
     NEEDS_MIDI_INPUT TRUE               # Does the plugin need midi input?
     # NEEDS_MIDI_OUTPUT TRUE/FALSE              # Does the plugin need midi output?
-    IS_MIDI_EFFECT TRUE                 # Is this plugin a MIDI effect?
+    IS_MIDI_EFFECT FALSE                 # Is this plugin a MIDI effect?
     NEEDS_MIDI_OUTPUT TRUE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE    # Does the editor need keyboard focus?
     COPY_PLUGIN_AFTER_BUILD FALSE      # Avoid copying into system plugin dirs during local builds.

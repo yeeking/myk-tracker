@@ -104,8 +104,11 @@ bool SamplePlayer::acceptsNote (int midiNote) const noexcept
 
 void SamplePlayer::trigger()
 {
+        DBG("SamplePlayer trigger ");
+
     if (sampleBuffer.getNumSamples() > 0)
     {
+        DBG("SamplePlayer triggered ");
         playHead = 0;
         state.isPlaying = true;
     }
@@ -119,6 +122,8 @@ void SamplePlayer::triggerNote (int midiNote)
 
 float SamplePlayer::getNextSampleForChannel (int channel)
 {
+    // DBG("SamplerPlayer getNextSampleForChannel  " << playHead);
+
     if (! state.isPlaying || sampleBuffer.getNumSamples() == 0)
         return 0.0f;
 

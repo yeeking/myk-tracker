@@ -46,7 +46,6 @@ void SamplerEngine::processBlock (juce::AudioBuffer<float>& buffer, const juce::
             noteOns[(size_t) pos].push_back (msg.getNoteNumber());
         }
     }
-
     const std::lock_guard<std::mutex> lock (playerMutex);
 
     for (auto& player : players)
@@ -63,8 +62,9 @@ void SamplerEngine::processBlock (juce::AudioBuffer<float>& buffer, const juce::
             {
                 for (auto& player : players)
                 {
-                    if (player->acceptsNote (note))
+                    if (player->acceptsNote (note)){
                         player->triggerNote (note);
+                    }
                 }
             }
         }
@@ -221,6 +221,7 @@ bool SamplerEngine::trigger (int playerId)
     const std::lock_guard<std::mutex> lock (playerMutex);
     if (auto* player = getPlayer (playerId))
     {
+        DBG("SamplerEngine::trigger: playing sampler " << playerId);
         player->trigger();
         return true;
     }

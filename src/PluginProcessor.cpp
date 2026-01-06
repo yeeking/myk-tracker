@@ -194,12 +194,14 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             // tick is from the clockabs class and it keeps track of the absolute tick 
             this->tick(); 
             // this will cause any pending messages to be added to 'midiToSend'
+            // and trigger any sample players
             sequencer.tick();
         }
     }
     // to get sample-accurate midi as opposed to block-accurate midi (!)
     // now add any midi that should have occurred within this block
-    // to midiMessages, but with an offset value within this block
+    // to the outgoing midibuffer 
+    // midiMessages , but with an offset value within this block
     
     juce::MidiBuffer futureMidi;    // store messages from midiToSend from the future here. 
     juce::MidiMessage message;
@@ -236,6 +238,8 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     midiToSend.clear();
     midiToSend.swapWith(futureMidi);
 
+    // now set up the midi messages that 
+    // we want to send to the internal sampler engines
     juce::MidiBuffer samplerMidiThisBlock;
     juce::MidiBuffer futureSamplerMidi;
     for (const MidiMessageMetadata metadata : midiToSendToSampler){
@@ -258,9 +262,17 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             }
         }
     }
+    // stash future midi to the class data member
+    // midiToSendToSampler so it comes back in the next
+    // call to processBlock
     midiToSendToSampler.clear();
     midiToSendToSampler.swapWith(futureSamplerMidi);
-
+    // now re-organise the sampler midi for this block
+    // (samplerMidiThisBlock) by sampler 
+    // this seems a bit over the top to me
+    // data structure wise but hey 
+    // it does make the call to processblock 
+    // on the samplers much cleaner 
     std::vector<juce::MidiBuffer> samplerMidiById(samplers.size());
     for (const MidiMessageMetadata metadata : samplerMidiThisBlock)
     {
@@ -270,8 +282,22 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         samplerMidiById[static_cast<std::size_t>(channelIndex)]
             .addEvent(metadata.getMessage(), metadata.samplePosition);
     }
+
+    // at this point, the MIDI events
+    // for the samplers have been prepared and placed
+    // in the correct offsets within the block
+    // so we can now send that MIDI to the samplers
+    // and the buffer and they can write audio into it
     for (std::size_t i = 0; i < samplers.size(); ++i)
     {
+        if (samplerMidiById[i].getNumEvents() > 0){
+            DBG("processblock on sampler engine " << i << " events " << samplerMidiById[i].getNumEvents());
+            juce::MidiBuffer::Iterator it(samplerMidiById[i]);
+            juce::MidiMessage message;
+            int samplePosition = 0;
+            while (it.getNextEvent(message, samplePosition))
+                DBG(message.getDescription());
+        }
         samplers[i]->processBlock(buffer, samplerMidiById[i]);
     }
 }
