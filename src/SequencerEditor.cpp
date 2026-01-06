@@ -36,7 +36,7 @@ std::string formatGain(float gain)
 }
 } // namespace
 
-SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer},
+SequencerEditor::SequencerEditor(SequencerAbs *sequencer) : sequencer{sequencer},
                                                          currentSequence{0},
                                                          currentStep{0},
                                                          currentStepRow{0},
@@ -45,11 +45,11 @@ SequencerEditor::SequencerEditor(Sequencer *sequencer) : sequencer{sequencer},
                                                          editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1},
                                                          stepIncrement{0.5f},
                                                          octave{6},
-                                                         armedSequence{Sequencer::notArmed} // default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
+                                                         armedSequence{SequencerAbs::notArmed} // default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
 {
 }
 
-void SequencerEditor::setSequencer(Sequencer *_sequencer)
+void SequencerEditor::setSequencer(SequencerAbs *_sequencer)
 {
   this->sequencer = _sequencer;
 }
@@ -57,7 +57,7 @@ void SequencerEditor::setSamplerHost(SamplerHost *host)
 {
   samplerHost = host;
 }
-Sequencer *SequencerEditor::getSequencer()
+SequencerAbs *SequencerEditor::getSequencer()
 {
   return this->sequencer;
 }
@@ -991,7 +991,7 @@ void SequencerEditor::decrementTicksPerStep()
   sequencer->getSequence(currentSequence)->setTicksPerStep(tps);
 }
 
-void SequencerEditor::nextSequenceType(Sequencer *seqr, unsigned int sequence)
+void SequencerEditor::nextSequenceType(SequencerAbs *seqr, unsigned int sequence)
 {
   SequenceType type = seqr->getSequenceType(sequence);
   switch (type)
@@ -1093,7 +1093,7 @@ void SequencerEditor::setArmedSequence(const size_t sequence)
   if (this->armedSequence == sequence)
   {
     // switch it off
-    this->armedSequence = Sequencer::notArmed;
+    this->armedSequence = SequencerAbs::notArmed;
   }
   else
   {
@@ -1107,12 +1107,12 @@ size_t SequencerEditor::getArmedSequence()
 
 void SequencerEditor::unarmSequence()
 {
-  this->armedSequence = Sequencer::notArmed;
+  this->armedSequence = SequencerAbs::notArmed;
 }
 
 bool SequencerEditor::isArmedForLiveMIDI()
 {
-  if (this->armedSequence == Sequencer::notArmed)
+  if (this->armedSequence == SequencerAbs::notArmed)
     return false;
   return true;
 }

@@ -57,10 +57,10 @@ enum class SequencerEditorSubMode
 class SequencerEditor
 {
 public:
-  SequencerEditor(Sequencer *sequencer);
-  void setSequencer(Sequencer *sequencer);
+  SequencerEditor(SequencerAbs *sequencer);
+  void setSequencer(SequencerAbs *sequencer);
   void setSamplerHost(SamplerHost *host);
-  Sequencer *getSequencer();
+  SequencerAbs *getSequencer();
   /** resets editor, e.g. when changing sequence*/
   void resetCursor();
   /** returns current major edit mode which is a SequencerEditorMode*/
@@ -155,7 +155,7 @@ public:
   void decrementChannel();
   void incrementTicksPerStep();
   void decrementTicksPerStep();
-  static void nextSequenceType(Sequencer *seqr, unsigned int sequence);
+  static void nextSequenceType(SequencerAbs *seqr, unsigned int sequence);
   /** returns the index of the sequence that the editor is currently focused on*/
   size_t getCurrentSequence() const;
   /** returns the index of the step that the editor is currently focused on*/
@@ -203,7 +203,7 @@ private:
   void moveSamplerCursor(int deltaRow, int deltaCol);
   void adjustSamplerEditValue(int direction);
 
-  Sequencer *sequencer;
+  SequencerAbs *sequencer;
   SamplerHost *samplerHost = nullptr;
   /** which sequence*/
   size_t currentSequence;
