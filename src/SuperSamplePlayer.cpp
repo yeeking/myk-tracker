@@ -1,4 +1,4 @@
-#include "SamplePlayer.h"
+#include "SuperSamplePlayer.h"
 #include "WaveformSVGRenderer.h"
 #include <algorithm>
 #include <limits>
@@ -64,7 +64,7 @@ std::vector<float> buildWaveformPoints(const juce::AudioBuffer<float>& buffer, i
 }
 } // namespace
 
-SamplePlayer::SamplePlayer (int newId)
+SuperSamplePlayer::SuperSamplePlayer (int newId)
 {
     state.id = newId;
     state.waveformSVG = WaveformSVGRenderer::generateBlankWaveformSVG();
@@ -72,7 +72,7 @@ SamplePlayer::SamplePlayer (int newId)
     waveformPoints = buildWaveformPoints(sampleBuffer, kWaveformPlotPoints);
 }
 
-void SamplePlayer::setMidiRange (int low, int high) noexcept
+void SuperSamplePlayer::setMidiRange (int low, int high) noexcept
 {
     low = juce::jlimit (0, 127, low);
     high = juce::jlimit (0, 127, high);
@@ -80,29 +80,29 @@ void SamplePlayer::setMidiRange (int low, int high) noexcept
     state.midiHigh = juce::jmax (low, high);
 }
 
-void SamplePlayer::setGain (float g) noexcept
+void SuperSamplePlayer::setGain (float g) noexcept
 {
     state.gain = juce::jlimit (0.0f, 2.0f, g);
 }
 
-void SamplePlayer::setFilePathAndStatus (const juce::String& path, const juce::String& statusLabel, const juce::String& displayName)
+void SuperSamplePlayer::setFilePathAndStatus (const juce::String& path, const juce::String& statusLabel, const juce::String& displayName)
 {
     state.filePath = path;
     state.fileName = displayName.isNotEmpty() ? displayName : juce::File (path).getFileName();
     state.status = statusLabel;
 }
 
-SamplePlayer::State SamplePlayer::getState() const noexcept
+SuperSamplePlayer::State SuperSamplePlayer::getState() const noexcept
 {
     return state;
 }
 
-bool SamplePlayer::acceptsNote (int midiNote) const noexcept
+bool SuperSamplePlayer::acceptsNote (int midiNote) const noexcept
 {
     return midiNote >= state.midiLow && midiNote <= state.midiHigh && sampleBuffer.getNumSamples() > 0;
 }
 
-void SamplePlayer::trigger()
+void SuperSamplePlayer::trigger()
 {
         DBG("SamplePlayer trigger ");
 
@@ -114,13 +114,13 @@ void SamplePlayer::trigger()
     }
 }
 
-void SamplePlayer::triggerNote (int midiNote)
+void SuperSamplePlayer::triggerNote (int midiNote)
 {
     juce::ignoreUnused (midiNote);
     trigger();
 }
 
-float SamplePlayer::getNextSampleForChannel (int channel)
+float SuperSamplePlayer::getNextSampleForChannel (int channel)
 {
     // DBG("SamplerPlayer getNextSampleForChannel  " << playHead);
 
@@ -148,7 +148,7 @@ float SamplePlayer::getNextSampleForChannel (int channel)
     return sample;
 }
 
-bool SamplePlayer::setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name)
+bool SuperSamplePlayer::setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name)
 {
     sampleBuffer = std::move (newBuffer);
     state.status = "loaded";
@@ -167,7 +167,7 @@ bool SamplePlayer::setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const 
     return true;
 }
 
-void SamplePlayer::markError (const juce::String& path, const juce::String& message)
+void SuperSamplePlayer::markError (const juce::String& path, const juce::String& message)
 {
     sampleBuffer.setSize (0, 0);
     state.status = "error";
@@ -181,12 +181,12 @@ void SamplePlayer::markError (const juce::String& path, const juce::String& mess
     lastVuDb = -60.0f;
 }
 
-void SamplePlayer::beginBlock() noexcept
+void SuperSamplePlayer::beginBlock() noexcept
 {
     // no-op for now; samples are pushed per-sample
 }
 
-void SamplePlayer::endBlock() noexcept
+void SuperSamplePlayer::endBlock() noexcept
 {
     const float average = vuBufferSize > 0 ? (vuSum / (float) vuBufferSize) : 0.0f;
     float db = juce::Decibels::gainToDecibels (average + 1.0e-6f, -80.0f);
@@ -196,7 +196,7 @@ void SamplePlayer::endBlock() noexcept
     lastVuDb = juce::jlimit (-60.0f, 6.0f, db);
 }
 
-void SamplePlayer::pushVuSample (float sample) noexcept
+void SuperSamplePlayer::pushVuSample (float sample) noexcept
 {
     if (vuBuffer.empty())
         return;

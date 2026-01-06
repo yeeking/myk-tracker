@@ -4,7 +4,7 @@
 #include <vector>
 
 // A lightweight sample player placeholder that will later own audio data.
-class SamplePlayer
+class SuperSamplePlayer
 {
 public:
     struct State
@@ -20,7 +20,7 @@ public:
         juce::String waveformSVG;
     };
 
-    explicit SamplePlayer (int newId);
+    explicit SuperSamplePlayer (int newId);
 
     int getId() const noexcept { return state.id; }
 
