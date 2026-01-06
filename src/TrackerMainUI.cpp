@@ -249,7 +249,7 @@ void TrackerMainUI::prepareMachineConfigView()
     if (machineType == CommandType::Sampler)
     {
         samplerViewActive = true;
-        samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
+        samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
 
         TrackerUIComponent::Style style;
         style.background = samplerPalette.background;
@@ -630,18 +630,42 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             if (Sequence* sequence = sequencer->getSequence(seqIndex))
             {
                 auto data = sequence->getStepData(stepIndex);
-                if (!data.empty())
+                const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
+                double note = it->second + (12 * seqEditor->getCurrentOctave());
+                DBG("keypressed sending note " << note);
+                seqEditor->samplerLearnNote(static_cast<int>(note));
+                auto context = sequence->getReadOnlyContext();
+                DBG("sequence context machineType=" << context.machineType
+                    << " machineId=" << context.machineId
+                    << " triggerProb=" << context.triggerProbability);
+                bool useDefaults = data.empty();
+                if (data.empty())
                 {
-                    const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
-                    if (data[safeRow].size() > Step::noteInd)
+                    data.resize(1);
+                    data[0].assign(Step::maxInd + 1, 0.0);
+                }
+                if (data[safeRow].size() < Step::maxInd + 1)
+                {
+                    data[safeRow].resize(Step::maxInd + 1, 0.0);
+                }
+                if (!useDefaults && data[safeRow][Step::noteInd] == 0.0)
+                {
+                    useDefaults = true;
+                }
+                if (useDefaults)
+                {
+                    data[safeRow][Step::cmdInd] = context.machineType;
+                    const Command& cmd = CommandProcessor::getCommand(context.machineType);
+                    for (std::size_t i = 0; i < cmd.parameters.size() && i < Step::maxInd; ++i)
                     {
-                        double note = it->second + (12 * seqEditor->getCurrentOctave());
-                        data[safeRow][Step::noteInd] = note;
-                        DBG("keypressed sending note " << note);
-                        const auto context = sequence->getReadOnlyContext();
-                        CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
+                        data[safeRow][i + 1] = cmd.parameters[i].defaultValue;
                     }
                 }
+                data[safeRow][Step::noteInd] = note;
+                data[safeRow][Step::probInd] = 1.0;
+                context.triggerProbability = 1.0;
+
+                CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
             }
             // also let the note go through to the sequence
             // so do not return here.

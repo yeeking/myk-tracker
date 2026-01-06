@@ -221,6 +221,7 @@ public:
   size_t getArmedSequence();
   /** return true if you have armed a sequence  */
   bool isArmedForLiveMIDI();
+  void samplerLearnNote(int midiNote);
   
 private:
   struct SamplerPlayerState
@@ -240,6 +241,7 @@ private:
   void rebuildSamplerCells();
   void moveSamplerCursor(int deltaRow, int deltaCol);
   void adjustSamplerEditValue(int direction);
+  void toggleSamplerLearn(int playerId);
 
   SequencerAbs *sequencer;
   SamplerHost *samplerHost = nullptr;
@@ -268,4 +270,5 @@ private:
   bool samplerEditMode = false;
   std::size_t samplerEditCol = 0;
   std::size_t samplerEditRow = 0;
+  int learningSamplerPlayerId = -1;
 };

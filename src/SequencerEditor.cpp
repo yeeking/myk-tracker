@@ -42,6 +42,15 @@ float vuDbToGlow(float db)
   const float gain = juce::Decibels::decibelsToGain(db, -60.0f);
   return juce::jlimit(0.0f, 1.0f, gain);
 }
+
+bool isSequencerPlaying(SequencerAbs *sequencer)
+{
+  if (sequencer == nullptr)
+    return false;
+  if (auto *impl = dynamic_cast<Sequencer *>(sequencer))
+    return impl->isPlaying();
+  return false;
+}
 } // namespace
 
 SequencerEditor::SequencerEditor(SequencerAbs *_sequencer) : sequencer{_sequencer},
@@ -1183,6 +1192,7 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
   {
     samplerPlayers.clear();
     samplerGlowLevels.clear();
+    learningSamplerPlayerId = -1;
     samplerCells.assign(1, std::vector<UIBox>(1));
     return;
   }
@@ -1192,6 +1202,7 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
   {
     samplerPlayers.clear();
     samplerGlowLevels.clear();
+    learningSamplerPlayerId = -1;
     rebuildSamplerCells();
     return;
   }
@@ -1201,6 +1212,7 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
   {
     samplerPlayers.clear();
     samplerGlowLevels.clear();
+    learningSamplerPlayerId = -1;
     rebuildSamplerCells();
     return;
   }
@@ -1210,6 +1222,7 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
   {
     samplerPlayers.clear();
     samplerGlowLevels.clear();
+    learningSamplerPlayerId = -1;
     rebuildSamplerCells();
     return;
   }
@@ -1237,8 +1250,11 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
 
   std::vector<float> nextGlow;
   nextGlow.reserve(nextPlayers.size());
+  bool learningStillValid = false;
   for (const auto &player : nextPlayers)
   {
+    if (player.id == learningSamplerPlayerId)
+      learningStillValid = true;
     float glow = 0.0f;
     for (std::size_t i = 0; i < samplerPlayers.size(); ++i)
     {
@@ -1257,6 +1273,8 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
 
   samplerPlayers = std::move(nextPlayers);
   samplerGlowLevels = std::move(nextGlow);
+  if (!learningStillValid)
+    learningSamplerPlayerId = -1;
   rebuildSamplerCells();
 }
 
@@ -1302,6 +1320,14 @@ void SequencerEditor::samplerActivateCurrentCell()
     cell.onActivate();
 }
 
+void SequencerEditor::samplerLearnNote(int midiNote)
+{
+  if (learningSamplerPlayerId < 0 || samplerHost == nullptr)
+    return;
+  const int clampedNote = juce::jlimit(0, 127, midiNote);
+  samplerHost->samplerSetRange(getActiveSamplerIndex(), learningSamplerPlayerId, clampedNote, clampedNote);
+}
+
 void SequencerEditor::samplerAdjustCurrentCell(int direction)
 {
   if (!isSamplerMachineForCurrentSequence() || samplerHost == nullptr)
@@ -1340,7 +1366,7 @@ bool SequencerEditor::isSamplerEditing() const
 void SequencerEditor::rebuildSamplerCells()
 {
   const std::size_t rows = samplerPlayers.size() + 1;
-  const std::size_t cols = 6;
+  const std::size_t cols = 7;
 
   if (rows == 0 || cols == 0)
   {
@@ -1363,6 +1389,7 @@ void SequencerEditor::rebuildSamplerCells()
     for (std::size_t row = 0; row < rows; ++row)
     {
       UIBox cell;
+      const bool learnDisabled = isSequencerPlaying(sequencer);
       if (row == 0)
       {
         if (col == 0)
@@ -1405,6 +1432,18 @@ void SequencerEditor::rebuildSamplerCells()
           };
           break;
         case 2:
+          cell.kind = UIBox::Kind::SamplerAction;
+          cell.text = "LerN";
+          cell.isActive = (playerId == learningSamplerPlayerId);
+          cell.isDisabled = learnDisabled;
+          cell.onActivate = [this, playerId]()
+          {
+            if (isSequencerPlaying(sequencer))
+              return;
+            toggleSamplerLearn(playerId);
+          };
+          break;
+        case 3:
           cell.kind = UIBox::Kind::SamplerValue;
           cell.text = sanitizeLabel(juce::String(player.midiLow), 4);
           cell.onActivate = [this, col, row]()
@@ -1425,7 +1464,7 @@ void SequencerEditor::rebuildSamplerCells()
             samplerHost->samplerSetRange(getActiveSamplerIndex(), playerId, nextLow, high);
           };
           break;
-        case 3:
+        case 4:
           cell.kind = UIBox::Kind::SamplerValue;
           cell.text = sanitizeLabel(juce::String(player.midiHigh), 4);
           cell.onActivate = [this, col, row]()
@@ -1445,7 +1484,7 @@ void SequencerEditor::rebuildSamplerCells()
             samplerHost->samplerSetRange(getActiveSamplerIndex(), playerId, low, nextHigh);
           };
           break;
-        case 4:
+        case 5:
           cell.kind = UIBox::Kind::SamplerValue;
           cell.text = formatGain(player.gain);
           cell.onActivate = [this, col, row]()
@@ -1462,7 +1501,7 @@ void SequencerEditor::rebuildSamplerCells()
             samplerHost->samplerSetGain(getActiveSamplerIndex(), playerId, nextGain);
           };
           break;
-        case 5:
+        case 6:
           cell.kind = UIBox::Kind::SamplerWaveform;
           if (!player.fileName.empty())
             cell.text = sanitizeLabel(juce::String(player.fileName), 18);
@@ -1473,12 +1512,13 @@ void SequencerEditor::rebuildSamplerCells()
           cell.kind = UIBox::Kind::None;
           break;
         }
-        cell.isActive = player.isPlaying;
+        if (col == 1)
+          cell.isActive = player.isPlaying;
       }
 
       cell.isSelected = (row == samplerCursorRow && col == samplerCursorCol);
       cell.isEditing = (samplerEditMode && cell.isSelected && row == samplerEditRow && col == samplerEditCol);
-      cell.isDisabled = (cell.kind == UIBox::Kind::None);
+      cell.isDisabled = cell.isDisabled || (cell.kind == UIBox::Kind::None);
 
       if (row > 0 && row - 1 < samplerGlowLevels.size())
         cell.glow = samplerGlowLevels[row - 1];
@@ -1520,4 +1560,12 @@ void SequencerEditor::adjustSamplerEditValue(int direction)
   const auto &cell = samplerCells[samplerEditCol][samplerEditRow];
   if (cell.onAdjust)
     cell.onAdjust(direction);
+}
+
+void SequencerEditor::toggleSamplerLearn(int playerId)
+{
+  if (learningSamplerPlayerId == playerId)
+    learningSamplerPlayerId = -1;
+  else
+    learningSamplerPlayerId = playerId;
 }
