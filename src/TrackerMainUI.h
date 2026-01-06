@@ -21,15 +21,15 @@
 /**
 */
 // Main plugin UI that renders the tracker and handles input.
-class PluginEditor  : public juce::AudioProcessorEditor,
+class TrackerMainUI  : public juce::AudioProcessorEditor,
                       public juce::OpenGLRenderer,
                       public juce::Timer,
                       public juce::KeyListener
 
 {
 public:
-    PluginEditor (PluginProcessor&);
-    ~PluginEditor() override;
+    TrackerMainUI (PluginProcessor&);
+    ~TrackerMainUI() override;
 
     //==============================================================================
     void paint (juce::Graphics&) override;
@@ -125,5 +125,5 @@ private:
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackerMainUI)
 };

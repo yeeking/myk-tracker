@@ -33,7 +33,7 @@ juce_generate_juce_header(myk-tracker-plug)
 
 target_sources(myk-tracker-plug
     PRIVATE
-    src/PluginEditor.cpp
+    src/TrackerMainUI.cpp
     src/PluginProcessor.cpp
     # src/StringTable.cpp
     src/TrackerUIComponent.cpp

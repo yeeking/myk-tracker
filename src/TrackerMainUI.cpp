@@ -7,14 +7,14 @@
 */
 
 #include "PluginProcessor.h"
-#include "PluginEditor.h"
+#include "TrackerMainUI.h"
 #include "SequencerCommands.h"
 // #include "SimpleClock.h"
 #include <algorithm>
 #include <cmath>
 
 //==============================================================================
-PluginEditor::PluginEditor (PluginProcessor& p)
+TrackerMainUI::TrackerMainUI (PluginProcessor& p)
     : AudioProcessorEditor (&p),
     framesDrawn{0},
     audioProcessor (p),
@@ -52,36 +52,36 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
 }
 
-PluginEditor::~PluginEditor()
+TrackerMainUI::~TrackerMainUI()
 {
   stopTimer();
   openGLContext.detach();
 }
 
-void PluginEditor::newOpenGLContextCreated()
+void TrackerMainUI::newOpenGLContextCreated()
 {
     uiComponent.initOpenGL(getWidth(), getHeight());
 }
 
-void PluginEditor::renderOpenGL()
+void TrackerMainUI::renderOpenGL()
 {
     uiComponent.setViewportBounds(seqViewBounds, getHeight(), openGLContext.getRenderingScale());
     uiComponent.renderUI();
     waitingForPaint = false;
 }
 
-void PluginEditor::openGLContextClosing()
+void TrackerMainUI::openGLContextClosing()
 {
     uiComponent.shutdownOpenGL();
 }
 
 //==============================================================================
-void PluginEditor::paint (juce::Graphics& g)
+void TrackerMainUI::paint (juce::Graphics& g)
 {
     waitingForPaint = false; 
 }
 
-void PluginEditor::resized()
+void TrackerMainUI::resized()
 {
     // This is generally where you'll want topip install tf-keras lay out the positions of any
     // subcomponents in your editor..
@@ -91,7 +91,7 @@ void PluginEditor::resized()
 }
 
 
-void PluginEditor::timerCallback ()
+void TrackerMainUI::timerCallback ()
 {
     ++framesDrawn;
 
@@ -158,7 +158,7 @@ void PluginEditor::timerCallback ()
 
 
 
-void PluginEditor::prepareSequenceView()
+void TrackerMainUI::prepareSequenceView()
 {
   samplerViewActive = false;
   samplerColumnWidths.clear();
@@ -184,7 +184,7 @@ void PluginEditor::prepareSequenceView()
                                         seqEditor->getArmedSequence());
   updateCellStates(boxes, rowsInUI - 1, 6);
 }
-void PluginEditor::prepareStepView()
+void TrackerMainUI::prepareStepView()
 {
     samplerViewActive = false;
     samplerColumnWidths.clear();
@@ -214,7 +214,7 @@ void PluginEditor::prepareStepView()
                                           Sequencer::notArmed);
     updateCellStates(boxes, rowsInUI - 1, 6);
 }
-void PluginEditor::prepareSeqConfigView()
+void TrackerMainUI::prepareSeqConfigView()
 {
     samplerViewActive = false;
     samplerColumnWidths.clear();
@@ -236,7 +236,7 @@ void PluginEditor::prepareSeqConfigView()
     updateCellStates(boxes, rowsInUI - 1, 6);
 }
 
-void PluginEditor::prepareMachineConfigView()
+void TrackerMainUI::prepareMachineConfigView()
 {
     samplerViewActive = false;
     samplerColumnWidths.clear();
@@ -289,7 +289,7 @@ void PluginEditor::prepareMachineConfigView()
         overlayState.text = "MACHINE";
 }
 
-void PluginEditor::prepareControlPanelView()
+void TrackerMainUI::prepareControlPanelView()
 {
     // std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
     // controlPanelTable.updateData(grid, 
@@ -298,7 +298,7 @@ void PluginEditor::prepareControlPanelView()
     //     std::vector<std::pair<int, int>>(), false); 
 }
 
-std::vector<std::vector<UIBox>> PluginEditor::buildBoxesFromGrid(const std::vector<std::vector<std::string>>& data,
+std::vector<std::vector<UIBox>> TrackerMainUI::buildBoxesFromGrid(const std::vector<std::vector<std::string>>& data,
                                                                  size_t cursorCol,
                                                                  size_t cursorRow,
                                                                  const std::vector<std::pair<int, int>>& highlightCells,
@@ -340,7 +340,7 @@ std::vector<std::vector<UIBox>> PluginEditor::buildBoxesFromGrid(const std::vect
     return boxes;
 }
 
-void PluginEditor::updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
+void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                                     size_t rowsToDisplay,
                                     size_t colsToDisplay)
 {
@@ -455,7 +455,7 @@ void PluginEditor::updateCellStates(const std::vector<std::vector<UIBox>>& boxes
     lastStartRow = nextStartRow;
 }
 
-TrackerUIComponent::CellState PluginEditor::makeDefaultCell() const
+TrackerUIComponent::CellState TrackerMainUI::makeDefaultCell() const
 {
     TrackerUIComponent::CellState cell;
     cell.fillColor = palette.gridEmpty;
@@ -467,7 +467,7 @@ TrackerUIComponent::CellState PluginEditor::makeDefaultCell() const
 }
 
 /** select colour based on cell state  */
-juce::Colour PluginEditor::getCellColour(const UIBox& cell) const
+juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
 {
     if (cell.isSelected && cell.hasNote)
         return PaletteDefaults::errorRed.withAlpha(0.6f);
@@ -479,7 +479,7 @@ juce::Colour PluginEditor::getCellColour(const UIBox& cell) const
     return palette.gridEmpty;
 }
 
-juce::Colour PluginEditor::getTextColour(const UIBox& cell) const
+juce::Colour TrackerMainUI::getTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
         return palette.gridSelected;
@@ -490,7 +490,7 @@ juce::Colour PluginEditor::getTextColour(const UIBox& cell) const
     return palette.textPrimary;
 }
 
-float PluginEditor::getCellDepthScale(const UIBox& cell) const
+float TrackerMainUI::getCellDepthScale(const UIBox& cell) const
 {
     float scale = 1.0f;
     if (cell.hasNote) scale = 1.3f;
@@ -500,14 +500,14 @@ float PluginEditor::getCellDepthScale(const UIBox& cell) const
     return scale;
 }
 
-void PluginEditor::adjustZoom(float delta)
+void TrackerMainUI::adjustZoom(float delta)
 {
     const float minZoom = 0.5f;
     const float maxZoom = 2.5f;
     zoomLevel = juce::jlimit(minZoom, maxZoom, zoomLevel + delta);
 }
 
-void PluginEditor::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+void TrackerMainUI::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
     if (!seqViewBounds.contains(event.getPosition()))
         return;
@@ -517,27 +517,27 @@ void PluginEditor::mouseWheelMove(const juce::MouseEvent& event, const juce::Mou
         adjustZoom(zoomDelta);
 }
 
-void PluginEditor::moveUp(float amount)
+void TrackerMainUI::moveUp(float amount)
 {
     panOffsetY += amount;
 }
 
-void PluginEditor::moveDown(float amount)
+void TrackerMainUI::moveDown(float amount)
 {
     panOffsetY -= amount;
 }
 
-void PluginEditor::moveLeft(float amount)
+void TrackerMainUI::moveLeft(float amount)
 {
     panOffsetX += amount;
 }
 
-void PluginEditor::moveRight(float amount)
+void TrackerMainUI::moveRight(float amount)
 {
     panOffsetX -= amount;
 }
 
-void PluginEditor::mouseDown(const juce::MouseEvent& event)
+void TrackerMainUI::mouseDown(const juce::MouseEvent& event)
 {
     if (!seqViewBounds.contains(event.getPosition()))
         return;
@@ -545,7 +545,7 @@ void PluginEditor::mouseDown(const juce::MouseEvent& event)
     lastDragPosition = event.getPosition();
 }
 
-void PluginEditor::mouseDrag(const juce::MouseEvent& event)
+void TrackerMainUI::mouseDrag(const juce::MouseEvent& event)
 {
     if (!seqViewBounds.contains(event.getPosition()))
         return;
@@ -559,7 +559,7 @@ void PluginEditor::mouseDrag(const juce::MouseEvent& event)
     panOffsetY -= static_cast<float>(delta.y) * panScale;
 }
 
-juce::Colour PluginEditor::getSamplerCellColour(const UIBox& cell) const
+juce::Colour TrackerMainUI::getSamplerCellColour(const UIBox& cell) const
 {
     if (cell.isDisabled)
         return samplerPalette.cellDisabled;
@@ -574,7 +574,7 @@ juce::Colour PluginEditor::getSamplerCellColour(const UIBox& cell) const
     return samplerPalette.cellIdle;
 }
 
-juce::Colour PluginEditor::getSamplerTextColour(const UIBox& cell) const
+juce::Colour TrackerMainUI::getSamplerTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
         return palette.gridSelected;
@@ -585,7 +585,7 @@ juce::Colour PluginEditor::getSamplerTextColour(const UIBox& cell) const
     return samplerPalette.textPrimary;
 }
 
-float PluginEditor::getSamplerCellDepthScale(const UIBox& cell) const
+float TrackerMainUI::getSamplerCellDepthScale(const UIBox& cell) const
 {
     if (cell.isEditing)
         return 1.05f;
@@ -595,7 +595,7 @@ float PluginEditor::getSamplerCellDepthScale(const UIBox& cell) const
 }
 
 
-bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
+bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
     if (seqEditor->getEditMode() == SequencerEditorMode::machineConfig)
     {
@@ -804,7 +804,7 @@ bool PluginEditor::keyPressed(const juce::KeyPress& key, juce::Component* origin
     return true; // Key was handled
 }
 
-bool PluginEditor::keyStateChanged(bool isKeyDown, juce::Component* originatingComponent)
+bool TrackerMainUI::keyStateChanged(bool isKeyDown, juce::Component* originatingComponent)
 {
   return false; 
 }

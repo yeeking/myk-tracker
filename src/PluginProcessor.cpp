@@ -8,7 +8,7 @@
 */
 
 #include "PluginProcessor.h"
-#include "PluginEditor.h"
+#include "TrackerMainUI.h"
 
 //==============================================================================
 PluginProcessor::PluginProcessor()
@@ -310,7 +310,7 @@ bool PluginProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* PluginProcessor::createEditor()
 {
-    return new PluginEditor (*this);
+    return new TrackerMainUI (*this);
 }
 
 //==============================================================================
