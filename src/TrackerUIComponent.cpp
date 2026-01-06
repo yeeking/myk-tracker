@@ -1,6 +1,7 @@
 #include "TrackerUIComponent.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <unordered_set>
 
 using namespace juce::gl;
@@ -410,7 +411,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
                                                        GL_FLOAT,
                                                        GL_FALSE,
                                                        stride,
-                                                       reinterpret_cast<GLvoid*>(offsetof(Vertex, position)));
+                                                       reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, position)));
         openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->position->attributeID);
     }
 
@@ -421,7 +422,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
                                                        GL_FLOAT,
                                                        GL_FALSE,
                                                        stride,
-                                                       reinterpret_cast<GLvoid*>(offsetof(Vertex, normal)));
+                                                       reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, normal)));
         openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->normal->attributeID);
     }
 
@@ -698,7 +699,7 @@ void TrackerUIComponent::renderCellText(const juce::Matrix3D<float>& projectionM
                                                                GL_FLOAT,
                                                                GL_FALSE,
                                                                sizeof(Segment14Geometry::Vertex),
-                                                               reinterpret_cast<GLvoid*>(offsetof(Segment14Geometry::Vertex, x)));
+                                                               reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Segment14Geometry::Vertex, x)));
             }
 
             glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
@@ -798,7 +799,7 @@ void TrackerUIComponent::renderOverlayText(const juce::Matrix3D<float>& projecti
                                                        GL_FLOAT,
                                                        GL_FALSE,
                                                        sizeof(Segment14Geometry::Vertex),
-                                                       reinterpret_cast<GLvoid*>(offsetof(Segment14Geometry::Vertex, x)));
+                                                       reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Segment14Geometry::Vertex, x)));
     }
 
     glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);

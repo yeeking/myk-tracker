@@ -104,15 +104,18 @@ int TrackerMainProcessor::getCurrentProgram()
 
 void TrackerMainProcessor::setCurrentProgram (int index)
 {
+    juce::ignoreUnused(index);
 }
 
 const juce::String TrackerMainProcessor::getProgramName (int index)
 {
+    juce::ignoreUnused(index);
     return {};
 }
 
 void TrackerMainProcessor::changeProgramName (int index, const juce::String& newName)
 {
+    juce::ignoreUnused(index, newName);
 }
 
 //==============================================================================
@@ -182,15 +185,16 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         // tell the 
     }
 
-    int blockSize = getBlockSize();
+    const int blockSizeSamples = getBlockSize();
     int blockStartSample = elapsedSamples;
-    int blockEndSample = (elapsedSamples + blockSize) % maxHorizon;
-    for (int i=0;i<blockSize; ++i){
+    int blockEndSample = (elapsedSamples + blockSizeSamples) % maxHorizon;
+    const int samplesPerTickInt = static_cast<int>(samplesPerTick);
+    for (int i = 0; i < blockSizeSamples; ++i){
         // weird but since juce midi sample offsets are int not unsigned long, 
         // I set a maximum elapsedSamples and mod on that, instead of just elapsedSamples ++; forever
         // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
-        elapsedSamples = (++elapsedSamples) % maxHorizon;
-        if (elapsedSamples % samplesPerTick == 0){
+        elapsedSamples = (elapsedSamples + 1) % maxHorizon;
+        if (samplesPerTickInt > 0 && (elapsedSamples % samplesPerTickInt) == 0){
             // tick is from the clockabs class and it keeps track of the absolute tick 
             this->tick(); 
             // this will cause any pending messages to be added to 'midiToSend'
@@ -292,11 +296,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         if (samplerMidiById[i].getNumEvents() > 0){
             DBG("processblock on sampler engine " << i << " events " << samplerMidiById[i].getNumEvents());
-            juce::MidiBuffer::Iterator it(samplerMidiById[i]);
-            juce::MidiMessage message;
-            int samplePosition = 0;
-            while (it.getNextEvent(message, samplePosition))
-                DBG(message.getDescription());
+            for (const auto metadata : samplerMidiById[i])
+                DBG(metadata.getMessage().getDescription());
         }
         samplers[i]->processBlock(buffer, samplerMidiById[i]);
     }
@@ -528,7 +529,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         if (seqArrayVar.isArray())
         {
             const auto& seqArray = *seqArrayVar.getArray();
-            const auto seqCount = juce::jmin<std::size_t>(seqArray.size(), sequencer.howManySequences());
+            const auto seqCount = juce::jmin<std::size_t>(static_cast<std::size_t>(seqArray.size()), sequencer.howManySequences());
             for (std::size_t i = 0; i < seqCount; ++i)
             {
                 const auto& seqObj = seqArray[static_cast<int>(i)];
@@ -555,7 +556,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
                 if (stepsVar.isArray())
                 {
                     const auto& stepsArray = *stepsVar.getArray();
-                    const auto stepsToLoad = juce::jmin<std::size_t>(stepsArray.size(), static_cast<std::size_t>(length));
+                    const auto stepsToLoad = juce::jmin<std::size_t>(static_cast<std::size_t>(stepsArray.size()), static_cast<std::size_t>(length));
                     for (std::size_t step = 0; step < stepsToLoad; ++step)
                     {
                         const auto& stepVar = stepsArray[static_cast<int>(step)];
@@ -625,7 +626,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     seqEditor.setCurrentSequence(seq);
 
     int step = static_cast<int>(stateVar.getProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep())));
-    const int maxStep = static_cast<int>(juce::jmax<std::size_t>(1, sequencer.howManySteps(seq))) - 1;
+    const int maxStep = static_cast<int>(juce::jmax<std::size_t>(1, sequencer.howManySteps(static_cast<std::size_t>(seq)))) - 1;
     step = juce::jlimit(0, juce::jmax(0, maxStep), step);
     seqEditor.setCurrentStep(step);
 
@@ -651,7 +652,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     if (samplersVar.isArray())
     {
         const auto& samplerArray = *samplersVar.getArray();
-        const auto samplerCount = juce::jmin<std::size_t>(samplerArray.size(), samplers.size());
+        const auto samplerCount = juce::jmin<std::size_t>(static_cast<std::size_t>(samplerArray.size()), samplers.size());
         for (std::size_t i = 0; i < samplerCount; ++i)
         {
             const auto encoded = samplerArray[static_cast<int>(i)].toString();
@@ -774,7 +775,9 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
     unsigned short channel = machineId + 1; // channels come in 0-15 but we want 1-16
     // offtick is an absolute tick from the start of time 
     // but we have a max horizon which is how far in the future we can set things 
-    int offSample =  elapsedSamples +  (samplesPerTick * static_cast<int>(durInTicks)) % maxHorizon;
+    const int samplesPerTickInt = static_cast<int>(samplesPerTick);
+    const int offsetSamples = (samplesPerTickInt * static_cast<int>(durInTicks)) % maxHorizon;
+    const int offSample = elapsedSamples + offsetSamples;
     // DBG("sendMessageToMachine note start/ end " << elapsedSamples << " -> " << offSample << " tick length " << durInTicks << " hor " << maxHorizon);
     // generate a note on and a note off 
     // note on is right now 
@@ -786,6 +789,7 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
 }
 void TrackerMainProcessor::sendQueuedMessages(long tick)
 {
+    juce::ignoreUnused(tick);
     // this is blank as midi gets sent by moving it from midiToSend to the processBlock's midi buffer
 
 }

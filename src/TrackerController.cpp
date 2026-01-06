@@ -1,4 +1,5 @@
 #include "TrackerController.h"
+#include <JuceHeader.h>
 
 TrackerController::TrackerController( Sequencer* _sequencer, 
                                         ClockAbs* _clockAbs, 
@@ -69,10 +70,12 @@ void TrackerController::setBPM(unsigned int bpm)
 }
 void TrackerController::loadTrack(const std::string& fname)
 {
+    juce::ignoreUnused(fname);
 
 }
 void TrackerController::saveTrack(const std::string& fname)
 {
+    juce::ignoreUnused(fname);
 
 }
 

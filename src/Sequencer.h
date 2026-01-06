@@ -18,6 +18,8 @@
 #include <memory>
 #include <unordered_map>
 
+
+#include "SequencerEditor.h"
 #include "SequencerCommands.h"
 //#include "ChordUtils.h"
 // #include "SequencerUtils.h"
@@ -188,7 +190,7 @@ class Sequence{
     /** apply a transpose to the sequence, which is reset when the sequence
      * hits step 0 again
      */
-    void setTranspose(double transpose);
+    void setTranspose(double _transpose);
     /** apply a length adjustment to the sequence. This immediately changes the length.
      * It is reset when the sequence
      * hits step 0 again
@@ -209,7 +211,7 @@ class Sequence{
     /** check if the sent step is active */
     bool isStepActive(std::size_t step) const;
     /** set the sequence type */
-    void setType(SequenceType type);
+    void setType(SequenceType _type);
     SequenceType getType() const;
     void setMachineType(double machineType);
     double getMachineType() const;
@@ -275,36 +277,36 @@ class Sequence{
 
 };
 
-// Abstract interface for editor-facing sequencer access.
-class SequencerAbs{
-  public:
-    virtual ~SequencerAbs() = default;
-    /** armed (MIDI recording) channel will be set to this if nothing is armed */
-    const static std::size_t notArmed{4096};
+// // Abstract interface for editor-facing sequencer access.
+// class SequencerAbs{
+//   public:
+//     virtual ~SequencerAbs() = default;
+//     /** armed (MIDI recording) channel will be set to this if nothing is armed */
+//     const static std::size_t notArmed{4096};
 
-    virtual std::size_t howManySequences() const = 0;
-    virtual std::size_t howManySteps(std::size_t sequence) const = 0;
-    virtual std::size_t getCurrentStep(std::size_t sequence) const = 0;
-    virtual SequenceType getSequenceType(std::size_t sequence) const = 0;
-    virtual Sequence* getSequence(std::size_t sequence) = 0;
-    virtual void setSequenceType(std::size_t sequence, SequenceType type) = 0;
-    virtual void setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data) = 0;
-    virtual std::vector<std::vector<double>> getStepData(std::size_t sequence, std::size_t step) = 0;
-    virtual double getStepDataAt(std::size_t seq, std::size_t step, std::size_t row, std::size_t col) = 0;
-    virtual void setStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col, double value) = 0;
-    virtual void resetStepRow(std::size_t sequence, std::size_t step, std::size_t row) = 0;
-    virtual std::size_t howManyStepDataRows(std::size_t seq, std::size_t step) = 0;
-    virtual std::size_t howManyStepDataCols(std::size_t seq, std::size_t step) = 0;
-    virtual void setStepDataToDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
-    virtual void extendSequence(std::size_t sequence) = 0;
-    virtual void shrinkSequence(std::size_t sequence) = 0;
-    virtual void incrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
-    virtual void decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
-    virtual std::vector<Parameter>& getSeqConfigSpecs() = 0;
-    virtual void incrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
-    virtual void decrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
-    virtual void toggleStepActive(std::size_t sequence, std::size_t step) = 0;
-};
+//     virtual std::size_t howManySequences() const = 0;
+//     virtual std::size_t howManySteps(std::size_t sequence) const = 0;
+//     virtual std::size_t getCurrentStep(std::size_t sequence) const = 0;
+//     virtual SequenceType getSequenceType(std::size_t sequence) const = 0;
+//     virtual Sequence* getSequence(std::size_t sequence) = 0;
+//     virtual void setSequenceType(std::size_t sequence, SequenceType type) = 0;
+//     virtual void setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data) = 0;
+//     virtual std::vector<std::vector<double>> getStepData(std::size_t sequence, std::size_t step) = 0;
+//     virtual double getStepDataAt(std::size_t seq, std::size_t step, std::size_t row, std::size_t col) = 0;
+//     virtual void setStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col, double value) = 0;
+//     virtual void resetStepRow(std::size_t sequence, std::size_t step, std::size_t row) = 0;
+//     virtual std::size_t howManyStepDataRows(std::size_t seq, std::size_t step) = 0;
+//     virtual std::size_t howManyStepDataCols(std::size_t seq, std::size_t step) = 0;
+//     virtual void setStepDataToDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
+//     virtual void extendSequence(std::size_t sequence) = 0;
+//     virtual void shrinkSequence(std::size_t sequence) = 0;
+//     virtual void incrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
+//     virtual void decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
+//     virtual std::vector<Parameter>& getSeqConfigSpecs() = 0;
+//     virtual void incrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
+//     virtual void decrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
+//     virtual void toggleStepActive(std::size_t sequence, std::size_t step) = 0;
+// };
 
 /** represents a sequencer which is used to store a grid of data and to step through it */
 // Multi-track sequencer that owns sequences and advances them over time.

@@ -1,8 +1,10 @@
 #include "SequencerEditor.h"
+#include "Sequencer.h"
 #include "SequencerCommands.h"
 #include <JuceHeader.h>
 #include <algorithm>
 #include <cmath> // fmod
+#include <limits>
 #include <assert.h>
 
 namespace
@@ -34,18 +36,25 @@ std::string formatGain(float gain)
   juce::String text = juce::String(gain, 2);
   return sanitizeLabel(text, 6);
 }
+
+float vuDbToGlow(float db)
+{
+  const float gain = juce::Decibels::decibelsToGain(db, -60.0f);
+  return juce::jlimit(0.0f, 1.0f, gain);
+}
 } // namespace
 
-SequencerEditor::SequencerEditor(SequencerAbs *sequencer) : sequencer{sequencer},
+SequencerEditor::SequencerEditor(SequencerAbs *_sequencer) : sequencer{_sequencer},
                                                          currentSequence{0},
                                                          currentStep{0},
                                                          currentStepRow{0},
                                                          currentStepCol{0},
                                                          currentSeqParam{0},
-                                                         editMode{SequencerEditorMode::selectingSeqAndStep}, editSubMode{SequencerEditorSubMode::editCol1},
+                                                         armedSequence{SequencerAbs::notArmed}, // default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
+                                                         editMode{SequencerEditorMode::selectingSeqAndStep},
+                                                         editSubMode{SequencerEditorSubMode::editCol1},
                                                          stepIncrement{0.5f},
-                                                         octave{6},
-                                                         armedSequence{SequencerAbs::notArmed} // default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
+                                                         octave{6}
 {
 }
 
@@ -100,6 +109,8 @@ void SequencerEditor::cycleEditMode()
 {
   switch (editMode)
   {
+  case SequencerEditorMode::selectingSeqAndStep:
+    return;
   case SequencerEditorMode::editingStep: // go to next data item
     this->editSubMode = SequencerEditor::cycleSubModeRight(this->editSubMode);
     return;
@@ -127,13 +138,16 @@ void SequencerEditor::cycleAtCursor()
     break;
 
   case SequencerEditorMode::selectingSeqAndStep:
+  {
     // toggle the step on or off
     // toggle all steps in current sequence to off
-    for (auto i = 0; i < sequencer->getSequence(currentSequence)->getLength(); ++i)
+    const auto length = sequencer->getSequence(currentSequence)->getLength();
+    for (std::size_t i = 0; i < length; ++i)
     {
       sequencer->toggleStepActive(currentSequence, i);
     }
     return;
+  }
   case SequencerEditorMode::editingStep:
     sequencer->toggleStepActive(currentSequence, currentStep);
     return;
@@ -145,14 +159,17 @@ void SequencerEditor::resetAtCursor()
   switch (editMode)
   {
   case SequencerEditorMode::selectingSeqAndStep:
+  {
     // delete a step
-    for (int row = 0; row < sequencer->howManyStepDataRows(currentSequence, currentStep); ++row)
+    const auto rowCount = sequencer->howManyStepDataRows(currentSequence, currentStep);
+    for (std::size_t row = 0; row < rowCount; ++row)
     {
       sequencer->resetStepRow(currentSequence, currentStep, row);
     }
 
     // sequencer->resetSequence(currentSequence);
     break;
+  }
   case SequencerEditorMode::editingStep:
     // enterNoteData(0);
     // sequencer->resetSequence(currentSequence);
@@ -188,12 +205,12 @@ void SequencerEditor::enterAtCursor()
   {
     editMode = SequencerEditorMode::editingStep;
     // check if we are in the right bounds with our cursor
-    int maxRows = sequencer->howManyStepDataRows(currentSequence, currentStep);
-    if (currentStepRow >= maxRows)
+    const std::size_t maxRows = sequencer->howManyStepDataRows(currentSequence, currentStep);
+    if (maxRows > 0 && currentStepRow >= maxRows)
       currentStepRow = maxRows - 1; //
-    int maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
-    if (currentStepCol >= maxCols)
-      currentStepRow = maxCols - 1;
+    const std::size_t maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
+    if (maxCols > 0 && currentStepCol >= maxCols)
+      currentStepCol = maxCols - 1;
     break;
   }
   case SequencerEditorMode::configuringSequence:
@@ -225,7 +242,7 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     if (editMode == SequencerEditorMode::editingStep)
     {
       // force currentCol to be note col
-      currentStepCol = column;
+      currentStepCol = static_cast<std::size_t>(column);
     }
     if (editMode == SequencerEditorMode::selectingSeqAndStep)
     {
@@ -235,10 +252,10 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     std::vector<std::vector<double>> firstStep = sequencer->getStepData(currentSequence, 0);
     // set the vel, len and probability values for the
     // new step data to defaults if they are currently at zero
-    std::vector<int> cols = {Step::velInd, Step::lengthInd, Step::probInd};
-    for (int col : cols)
+    const std::size_t cols[] = {Step::velInd, Step::lengthInd, Step::probInd};
+    for (std::size_t col : cols)
     {
-      if (data[currentStepRow][col] == 0)
+      if (std::abs(data[currentStepRow][col]) < std::numeric_limits<double>::epsilon())
       {
         sequencer->setStepDataToDefault(currentSequence, currentStep, currentStepRow, col);
       }
@@ -252,7 +269,7 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     // Parameter param = CommandProcessor::getCommand(data[Step::cmdInd]).parameters[(int)column]; // -1 as the first col is the command which has no parameter
 
     // always used the mutex protected function to update the data
-    sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, column, value);
+    sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, static_cast<std::size_t>(column), value);
     // move to the next step down
     moveCursorDown();
   }
@@ -358,9 +375,9 @@ void SequencerEditor::enterDataAtCursor(double inValue)
     }
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     // set a default vel and len if needed.
-    if (data[dataRow][Step::velInd] == 0)
+    if (std::abs(data[dataRow][Step::velInd]) < std::numeric_limits<double>::epsilon())
       data[dataRow][Step::velInd] = 64;
-    if (data[dataRow][Step::lengthInd] == 0)
+    if (std::abs(data[dataRow][Step::lengthInd]) < std::numeric_limits<double>::epsilon())
       data[dataRow][Step::lengthInd] = 1; // two ticks
     switch (dataCol)
     {
@@ -427,7 +444,7 @@ void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note
   data[0][Step::velInd] = static_cast<double>(velocity);
   // data[0][Step::chanInd] = data[0][Step::chanInd];// keep the channel the seq already has
   data[0][Step::lengthInd] = 2.0; // shortish
-  if (data[0][Step::probInd] == 0.0)
+  if (std::abs(data[0][Step::probInd]) < std::numeric_limits<double>::epsilon())
   {
     data[0][Step::probInd] = 1.0; // keep the prob unless it is currently zero
   }
@@ -469,8 +486,6 @@ void SequencerEditor::moveCursorLeft()
       return;
 
     currentSequence -= 1;
-    if (currentSequence < 0)
-      currentSequence = 0;
     if (currentStep >= sequencer->howManySteps(currentSequence))
       currentStep = sequencer->howManySteps(currentSequence) - 1;
     break;
@@ -481,8 +496,6 @@ void SequencerEditor::moveCursorLeft()
     if (currentStepCol == 0)
       return;
     currentStepCol--;
-    if (currentStepCol < 0)
-      currentStepCol = 0;
     break;
   }
   case SequencerEditorMode::configuringSequence:
@@ -493,8 +506,6 @@ void SequencerEditor::moveCursorLeft()
     if (currentSequence == 0)
       return;
     currentSequence -= 1;
-    if (currentSequence < 0)
-      currentSequence = 0;
     if (currentStep >= sequencer->howManySteps(currentSequence))
       currentStep = sequencer->howManySteps(currentSequence) - 1;
     break;
@@ -532,9 +543,9 @@ void SequencerEditor::moveCursorRight()
     // move right to next step col
     currentStepCol++;
     // int naxCols = sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow)
-    int maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
+    const std::size_t maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
     // sequencer->getStepDataDirect(currentSequence, currentStep)->at(currentStepRow).size();
-    if (currentStepCol >= maxCols)
+    if (maxCols > 0 && currentStepCol >= maxCols)
       currentStepCol = maxCols - 1;
     break;
   }
@@ -576,8 +587,6 @@ void SequencerEditor::moveCursorUp()
     }
 
     currentStep -= 1;
-    if (currentStep < 0)
-      currentStep = 0;
     break;
   }
   case SequencerEditorMode::editingStep:
@@ -590,9 +599,6 @@ void SequencerEditor::moveCursorUp()
     // cycles which data field we are editing
     // this->editSubMode = SequencerEditor::cycleSubModeLeft(this->editSubMode);
     currentStepRow -= 1;
-    if (currentStepRow < 0)
-      currentStepRow = 0;
-
     break;
   }
   case SequencerEditorMode::configuringSequence:
@@ -604,8 +610,6 @@ void SequencerEditor::moveCursorUp()
 
     // SequencerEditor::nextSequenceType(sequencer, currentSequence);
     currentSeqParam--;
-    if (currentSeqParam < 0)
-      currentSeqParam = 0;
     break;
   }
   case SequencerEditorMode::machineConfig:
@@ -635,8 +639,8 @@ void SequencerEditor::moveCursorDown()
   case SequencerEditorMode::editingStep:
   {
     currentStepRow += 1;
-    int rowsInStep = sequencer->howManyStepDataRows(currentSequence, currentStep);
-    if (currentStepRow >= rowsInStep) // sequencer->howManySteps(currentSequence))
+    const std::size_t rowsInStep = sequencer->howManyStepDataRows(currentSequence, currentStep);
+    if (rowsInStep > 0 && currentStepRow >= rowsInStep) // sequencer->howManySteps(currentSequence))
       currentStepRow = rowsInStep - 1;
     break;
   }
@@ -644,10 +648,14 @@ void SequencerEditor::moveCursorDown()
   {
     // moving down moves to the next parameter for this track
     currentSeqParam++;
-    int max = sequencer->getSeqConfigSpecs().size() - 1;
-    if (currentSeqParam > max)
+    const std::size_t max = sequencer->getSeqConfigSpecs().size();
+    if (max == 0)
     {
-      currentSeqParam = max;
+      currentSeqParam = 0;
+    }
+    else if (currentSeqParam >= max)
+    {
+      currentSeqParam = max - 1;
     }
     break;
   }
@@ -715,8 +723,8 @@ void SequencerEditor::removeRow()
       writeStepData(data); // only shrink if small enough
     }
     // make sure the cursor is in range
-    int rowsInStep = data.size();
-    if (currentStepRow >= rowsInStep) // sequencer->howManySteps(currentSequence))
+    const std::size_t rowsInStep = data.size();
+    if (rowsInStep > 0 && currentStepRow >= rowsInStep) // sequencer->howManySteps(currentSequence))
       currentStepRow = rowsInStep - 1;
     break;
   }
@@ -827,6 +835,11 @@ void SequencerEditor::decrementStepData(std::vector<std::vector<double>> &data, 
     decrement = 1;
     break;
   }
+  case SequenceType::chordMidi:
+  case SequenceType::samplePlayer:
+  {
+    break;
+  }
 
   case SequenceType::transposer: // up 1
   {
@@ -868,7 +881,6 @@ void SequencerEditor::decrementStepData(std::vector<std::vector<double>> &data, 
     break;
   }
   }
-  double now = data[0][targetIndex];
   data[0][targetIndex] -= decrement;
   if (data[0][targetIndex] < min)
     data[0][targetIndex] = min;
@@ -894,6 +906,11 @@ void SequencerEditor::incrementStepData(std::vector<std::vector<double>> &data, 
   case SequenceType::drumMidi: // octave adjust
   {
     increment = 1;
+    break;
+  }
+  case SequenceType::chordMidi:
+  case SequenceType::samplePlayer:
+  {
     break;
   }
   case SequenceType::transposer: // up 1
@@ -936,7 +953,6 @@ void SequencerEditor::incrementStepData(std::vector<std::vector<double>> &data, 
     break;
   }
   }
-  double now = data[0][targetIndex];
   data[0][targetIndex] += increment;
   if (data[0][targetIndex] > max)
     data[0][targetIndex] = max;
@@ -980,7 +996,7 @@ void SequencerEditor::incrementTicksPerStep()
   tps++;
   if (tps > 8)
     tps = 1;
-  sequencer->getSequence(currentSequence)->setTicksPerStep(tps);
+  sequencer->getSequence(currentSequence)->setTicksPerStep(static_cast<std::size_t>(tps));
 }
 void SequencerEditor::decrementTicksPerStep()
 {
@@ -988,7 +1004,7 @@ void SequencerEditor::decrementTicksPerStep()
   tps--;
   if (tps == 0)
     tps = 1;
-  sequencer->getSequence(currentSequence)->setTicksPerStep(tps);
+  sequencer->getSequence(currentSequence)->setTicksPerStep(static_cast<std::size_t>(tps));
 }
 
 void SequencerEditor::nextSequenceType(SequencerAbs *seqr, unsigned int sequence)
@@ -1002,9 +1018,10 @@ void SequencerEditor::nextSequenceType(SequencerAbs *seqr, unsigned int sequence
   case SequenceType::drumMidi:
     seqr->setSequenceType(sequence, SequenceType::transposer);
     break;
-    //  case SequenceType::chordMidi:
-    //   seqr->setSequenceType(sequence, SequenceType::transposer);
-    //   break;
+  case SequenceType::chordMidi:
+  case SequenceType::samplePlayer:
+    seqr->setSequenceType(sequence, SequenceType::transposer);
+    break;
   case SequenceType::transposer:
     seqr->setSequenceType(sequence, SequenceType::lengthChanger);
     break;
@@ -1042,15 +1059,26 @@ size_t SequencerEditor::getCurrentSeqParam() const
   return currentSeqParam;
 }
 
+double SequencerEditor::getCurrentOctave() const
+{
+  return octave; 
+}
+
 /** move the cursor to a specific sequence*/
 void SequencerEditor::setCurrentSequence(int seq)
 {
-  currentSequence = seq;
+  if (seq < 0)
+    currentSequence = 0;
+  else
+    currentSequence = static_cast<std::size_t>(seq);
 }
 /** move the cursor to a specific step*/
 void SequencerEditor::setCurrentStep(int step)
 {
-  currentStep = step;
+  if (step < 0)
+    currentStep = 0;
+  else
+    currentStep = static_cast<std::size_t>(step);
 }
 /** write the sent data to the current step and sequence */
 void SequencerEditor::writeStepData(std::vector<std::vector<double>> data)
@@ -1061,7 +1089,8 @@ void SequencerEditor::writeStepData(std::vector<std::vector<double>> data)
 void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
 {
   std::vector<std::vector<double>> stepData = {{0}};
-  for (int i = 0; i < sequencer->howManySteps(currentSequence); ++i)
+  const auto stepCount = sequencer->howManySteps(currentSequence);
+  for (std::size_t i = 0; i < stepCount; ++i)
   {
     stepData[0] = data[i % data.size()]; // wrap it around :)
     sequencer->setStepData(currentSequence, currentSequence, stepData);
@@ -1199,6 +1228,8 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
     st.midiHigh = static_cast<int>(playerObj->getProperty("midiHigh"));
     st.gain = static_cast<float>(double(playerObj->getProperty("gain")));
     st.isPlaying = static_cast<bool>(playerObj->getProperty("isPlaying"));
+    const auto vuVar = playerObj->getProperty("vuDb");
+    st.vuDb = vuVar.isVoid() ? -60.0f : static_cast<float>(double(vuVar));
     st.status = playerObj->getProperty("status").toString().toStdString();
     st.fileName = playerObj->getProperty("fileName").toString().toStdString();
     nextPlayers.push_back(st);
@@ -1217,10 +1248,8 @@ void SequencerEditor::refreshSamplerStateForCurrentSequence()
         break;
       }
     }
-    if (player.isPlaying)
-      glow = 1.0f;
-    else
-      glow *= 0.85f;
+    const float targetGlow = vuDbToGlow(player.vuDb);
+    glow = std::max(targetGlow, glow * 0.85f);
     if (glow < 0.02f)
       glow = 0.0f;
     nextGlow.push_back(glow);
@@ -1380,9 +1409,13 @@ void SequencerEditor::rebuildSamplerCells()
           cell.text = sanitizeLabel(juce::String(player.midiLow), 4);
           cell.onActivate = [this, col, row]()
           {
-            samplerEditMode = true;
-            samplerEditCol = col;
-            samplerEditRow = row;
+            // commented out because i don't need the lambda
+            // to do anything when they press 'return' on
+            // the SampleVale cells
+
+            // samplerEditMode = true;
+            // samplerEditCol = col;
+            // samplerEditRow = row;
           };
           cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
           {
@@ -1397,9 +1430,12 @@ void SequencerEditor::rebuildSamplerCells()
           cell.text = sanitizeLabel(juce::String(player.midiHigh), 4);
           cell.onActivate = [this, col, row]()
           {
-            samplerEditMode = true;
-            samplerEditCol = col;
-            samplerEditRow = row;
+            // commented out because i don't need the lambda
+            // to do anything when they press 'return' on
+            // the SampleVale cells
+            // samplerEditMode = true;
+            // samplerEditCol = col;
+            // samplerEditRow = row;
           };
           cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
           {
@@ -1414,9 +1450,9 @@ void SequencerEditor::rebuildSamplerCells()
           cell.text = formatGain(player.gain);
           cell.onActivate = [this, col, row]()
           {
-            samplerEditMode = true;
-            samplerEditCol = col;
-            samplerEditRow = row;
+            // samplerEditMode = true;
+            // samplerEditCol = col;
+            // samplerEditRow = row;
           };
           cell.onAdjust = [this, playerId, gain = player.gain](int direction)
           {

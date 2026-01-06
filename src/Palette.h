@@ -14,6 +14,7 @@ struct SamplerPalette
     juce::Colour textMuted { 0xFF6B7C8F };
     juce::Colour glowActive { 0xFFFF5533 };
     juce::Colour lightColor { 0xFFEAF6FF };
+    float glowDecayScalar = 0.4f;
     float ambientStrength = 0.32f;
     juce::Vector3D<float> lightDirection { 0.2f, 0.45f, 1.0f };
 };
@@ -32,6 +33,7 @@ struct TrackerPalette
     juce::Colour statusOk { 0xFF19FF6A };
     juce::Colour borderNeon { 0xFF0F5F4B };
     juce::Colour lightColor { 0xFFDDF6E8 };
+    float glowDecayScalar = 0.8f;
     float ambientStrength = 0.32f;
     juce::Vector3D<float> lightDirection { 0.2f, 0.45f, 1.0f };
 };

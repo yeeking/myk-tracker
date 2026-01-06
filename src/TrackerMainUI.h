@@ -56,7 +56,6 @@ public:
 private:
 
 // some variables to control the display style
-    const float glowDecayScalar{0.8f};
     // render sizes for cells and 
     const float cellWidth{2.0f};
     const float cellHeight{1.0f};

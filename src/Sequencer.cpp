@@ -2,6 +2,8 @@
 #include "MachineUtilsAbs.h"
 #include <sstream>
 #include <iomanip>
+#include <cmath>
+#include <limits>
 
 Step::Step() : rw_mutex{std::make_unique<std::shared_mutex>()}, active{true}
 
@@ -43,17 +45,23 @@ std::size_t Step::howManyDataCols() const
 std::string Step::toStringFlat() const
 {
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
-  if (this->data[0][Step::noteInd] == 0){
+  if (std::abs(this->data[0][Step::noteInd]) < std::numeric_limits<double>::epsilon()){
     return "----";
   }
   else {
     std::string disp = "";
-    std::size_t note = (int)this->data[0][Step::noteInd];
+    int noteInt = static_cast<int>(this->data[0][Step::noteInd]);
+    if (noteInt < 0)
+      noteInt = 0;
+    std::size_t note = static_cast<std::size_t>(noteInt);
     char nchar = MachineUtilsAbs::getIntToNoteMap()[note % 12];
     std::size_t oct = note / 12; 
     disp.push_back(nchar);
     disp += "-" + std::to_string(oct) + " ";
-    std::size_t power = (int)this->data[0][Step::velInd] / 32; 
+    int velInt = static_cast<int>(this->data[0][Step::velInd]);
+    if (velInt < 0)
+      velInt = 0;
+    std::size_t power = static_cast<std::size_t>(velInt / 32);
     for (std::size_t p=0;p<power;++p){
       disp += "+";
     }
@@ -148,7 +156,7 @@ void Step::setDataAt(std::size_t row, std::size_t col, double value)
   // apply data constraints based on current command
   if (col == Step::cmdInd)
   { // changing the command - only allowed a value 0->no. commands
-    std::size_t maxCmds = CommandProcessor::countCommands();
+    const std::size_t maxCmds = static_cast<std::size_t>(CommandProcessor::countCommands());
     if (value >= maxCmds)
       value = maxCmds - 1;
     if (value < 0)
@@ -186,9 +194,8 @@ void Step::trigger(std::size_t row, const SequenceReadOnly* sequenceContext)
   // std::cout << "Step::trigger" << std::endl;
   if (active)
   {
-    if (row > -1)
+    if (row < data.size())
     { // only trigger one row
-      assert(row < data.size());
       // note that the command decides if 
       // the data is valid and therefore, if it should do anything, not the step 
       CommandProcessor::executeCommand(data[row][Step::cmdInd], &data[row], sequenceContext);
@@ -227,14 +234,25 @@ std::string Step::dblToString(double val, std::size_t dps)
 Sequence::Sequence(Sequencer *_sequencer,
                    std::size_t seqLength,
                    unsigned short _machineId)
-    : sequencer{_sequencer}, currentStep{0},
-      machineId{static_cast<double>(_machineId)}, type{SequenceType::midiNote},
-      machineType{static_cast<double>(CommandType::MidiNote)}, triggerProbability{0.0},
-      transpose{0}, lengthAdjustment{0}, ticksPerStep{4}, originalTicksPerStep{4}, nextTicksPerStep{0}, ticksElapsed{0}, tickOfFour{0}, muted{false}, 
-      rw_mutex{std::make_unique<std::shared_mutex>()}, rewindAtNextZeroTick{false}
+    : sequencer{_sequencer},
+      currentLength{seqLength},
+      currentStep{0},
+      machineId{static_cast<double>(_machineId)},
+      type{SequenceType::midiNote},
+      machineType{static_cast<double>(CommandType::MidiNote)},
+      triggerProbability{0.0},
+      transpose{0},
+      lengthAdjustment{0},
+      ticksPerStep{4},
+      originalTicksPerStep{4},
+      nextTicksPerStep{0},
+      rewindAtNextZeroTick{false},
+      ticksElapsed{0},
+      tickOfFour{0},
+      muted{false},
+      rw_mutex{std::make_unique<std::shared_mutex>()}
 // , midiScaleToDrum{MachineUtilsAbs::getScaleMidiToDrumMidi()}
 {
-  currentLength = seqLength;
   for (std::size_t i = 0; i < seqLength; i++)
   {
     Step s;
@@ -254,7 +272,7 @@ void Sequence::tick(bool trigger)
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   
   ++ticksElapsed;
-  tickOfFour = ++tickOfFour % 4;
+  tickOfFour = (tickOfFour + 1) % 4;
   
   // jump to the top 
   if (rewindAtNextZeroTick && tickOfFour == 0){
@@ -286,13 +304,20 @@ void Sequence::tick(bool trigger)
       steps[currentStep].trigger(0, &context);
     }
 
-    if (currentLength + lengthAdjustment < 1)
+    const long long adjustedLength =
+        static_cast<long long>(currentLength) + static_cast<long long>(lengthAdjustment);
+    if (adjustedLength < 1)
+    {
       currentStep = 0;
+    }
     else
-      currentStep = (++currentStep) % (currentLength + lengthAdjustment);
+    {
+      const std::size_t lengthSize = static_cast<std::size_t>(adjustedLength);
+      currentStep = (currentStep + 1) % lengthSize;
+    }
     if (currentStep >= steps.size())
       currentStep = 0;
-    assert(currentStep >= 0 && currentStep < steps.size());
+    assert(currentStep < steps.size());
     // switch off any adjusters when we are at step 0
     if (currentStep == 0)
       deactivateProcessors();
@@ -372,7 +397,7 @@ std::size_t Sequence::getCurrentStep() const
 }
 bool Sequence::assertStep(std::size_t step) const
 {
-  if (step >= steps.size() || step < 0)
+  if (step >= steps.size())
     return false;
   return true;
 }
@@ -463,7 +488,9 @@ std::size_t Sequence::howManySteps() const
   //  case where length adjust is too high
   // if (currentLength + lengthAdjustment >= steps.size()) return currentLength;
 
-  return currentLength + lengthAdjustment > 0 ? currentLength + lengthAdjustment : 1;
+  const long long adjustedLength =
+      static_cast<long long>(currentLength) + static_cast<long long>(lengthAdjustment);
+  return adjustedLength > 0 ? static_cast<std::size_t>(adjustedLength) : 1u;
 }
 
 std::size_t Sequence::howManyStepDataRows(std::size_t step)
@@ -483,9 +510,9 @@ bool Sequence::isStepActive(std::size_t step) const
 {
   return steps[step].isActive();
 }
-void Sequence::setType(SequenceType type)
+void Sequence::setType(SequenceType _type)
 {
-  this->type = type;
+  this->type = _type;
 }
 SequenceType Sequence::getType() const
 {
@@ -544,9 +571,9 @@ SequenceReadOnly Sequence::getReadOnlyContext() const
   return SequenceReadOnly{triggerProbability, machineType, machineId};
 }
 
-void Sequence::setTranspose(double transpose)
+void Sequence::setTranspose(double _transpose)
 {
-  this->transpose = transpose;
+  this->transpose = _transpose;
 }
 
 std::string Sequence::stepToStringFlat(std::size_t step)
@@ -837,7 +864,7 @@ bool Sequencer::assertSequence(std::size_t sequence) const
 {
 // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
 
-  if (sequence >= sequences.size() || sequence < 0)
+  if (sequence >= sequences.size())
   {
     return false;
   }
@@ -924,8 +951,9 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
     Sequence* sequence = getSequence(seq);
     for (std::size_t paramIndex = 0; paramIndex < params.size(); ++paramIndex){
       Parameter& p = params[paramIndex];
+      const std::size_t decPlaces = p.decPlaces < 0 ? 0u : static_cast<std::size_t>(p.decPlaces);
       if (paramIndex == Sequence::machineIdConfig){
-        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getMachineId(), p.decPlaces));
+        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getMachineId(), decPlaces));
       }
       else if (paramIndex == Sequence::machineTypeConfig){
         Command cmd = CommandProcessor::getCommand(sequence->getMachineType());
@@ -935,7 +963,7 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
         confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequencerNextTicksPerStep(seq)));    
       }
       else if (paramIndex == Sequence::probConfig){
-        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getTriggerProbability(), p.decPlaces));
+        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getTriggerProbability(), decPlaces));
       }
     }
   }    
@@ -972,8 +1000,7 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
 
-  assert(paramIndex < getSeqConfigSpecs().size() &&
-         paramIndex >= 0);
+  assert(paramIndex < getSeqConfigSpecs().size());
   Parameter p = seqConfigSpecs[paramIndex];
   Sequence* sequence = getSequence(seq);
   if (paramIndex == Sequence::machineIdConfig){
@@ -1009,8 +1036,7 @@ void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex)
 {
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
 
-  assert(paramIndex < getSeqConfigSpecs().size() &&
-         paramIndex >= 0);
+  assert(paramIndex < getSeqConfigSpecs().size());
 
   Parameter p = seqConfigSpecs[paramIndex];
   Sequence* sequence = getSequence(seq);

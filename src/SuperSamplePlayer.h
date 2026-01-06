@@ -14,6 +14,7 @@ public:
         int midiHigh { 60 };  // default C4
         float gain { 1.0f };
         bool isPlaying { false };
+        float vuDb { -60.0f };
         juce::String status { "empty" };
         juce::String fileName;
         juce::String filePath;

@@ -357,8 +357,13 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
             {
                 for (auto& player : players)
                 {
-                    if (player->acceptsNote (note))
+                    if (player->acceptsNote (note)){
+                        DBG("Player playing a note " << note);
                         player->triggerNote (note);
+                    }
+                    else{
+                        DBG("Player rejects note " << note);
+                    }
                 }
             }
         }
@@ -375,21 +380,21 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
     for (auto& player : players)
         player->endBlock();
 
-    std::ostringstream vuBuilder;
-    vuBuilder.setf (std::ios::fixed);
-    vuBuilder.precision (2);
-    vuBuilder << "{\"dB_out\":[";
-    for (size_t i = 0; i < players.size(); ++i)
-    {
-        if (i > 0)
-            vuBuilder << ',';
-        vuBuilder << players[i]->getLastVuDb();
-    }
-    vuBuilder << "]}";
-    {
-        const juce::SpinLock::ScopedLockType guard (vuLock);
-        vuJson = vuBuilder.str();
-    }
+    // std::ostringstream vuBuilder;
+    // vuBuilder.setf (std::ios::fixed);
+    // vuBuilder.precision (2);
+    // vuBuilder << "{\"dB_out\":[";
+    // for (size_t i = 0; i < players.size(); ++i)
+    // {
+    //     if (i > 0)
+    //         vuBuilder << ',';
+    //     vuBuilder << players[i]->getLastVuDb();
+    // }
+    // vuBuilder << "]}";
+    // {
+    //     const juce::SpinLock::ScopedLockType guard (vuLock);
+    //     vuJson = vuBuilder.str();
+    // }
 }
 
 int SuperSamplerProcessor::addSamplePlayer()
@@ -428,6 +433,7 @@ juce::var SuperSamplerProcessor::toVar() const
         obj->setProperty ("midiHigh", st.midiHigh);
         obj->setProperty ("gain", st.gain);
         obj->setProperty ("isPlaying", st.isPlaying);
+        obj->setProperty ("vuDb", st.vuDb);
         obj->setProperty ("status", st.status);
         obj->setProperty ("fileName", st.fileName);
         obj->setProperty ("filePath", st.filePath);

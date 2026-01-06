@@ -4,13 +4,17 @@
 #include <string>
 #include <vector>
 
-#include "Sequencer.h"
 #include "UIBox.h"
 
+// todo: remove this and just include the juce header instead 
 namespace juce
 {
 class var;
 }
+
+class Sequence;
+enum class SequenceType;
+struct Parameter;
 
 // Interface for routing sampler actions from the editor to the host processor.
 class SamplerHost
@@ -25,6 +29,37 @@ public:
   virtual void samplerTrigger(std::size_t samplerIndex, int playerId) = 0;
   virtual void samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high) = 0;
   virtual void samplerSetGain(std::size_t samplerIndex, int playerId, float gain) = 0;
+};
+
+// Abstract interface for editor-facing sequencer access.
+class SequencerAbs{
+  public:
+    virtual ~SequencerAbs() = default;
+    /** armed (MIDI recording) channel will be set to this if nothing is armed */
+    const static std::size_t notArmed{4096};
+
+    virtual std::size_t howManySequences() const = 0;
+    virtual std::size_t howManySteps(std::size_t sequence) const = 0;
+    virtual std::size_t getCurrentStep(std::size_t sequence) const = 0;
+    virtual SequenceType getSequenceType(std::size_t sequence) const = 0;
+    virtual Sequence* getSequence(std::size_t sequence) = 0;
+    virtual void setSequenceType(std::size_t sequence, SequenceType type) = 0;
+    virtual void setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data) = 0;
+    virtual std::vector<std::vector<double>> getStepData(std::size_t sequence, std::size_t step) = 0;
+    virtual double getStepDataAt(std::size_t seq, std::size_t step, std::size_t row, std::size_t col) = 0;
+    virtual void setStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col, double value) = 0;
+    virtual void resetStepRow(std::size_t sequence, std::size_t step, std::size_t row) = 0;
+    virtual std::size_t howManyStepDataRows(std::size_t seq, std::size_t step) = 0;
+    virtual std::size_t howManyStepDataCols(std::size_t seq, std::size_t step) = 0;
+    virtual void setStepDataToDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
+    virtual void extendSequence(std::size_t sequence) = 0;
+    virtual void shrinkSequence(std::size_t sequence) = 0;
+    virtual void incrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
+    virtual void decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
+    virtual std::vector<Parameter>& getSeqConfigSpecs() = 0;
+    virtual void incrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
+    virtual void decrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
+    virtual void toggleStepActive(std::size_t sequence, std::size_t step) = 0;
 };
 
 /**
@@ -57,7 +92,7 @@ enum class SequencerEditorSubMode
 class SequencerEditor
 {
 public:
-  SequencerEditor(SequencerAbs *sequencer);
+  SequencerEditor(SequencerAbs *_sequencer);
   void setSequencer(SequencerAbs *sequencer);
   void setSamplerHost(SamplerHost *host);
   SequencerAbs *getSequencer();
@@ -166,6 +201,8 @@ public:
   size_t getCurrentStepCol() const;
   /** which seq param index are we editing? */
   size_t getCurrentSeqParam() const; 
+  /** returns the current edit octave */
+  double getCurrentOctave() const;
   /** move the cursor to a specific sequence*/
   void setCurrentSequence(int seq);
   /** move the cursor to a specific step*/
@@ -193,6 +230,7 @@ private:
     int midiHigh = 60;
     float gain = 1.0f;
     bool isPlaying = false;
+    float vuDb = -60.0f;
     std::string status;
     std::string fileName;
   };

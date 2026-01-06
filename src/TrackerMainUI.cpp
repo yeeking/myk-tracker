@@ -78,6 +78,7 @@ void TrackerMainUI::openGLContextClosing()
 //==============================================================================
 void TrackerMainUI::paint (juce::Graphics& g)
 {
+    juce::ignoreUnused(g);
     waitingForPaint = false; 
 }
 
@@ -428,6 +429,9 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
                 box = boxes[col][row];
 
             const float previousGlow = reuseGlow ? playheadGlow[displayCol][displayRow] : 0.0f;
+            const float glowDecayScalar = samplerViewActive
+                ? samplerPalette.glowDecayScalar
+                : palette.glowDecayScalar;
             const float glowValue = samplerViewActive
                 ? box.glow
                 : (box.isHighlighted ? 1.0f : std::max(0.0f, previousGlow * glowDecayScalar));
@@ -597,10 +601,64 @@ float TrackerMainUI::getSamplerCellDepthScale(const UIBox& cell) const
 
 bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
+    juce::ignoreUnused(originatingComponent);
+    // 
+    // space key always stops and starts.
+    if (key.isKeyCode(juce::KeyPress::spaceKey)){
+        CommandProcessor::sendAllNotesOff();
+        if (audioProcessor.getSequencer()->isPlaying()){
+            audioProcessor.getSequencer()->stop();
+        }
+        else{
+            audioProcessor.getSequencer()->rewindAtNextZero();
+            audioProcessor.getSequencer()->play();
+
+        }
+        return true; 
+    }
+
+    if (!audioProcessor.getSequencer()->isPlaying())
+    {
+        const char ch = static_cast<char>(key.getTextCharacter());
+        const std::map<char, double> key_to_note = MachineUtilsAbs::getKeyboardToMidiNotes(0);
+        const auto it = key_to_note.find(ch);
+        if (it != key_to_note.end())
+        {
+            const size_t seqIndex = seqEditor->getCurrentSequence();
+            const size_t stepIndex = seqEditor->getCurrentStep();
+            const size_t rowIndex = seqEditor->getCurrentStepRow();
+            if (Sequence* sequence = sequencer->getSequence(seqIndex))
+            {
+                auto data = sequence->getStepData(stepIndex);
+                if (!data.empty())
+                {
+                    const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
+                    if (data[safeRow].size() > Step::noteInd)
+                    {
+                        double note = it->second + (12 * seqEditor->getCurrentOctave());
+                        data[safeRow][Step::noteInd] = note;
+                        DBG("keypressed sending note " << note);
+                        const auto context = sequence->getReadOnlyContext();
+                        CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
+                    }
+                }
+            }
+            // also let the note go through to the sequence
+            // so do not return here.
+            // return true;
+        }
+    }
+
     if (seqEditor->getEditMode() == SequencerEditorMode::machineConfig)
     {
-        if (key.isKeyCode(juce::KeyPress::returnKey))
+        // if (key.isKeyCode(juce::KeyPress::returnKey))
+        // {
+        //     seqEditor->enterAtCursor();
+        //     return true;
+        // }
+        if (key == juce::KeyPress::escapeKey)
         {
+            // escape goes back to previous edit mode
             seqEditor->enterAtCursor();
             return true;
         }
@@ -609,11 +667,16 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
         if (machineType == CommandType::Sampler)
         {
-            if (key == juce::KeyPress::escapeKey)
-            {
-                seqEditor->samplerCancelEdit();
-                return true;
-            }
+            // if (key == juce::KeyPress::escapeKey)
+            // {
+            //     seqEditor->samplerCancelEdit();
+            //     return true;
+            // }
+            // if (key.isKeyCode(juce::KeyPress::returnKey))
+            // {
+
+            //     return true;
+            // }
 
             const char samplerKey = static_cast<char>(key.getTextCharacter());
             if (samplerKey == '=')
@@ -657,8 +720,10 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                 seqEditor->moveCursorDown();
                 return true;
             }
-            if (key.getKeyCode() == juce::KeyPress::spaceKey)
+            if (key.getKeyCode() == juce::KeyPress::returnKey)
             {
+                // return will trigger the button
+                // it its an add or play button
                 seqEditor->cycleAtCursor();
                 return true;
             }
@@ -675,17 +740,17 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             CommandProcessor::sendAllNotesOff();
             audioProcessor.getSequencer()->rewindAtNextZero();
             break;
-        case ' ':
-            CommandProcessor::sendAllNotesOff();
-            if (audioProcessor.getSequencer()->isPlaying()){
-                audioProcessor.getSequencer()->stop();
-            }
-            else{
-                audioProcessor.getSequencer()->rewindAtNextZero();
-                audioProcessor.getSequencer()->play();
+        // case ' ':
+        //     CommandProcessor::sendAllNotesOff();
+        //     if (audioProcessor.getSequencer()->isPlaying()){
+        //         audioProcessor.getSequencer()->stop();
+        //     }
+        //     else{
+        //         audioProcessor.getSequencer()->rewindAtNextZero();
+        //         audioProcessor.getSequencer()->play();
 
-            }
-            break;
+        //     }
+        //     break;
         case '\t':
             seqEditor->nextStep();
             break;
@@ -806,5 +871,7 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
 
 bool TrackerMainUI::keyStateChanged(bool isKeyDown, juce::Component* originatingComponent)
 {
+  juce::ignoreUnused(isKeyDown);
+  juce::ignoreUnused(originatingComponent);
   return false; 
 }

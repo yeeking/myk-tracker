@@ -9,14 +9,14 @@
 
 // Constructor definitions
 Parameter::Parameter(){}
-Parameter::Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol, int dps)
-    : name(name), shortName(shortName), min(min), max(max), step(step), defaultValue(defaultValue), stepCol{stepCol}, decPlaces{dps} {}
+Parameter::Parameter(const std::string& _name, const std::string& _shortName, double _min, double _max, double _step, double _defaultValue, int _stepCol, int _dps)
+    : name(_name), shortName(_shortName), min(_min), max(_max), step(_step), defaultValue(_defaultValue), stepCol{_stepCol}, decPlaces{_dps} {}
 
-Command::Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
-                 int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam,
-                 std::function<void(std::vector<double>*, const SequenceReadOnly*)> execute)
-    : name(name), shortName(shortName), description(description), parameters(parameters), 
-    noteEditGoesToParam{noteEditGoesToParam}, numberEditGoesToParam{numberEditGoesToParam}, lengthEditGoesToParam{lengthEditGoesToParam}, execute(std::move(execute)) {}
+Command::Command(const std::string& _name, const std::string& _shortName, const std::string& _description, const std::vector<Parameter>& _parameters,
+                 int _noteEditGoesToParam, int _numberEditGoesToParam, int _lengthEditGoesToParam,
+                 std::function<void(std::vector<double>*, const SequenceReadOnly*)> _execute)
+    : name(_name), shortName(_shortName), description(_description), parameters(_parameters), 
+    noteEditGoesToParam{_noteEditGoesToParam}, numberEditGoesToParam{_numberEditGoesToParam}, lengthEditGoesToParam{_lengthEditGoesToParam}, execute(std::move(_execute)) {}
 
 
 /** handy wrapper for generating random numbers */
@@ -98,7 +98,7 @@ void CommandProcessor::initialiseCommands() {
                     }
                     double random_number = RandomNumberGenerator::getRandomNumber();
                     if (random_number < triggerProbability){ 
-                        double now = CommandData::masterClock->getCurrentTick();
+                        // double now = CommandData::masterClock->getCurrentTick();
                         // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
                         CommandData::machineUtils->sendMessageToMachine(
                             static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),

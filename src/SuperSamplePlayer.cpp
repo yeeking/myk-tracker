@@ -33,6 +33,7 @@ std::vector<float> buildWaveformPoints(const juce::AudioBuffer<float>& buffer, i
         const int end = std::min(totalSamples, start + samplesPerPoint);
         float localMin = std::numeric_limits<float>::max();
         float localMax = std::numeric_limits<float>::lowest();
+        bool hasSample = false;
 
         for (int chan = 0; chan < buffer.getNumChannels(); ++chan)
         {
@@ -40,15 +41,17 @@ std::vector<float> buildWaveformPoints(const juce::AudioBuffer<float>& buffer, i
             for (int i = start; i < end; ++i)
             {
                 const float sample = data[i];
+                hasSample = true;
                 localMin = std::min(localMin, sample);
                 localMax = std::max(localMax, sample);
             }
         }
 
-        if (localMin == std::numeric_limits<float>::max())
+        if (!hasSample)
+        {
             localMin = 0.0f;
-        if (localMax == std::numeric_limits<float>::lowest())
             localMax = 0.0f;
+        }
 
         points.push_back(localMin);
         points.push_back(localMax);
@@ -94,7 +97,9 @@ void SuperSamplePlayer::setFilePathAndStatus (const juce::String& path, const ju
 
 SuperSamplePlayer::State SuperSamplePlayer::getState() const noexcept
 {
-    return state;
+    auto snapshot = state;
+    snapshot.vuDb = lastVuDb;
+    return snapshot;
 }
 
 bool SuperSamplePlayer::acceptsNote (int midiNote) const noexcept

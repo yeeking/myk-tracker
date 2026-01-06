@@ -28,7 +28,7 @@ struct Parameter {
     /** how many decimal places to display on the UI?*/
     int decPlaces;
     Parameter();
-    Parameter(const std::string& name, const std::string& shortName, double min, double max, double step, double defaultValue, int stepCol, int dps=0);
+    Parameter(const std::string& _name, const std::string& _shortName, double _min, double _max, double _step, double _defaultValue, int _stepCol, int _dps=0);
 };
 
 struct SequenceReadOnly {
@@ -54,9 +54,9 @@ struct Command {
     int lengthEditGoesToParam;
     std::function<void(std::vector<double>*, const SequenceReadOnly*)> execute;
     Command(){}
-    Command(const std::string& name, const std::string& shortName, const std::string& description, const std::vector<Parameter>& parameters,
-            int noteEditGoesToParam, int numberEditGoesToParam, int lengthEditGoesToParam,
-            std::function<void(std::vector<double>*, const SequenceReadOnly*)> execute);
+    Command(const std::string& _name, const std::string& _shortName, const std::string& _description, const std::vector<Parameter>& _parameters,
+            int _noteEditGoesToParam, int _numberEditGoesToParam, int _lengthEditGoesToParam,
+            std::function<void(std::vector<double>*, const SequenceReadOnly*)> _execute);
 };
 
 // Stable identifiers for command slots in CommandProcessor::commandsDouble.
