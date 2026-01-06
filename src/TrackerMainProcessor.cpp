@@ -7,11 +7,11 @@
   ==============================================================================
 */
 
-#include "PluginProcessor.h"
+#include "TrackerMainProcessor.h"
 #include "TrackerMainUI.h"
 
 //==============================================================================
-PluginProcessor::PluginProcessor()
+TrackerMainProcessor::TrackerMainProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
                      #if ! JucePlugin_IsMidiEffect
@@ -48,18 +48,18 @@ PluginProcessor::PluginProcessor()
   
 }
 
-PluginProcessor::~PluginProcessor()
+TrackerMainProcessor::~TrackerMainProcessor()
 {
 }
 
 
 //==============================================================================
-const juce::String PluginProcessor::getName() const
+const juce::String TrackerMainProcessor::getName() const
 {
     return JucePlugin_Name;
 }
 
-bool PluginProcessor::acceptsMidi() const
+bool TrackerMainProcessor::acceptsMidi() const
 {
    #if JucePlugin_WantsMidiInput
     return true;
@@ -68,7 +68,7 @@ bool PluginProcessor::acceptsMidi() const
    #endif
 }
 
-bool PluginProcessor::producesMidi() const
+bool TrackerMainProcessor::producesMidi() const
 {
    #if JucePlugin_ProducesMidiOutput
     return true;
@@ -77,7 +77,7 @@ bool PluginProcessor::producesMidi() const
    #endif
 }
 
-bool PluginProcessor::isMidiEffect() const
+bool TrackerMainProcessor::isMidiEffect() const
 {
    #if JucePlugin_IsMidiEffect
     return true;
@@ -86,37 +86,37 @@ bool PluginProcessor::isMidiEffect() const
    #endif
 }
 
-double PluginProcessor::getTailLengthSeconds() const
+double TrackerMainProcessor::getTailLengthSeconds() const
 {
     return 0.0;
 }
 
-int PluginProcessor::getNumPrograms()
+int TrackerMainProcessor::getNumPrograms()
 {
     return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
                 // so this should be at least 1, even if you're not really implementing programs.
 }
 
-int PluginProcessor::getCurrentProgram()
+int TrackerMainProcessor::getCurrentProgram()
 {
     return 0;
 }
 
-void PluginProcessor::setCurrentProgram (int index)
+void TrackerMainProcessor::setCurrentProgram (int index)
 {
 }
 
-const juce::String PluginProcessor::getProgramName (int index)
+const juce::String TrackerMainProcessor::getProgramName (int index)
 {
     return {};
 }
 
-void PluginProcessor::changeProgramName (int index, const juce::String& newName)
+void TrackerMainProcessor::changeProgramName (int index, const juce::String& newName)
 {
 }
 
 //==============================================================================
-void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
@@ -126,7 +126,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     }
 }
 
-void PluginProcessor::releaseResources()
+void TrackerMainProcessor::releaseResources()
 {
     // When playback stops, you can use this as an opportunity to free up any
     // spare memory, etc.
@@ -137,7 +137,7 @@ void PluginProcessor::releaseResources()
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
-bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool TrackerMainProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
   #if JucePlugin_IsMidiEffect
     juce::ignoreUnused (layouts);
@@ -162,7 +162,7 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 }
 #endif
 
-void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
     bool receivedMidi = false; 
@@ -303,24 +303,24 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 }
 
 //==============================================================================
-bool PluginProcessor::hasEditor() const
+bool TrackerMainProcessor::hasEditor() const
 {
     return true; // (change this to false if you choose to not supply an editor)
 }
 
-juce::AudioProcessorEditor* PluginProcessor::createEditor()
+juce::AudioProcessorEditor* TrackerMainProcessor::createEditor()
 {
     return new TrackerMainUI (*this);
 }
 
 //==============================================================================
-juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout TrackerMainProcessor::createParameterLayout()
 {
     // No traditional parameters yet – we just want the APVTS machinery for state persistence.
     return {};
 }
 
-void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
+void TrackerMainProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     const auto stateVar = serializeSequencerState();
     const auto json = juce::JSON::toString(stateVar);
@@ -331,7 +331,7 @@ void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
         xml->writeTo(stream);
 }
 
-void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
+void TrackerMainProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream input(data, static_cast<size_t>(sizeInBytes), false);
     if (auto xml = juce::parseXML(input.readEntireStreamAsString()))
@@ -349,7 +349,7 @@ void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
     }
 }
 
-juce::var PluginProcessor::stringGridToVar(const std::vector<std::vector<std::string>>& grid)
+juce::var TrackerMainProcessor::stringGridToVar(const std::vector<std::vector<std::string>>& grid)
 {
     juce::Array<juce::var> cols;
     for (const auto& col : grid)
@@ -361,7 +361,7 @@ juce::var PluginProcessor::stringGridToVar(const std::vector<std::vector<std::st
     }
     return cols;
 }
-juce::var PluginProcessor::numberGridToVar(const std::vector<std::vector<double>>& grid)
+juce::var TrackerMainProcessor::numberGridToVar(const std::vector<std::vector<double>>& grid)
 {
     juce::Array<juce::var> cols;
     for (const auto& col : grid)
@@ -374,7 +374,7 @@ juce::var PluginProcessor::numberGridToVar(const std::vector<std::vector<double>
     return cols;
 }
 
-juce::var PluginProcessor::getUiState()
+juce::var TrackerMainProcessor::getUiState()
 {
     // syncSequenceStrings();
     sequencer.updateSeqStringGrid();
@@ -438,7 +438,7 @@ juce::var PluginProcessor::getUiState()
     return state.get();
 }
 
-juce::var PluginProcessor::serializeSequencerState()
+juce::var TrackerMainProcessor::serializeSequencerState()
 {
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
     auto sequencerToVar = [this]() {
@@ -516,7 +516,7 @@ juce::var PluginProcessor::serializeSequencerState()
     return root.get();
 }
 
-void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
+void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
 {
     if (!stateVar.isObject())
         return;
@@ -687,30 +687,30 @@ void PluginProcessor::restoreSequencerState(const juce::var& stateVar)
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new PluginProcessor();
+    return new TrackerMainProcessor();
 }
 
-Sequencer* PluginProcessor::getSequencer()
+Sequencer* TrackerMainProcessor::getSequencer()
 {
     return &sequencer;
 }
 
-SequencerEditor* PluginProcessor::getSequenceEditor()
+SequencerEditor* TrackerMainProcessor::getSequenceEditor()
 {
     return &seqEditor;
 }
 
-TrackerController* PluginProcessor::getTrackerController()
+TrackerController* TrackerMainProcessor::getTrackerController()
 {
     return &trackerController;
 }
 
-std::size_t PluginProcessor::getSamplerCount() const
+std::size_t TrackerMainProcessor::getSamplerCount() const
 {
     return samplers.size();
 }
 
-juce::var PluginProcessor::getSamplerState(std::size_t samplerIndex) const
+juce::var TrackerMainProcessor::getSamplerState(std::size_t samplerIndex) const
 {
     const auto* sampler = getSamplerForIndex(samplerIndex);
     if (sampler == nullptr)
@@ -718,37 +718,37 @@ juce::var PluginProcessor::getSamplerState(std::size_t samplerIndex) const
     return sampler->getSamplerState();
 }
 
-void PluginProcessor::samplerAddPlayer(std::size_t samplerIndex)
+void TrackerMainProcessor::samplerAddPlayer(std::size_t samplerIndex)
 {
     if (auto* sampler = getSamplerForIndex(samplerIndex))
         sampler->addSamplePlayerFromWeb();
 }
 
-void PluginProcessor::samplerRemovePlayer(std::size_t samplerIndex, int playerId)
+void TrackerMainProcessor::samplerRemovePlayer(std::size_t samplerIndex, int playerId)
 {
     if (auto* sampler = getSamplerForIndex(samplerIndex))
         sampler->removeSamplePlayer(playerId);
 }
 
-void PluginProcessor::samplerRequestLoad(std::size_t samplerIndex, int playerId)
+void TrackerMainProcessor::samplerRequestLoad(std::size_t samplerIndex, int playerId)
 {
     if (auto* sampler = getSamplerForIndex(samplerIndex))
         sampler->requestSampleLoadFromWeb(playerId);
 }
 
-void PluginProcessor::samplerTrigger(std::size_t samplerIndex, int playerId)
+void TrackerMainProcessor::samplerTrigger(std::size_t samplerIndex, int playerId)
 {
     if (auto* sampler = getSamplerForIndex(samplerIndex))
         sampler->triggerFromWeb(playerId);
 }
 
-void PluginProcessor::samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high)
+void TrackerMainProcessor::samplerSetRange(std::size_t samplerIndex, int playerId, int low, int high)
 {
     if (auto* sampler = getSamplerForIndex(samplerIndex))
         sampler->setSampleRangeFromWeb(playerId, low, high);
 }
 
-void PluginProcessor::samplerSetGain(std::size_t samplerIndex, int playerId, float gain)
+void TrackerMainProcessor::samplerSetGain(std::size_t samplerIndex, int playerId, float gain)
 {
     if (auto* sampler = getSamplerForIndex(samplerIndex))
         sampler->setGainFromUI(playerId, gain);
@@ -756,7 +756,7 @@ void PluginProcessor::samplerSetGain(std::size_t samplerIndex, int playerId, flo
 
 ////////////// MIDIUtils interface 
 
-void PluginProcessor::allNotesOff()
+void TrackerMainProcessor::allNotesOff()
 {
     midiToSend.clear();// remove anything that's hanging around. 
     midiToSendToSampler.clear();
@@ -765,7 +765,7 @@ void PluginProcessor::allNotesOff()
         midiToSendToSampler.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
 }
-void PluginProcessor::sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks)
+void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks)
 {
     juce::MidiBuffer* targetBuffer = &midiToSend;
     if (machineType == CommandType::Sampler)
@@ -784,7 +784,7 @@ void PluginProcessor::sendMessageToMachine(CommandType machineType, unsigned sho
     // assert()
     outstandingNoteOffs ++ ;
 }
-void PluginProcessor::sendQueuedMessages(long tick)
+void TrackerMainProcessor::sendQueuedMessages(long tick)
 {
     // this is blank as midi gets sent by moving it from midiToSend to the processBlock's midi buffer
 
@@ -793,7 +793,7 @@ void PluginProcessor::sendQueuedMessages(long tick)
 ////////////// end MIDIUtils interface 
 
 
-void PluginProcessor::setBPM(double _bpm)
+void TrackerMainProcessor::setBPM(double _bpm)
 {   
     assert(_bpm > 0);
     // update tick interval in samples 
@@ -801,26 +801,26 @@ void PluginProcessor::setBPM(double _bpm)
     bpm.store(_bpm, std::memory_order_relaxed);
 }
 
-double PluginProcessor::getBPM()
+double TrackerMainProcessor::getBPM()
 {
     return bpm.load(std::memory_order_relaxed);
 }
 
 
-void PluginProcessor::clearPendingEvents()
+void TrackerMainProcessor::clearPendingEvents()
 {
     midiToSend.clear();
     midiToSendToSampler.clear();
 }
 
-SuperSamplerProcessor* PluginProcessor::getSamplerForIndex(std::size_t samplerIndex)
+SuperSamplerProcessor* TrackerMainProcessor::getSamplerForIndex(std::size_t samplerIndex)
 {
     if (samplerIndex >= samplers.size())
         return nullptr;
     return samplers[samplerIndex].get();
 }
 
-const SuperSamplerProcessor* PluginProcessor::getSamplerForIndex(std::size_t samplerIndex) const
+const SuperSamplerProcessor* TrackerMainProcessor::getSamplerForIndex(std::size_t samplerIndex) const
 {
     if (samplerIndex >= samplers.size())
         return nullptr;

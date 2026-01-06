@@ -9,7 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "PluginProcessor.h"
+#include "TrackerMainProcessor.h"
 // #include "StringTable.h"
 #include "Sequencer.h"
 #include "SequencerEditor.h"
@@ -28,7 +28,7 @@ class TrackerMainUI  : public juce::AudioProcessorEditor,
 
 {
 public:
-    TrackerMainUI (PluginProcessor&);
+    TrackerMainUI (TrackerMainProcessor&);
     ~TrackerMainUI() override;
 
     //==============================================================================
@@ -61,7 +61,7 @@ private:
     const float cellWidth{2.0f};
     const float cellHeight{1.0f};
     
-    PluginProcessor& audioProcessor;
+    TrackerMainProcessor& audioProcessor;
 
     // StringTable controlPanelTable;
     Sequencer* sequencer; 

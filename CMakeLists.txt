@@ -34,7 +34,7 @@ juce_generate_juce_header(myk-tracker-plug)
 target_sources(myk-tracker-plug
     PRIVATE
     src/TrackerMainUI.cpp
-    src/PluginProcessor.cpp
+    src/TrackerMainProcessor.cpp
     # src/StringTable.cpp
     src/TrackerUIComponent.cpp
 src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp

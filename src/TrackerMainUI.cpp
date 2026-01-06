@@ -6,7 +6,7 @@
   ==============================================================================
 */
 
-#include "PluginProcessor.h"
+#include "TrackerMainProcessor.h"
 #include "TrackerMainUI.h"
 #include "SequencerCommands.h"
 // #include "SimpleClock.h"
@@ -14,7 +14,7 @@
 #include <cmath>
 
 //==============================================================================
-TrackerMainUI::TrackerMainUI (PluginProcessor& p)
+TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
     : AudioProcessorEditor (&p),
     framesDrawn{0},
     audioProcessor (p),

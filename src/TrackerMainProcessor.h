@@ -26,7 +26,7 @@
 /**
 */
 // Main plugin processor that owns the sequencer, samplers, and timing.
-class PluginProcessor  :    public MachineUtilsAbs, 
+class TrackerMainProcessor  :    public MachineUtilsAbs, 
                             public ClockAbs, 
                             public juce::AudioProcessor, 
                             public juce::ChangeBroadcaster,
@@ -38,8 +38,8 @@ class PluginProcessor  :    public MachineUtilsAbs,
 {
 public:
     //==============================================================================
-    PluginProcessor();
-    ~PluginProcessor() override;
+    TrackerMainProcessor();
+    ~TrackerMainProcessor() override;
 
     // the MachineUtils interface 
     void allNotesOff() override;
@@ -135,5 +135,5 @@ private:
     SuperSamplerProcessor* getSamplerForIndex(std::size_t samplerIndex);
     const SuperSamplerProcessor* getSamplerForIndex(std::size_t samplerIndex) const;
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackerMainProcessor)
 };
