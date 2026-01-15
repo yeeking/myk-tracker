@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <vector>
 
 #include "MachineInterface.h"
@@ -40,6 +41,7 @@ private:
     int recordHead = 0;
     int playHead = -1;
     std::vector<NoteSlot> slots;
+    mutable std::mutex stateMutex;
 
     void clampLength();
     static std::string formatNote(int midiNote);

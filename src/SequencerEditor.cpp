@@ -777,7 +777,7 @@ SequencerEditorSubMode SequencerEditor::cycleSubModeRight(SequencerEditorSubMode
 void SequencerEditor::decrementStepData(std::vector<std::vector<double>> &data, SequenceType seqType)
 {
   double decrement{0};
-  double targetIndex{Step::noteInd};
+  std::size_t targetIndex{Step::noteInd};
   double min{0};
 
   // figure out the increment
@@ -850,7 +850,7 @@ void SequencerEditor::decrementStepData(std::vector<std::vector<double>> &data, 
 void SequencerEditor::incrementStepData(std::vector<std::vector<double>> &data, SequenceType seqType)
 {
   double increment{0};
-  double targetIndex{Step::noteInd};
+  std::size_t targetIndex{Step::noteInd};
   double max{127};
 
   // figure out the increment
@@ -950,19 +950,21 @@ void SequencerEditor::decrementChannel()
 
 void SequencerEditor::incrementTicksPerStep()
 {
-  int tps = sequencer->getSequence(currentSequence)->getTicksPerStep();
-  tps++;
-  if (tps > 8)
+  std::size_t tps = sequencer->getSequence(currentSequence)->getTicksPerStep();
+  if (tps >= 8)
     tps = 1;
-  sequencer->getSequence(currentSequence)->setTicksPerStep(static_cast<std::size_t>(tps));
+  else
+    ++tps;
+  sequencer->getSequence(currentSequence)->setTicksPerStep(tps);
 }
 void SequencerEditor::decrementTicksPerStep()
 {
-  int tps = sequencer->getSequence(currentSequence)->getTicksPerStep();
-  tps--;
-  if (tps == 0)
+  std::size_t tps = sequencer->getSequence(currentSequence)->getTicksPerStep();
+  if (tps <= 1)
     tps = 1;
-  sequencer->getSequence(currentSequence)->setTicksPerStep(static_cast<std::size_t>(tps));
+  else
+    --tps;
+  sequencer->getSequence(currentSequence)->setTicksPerStep(tps);
 }
 
 void SequencerEditor::nextSequenceType(SequencerAbs *seqr, unsigned int sequence)

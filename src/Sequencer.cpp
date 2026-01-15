@@ -1,5 +1,6 @@
 #include "Sequencer.h"
 #include "MachineUtilsAbs.h"
+#include <algorithm>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -226,7 +227,7 @@ std::string Step::dblToString(double val, std::size_t dps)
 {
   // quite verbose C++ way to make a string of a double with 2sf
   std::ostringstream oss;
-  oss << std::fixed << std::setprecision(dps) << val;
+  oss << std::fixed << std::setprecision(static_cast<int>(dps)) << val;
   return oss.str();
 }
 
@@ -350,7 +351,9 @@ void Sequence::setLengthAdjustment(std::size_t lenAdjust)
 {
   // make sure we have enough steps
   this->ensureEnoughStepsForLength(currentLength + lenAdjust);
-  this->lengthAdjustment = lenAdjust;
+  const auto clamped = std::min<std::size_t>(lenAdjust,
+                                             static_cast<std::size_t>(std::numeric_limits<int>::max()));
+  this->lengthAdjustment = static_cast<int>(clamped);
 }
 
 void Sequence::setTicksPerStep(std::size_t tps)
@@ -708,17 +711,22 @@ std::size_t Sequencer::getSequencerNextTicksPerStep(std::size_t sequence) const
 /** move the sequencer along by one tick */
 void Sequencer::tick()
 {
-  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-
-  if (!playing) return; 
-  for (Sequence &seq : sequences)
+  bool updateStrings = false;
   {
-    seq.tick(triggerOnTick);
+    std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
+    updateStrings = stringUpdateRequested;
+    stringUpdateRequested = false;
+    if (playing)
+    {
+      for (Sequence &seq : sequences)
+      {
+        seq.tick(triggerOnTick);
+      }
+    }
   }
-  if (this->stringUpdateRequested){
-    this->updateSeqStringGrid();
-    stringUpdateRequested = false; 
-  }
+  if (updateStrings)
+    updateSeqStringGrid();
 }
 
 void Sequencer::triggerStep(std::size_t seq, std::size_t step, std::size_t row)
@@ -1025,10 +1033,11 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
     sequence->setTriggerProbability(val);
   }
   if (paramIndex == Sequence::tpsConfig){
-    std::size_t tps = sequences[seq].getTicksPerStep();
+    double tps = static_cast<double>(sequences[seq].getTicksPerStep());
     tps += p.step;
     if (tps > p.max) tps = p.max;
-    sequences[seq].onZeroSetTicksPerStep(tps);
+    if (tps < p.min) tps = p.min;
+    sequences[seq].onZeroSetTicksPerStep(static_cast<std::size_t>(tps));
   }
 
 }
@@ -1062,10 +1071,11 @@ void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex)
     sequence->setTriggerProbability(val);
   }
   if (paramIndex == Sequence::tpsConfig){
-    std::size_t tps = sequences[seq].getTicksPerStep();
+    double tps = static_cast<double>(sequences[seq].getTicksPerStep());
     tps -= p.step;
     if (tps < p.min) tps = p.min;
-    sequences[seq].onZeroSetTicksPerStep(tps);
+    if (tps > p.max) tps = p.max;
+    sequences[seq].onZeroSetTicksPerStep(static_cast<std::size_t>(tps));
   }
 }
 
@@ -1151,5 +1161,6 @@ void Sequencer::rewindAtNextZero()
 
 void Sequencer::requestStrUpdate()
 {
-  this->stringUpdateRequested = true; 
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  this->stringUpdateRequested = true;
 }

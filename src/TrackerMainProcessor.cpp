@@ -181,6 +181,8 @@ bool TrackerMainProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 
 void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
+    processing.store(true, std::memory_order_release);
+    std::lock_guard<std::mutex> audioLock(audioMutex);
     juce::ScopedNoDenormals noDenormals;
     bool receivedMidi = false; 
     for (const MidiMessageMetadata metadata : midiMessages){
@@ -413,6 +415,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         arp->processBlock(buffer, emptyMidi);
     }
+    processing.store(false, std::memory_order_release);
 }
 
 //==============================================================================
@@ -435,31 +438,37 @@ juce::AudioProcessorValueTreeState::ParameterLayout TrackerMainProcessor::create
 
 void TrackerMainProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    const auto stateVar = serializeSequencerState();
-    const auto json = juce::JSON::toString(stateVar);
-    apvts.state.setProperty("json", json, nullptr);
+    withAudioThreadExclusive([&]()
+    {
+        const auto stateVar = serializeSequencerState();
+        const auto json = juce::JSON::toString(stateVar);
+        apvts.state.setProperty("json", json, nullptr);
 
-    juce::MemoryOutputStream stream(destData, true);
-    if (auto xml = apvts.copyState().createXml())
-        xml->writeTo(stream);
+        juce::MemoryOutputStream stream(destData, true);
+        if (auto xml = apvts.copyState().createXml())
+            xml->writeTo(stream);
+    });
 }
 
 void TrackerMainProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    juce::MemoryInputStream input(data, static_cast<size_t>(sizeInBytes), false);
-    if (auto xml = juce::parseXML(input.readEntireStreamAsString()))
+    withAudioThreadExclusive([&]()
     {
-        auto vt = juce::ValueTree::fromXml(*xml);
-        if (vt.isValid())
-            apvts.replaceState(vt);
-    }
+        juce::MemoryInputStream input(data, static_cast<size_t>(sizeInBytes), false);
+        if (auto xml = juce::parseXML(input.readEntireStreamAsString()))
+        {
+            auto vt = juce::ValueTree::fromXml(*xml);
+            if (vt.isValid())
+                apvts.replaceState(vt);
+        }
 
-    const juce::String json = apvts.state.getProperty("json").toString();
-    if (json.isNotEmpty())
-    {
-        const auto parsed = juce::JSON::fromString(json);
-        restoreSequencerState(parsed);
-    }
+        const juce::String json = apvts.state.getProperty("json").toString();
+        if (json.isNotEmpty())
+        {
+            const auto parsed = juce::JSON::fromString(json);
+            restoreSequencerState(parsed);
+        }
+    });
 }
 
 juce::var TrackerMainProcessor::stringGridToVar(const std::vector<std::vector<std::string>>& grid)
@@ -960,7 +969,8 @@ void TrackerMainProcessor::setBPM(double _bpm)
 {   
     assert(_bpm > 0);
     // update tick interval in samples 
-    samplesPerTick = getSampleRate() *  (60/_bpm) /8;
+    samplesPerTick = static_cast<unsigned int>(
+        std::lround(getSampleRate() * (60.0 / _bpm) / 8.0));
     bpm.store(_bpm, std::memory_order_relaxed);
 }
 

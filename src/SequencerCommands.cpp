@@ -274,7 +274,7 @@ int CommandProcessor::countCommands()
     if (CommandData::commands.size() == 0){
         CommandProcessor::initialiseCommands();
     }
-    return CommandData::commands.size();
+    return static_cast<int>(CommandData::commands.size());
 }
 
 void CommandProcessor::assignMachineUtils(MachineUtilsAbs* _machineUtils)

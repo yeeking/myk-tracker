@@ -33,6 +33,7 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
 {
     juce::ignoreUnused(context);
 
+    const std::lock_guard<std::mutex> lock(stateMutex);
     clampLength();
 
     const std::size_t rows = 2;
@@ -73,6 +74,7 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
             controlCell.isArmed = recordEnabled;
             controlCell.onActivate = [this]()
             {
+                const std::lock_guard<std::mutex> guard(stateMutex);
                 recordEnabled = !recordEnabled;
             };
         }
@@ -87,6 +89,7 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
             controlCell.text = std::to_string(length);
             controlCell.onAdjust = [this](int direction)
             {
+                const std::lock_guard<std::mutex> guard(stateMutex);
                 length = juce::jlimit(1, kMaxLength, length + direction);
                 clampLength();
             };
@@ -108,6 +111,7 @@ bool ArpeggiatorMachine::handleIncomingNote(unsigned short note,
                                             unsigned short durationTicks,
                                             MachineNoteEvent& outEvent)
 {
+    const std::lock_guard<std::mutex> lock(stateMutex);
     clampLength();
     if (length <= 0)
         return false;
@@ -135,6 +139,7 @@ bool ArpeggiatorMachine::handleIncomingNote(unsigned short note,
 
 void ArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
 {
+    const std::lock_guard<std::mutex> lock(stateMutex);
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
     root->setProperty("version", kStateVersion);
     root->setProperty("length", length);
@@ -165,6 +170,7 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
     if (data == nullptr || sizeInBytes <= 0)
         return;
 
+    const std::lock_guard<std::mutex> lock(stateMutex);
     juce::String json(static_cast<const char*>(data), static_cast<size_t>(sizeInBytes));
     const auto parsed = juce::JSON::fromString(json);
     if (!parsed.isObject())

@@ -10,8 +10,10 @@
 
 #include <JuceHeader.h>
 #include <atomic>
-#include <atomic>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <type_traits>
 #include <vector>
 
 #include "MachineUtilsAbs.h"
@@ -96,6 +98,30 @@ public:
     std::size_t getMachineCount(CommandType type) const override;
     MachineInterface* getMachine(CommandType type, std::size_t index) override;
     const MachineInterface* getMachine(CommandType type, std::size_t index) const override;
+
+    template <typename Fn>
+    auto withAudioThreadExclusive(Fn&& fn) -> decltype(fn())
+    {
+        using ReturnType = decltype(fn());
+        for (;;)
+        {
+            while (processing.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            std::unique_lock<std::mutex> lock(audioMutex);
+            if (!processing.load(std::memory_order_acquire))
+            {
+                if constexpr (std::is_void_v<ReturnType>)
+                {
+                    fn();
+                    return;
+                }
+                else
+                {
+                    return fn();
+                }
+            }
+        }
+    }
     
 private:
     Sequencer sequencer;
@@ -109,6 +135,8 @@ private:
     juce::MidiBuffer midiToSendToSampler;
     std::vector<std::unique_ptr<MachineInterface>> samplers;
     std::vector<std::unique_ptr<ArpeggiatorMachine>> arpeggiators;
+    std::mutex audioMutex;
+    std::atomic<bool> processing { false };
 
 
     // unsigned long elapsedSamples;

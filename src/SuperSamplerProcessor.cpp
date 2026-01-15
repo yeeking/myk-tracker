@@ -551,7 +551,7 @@ void SuperSamplerProcessor::sendSamplerStateToUI()
 {
     // DBG("sendSamplerStateToUI");
     auto payload = toVar();
-    juce::MessageManager::callAsync ([this, payload]()
+    juce::MessageManager::callAsync ([payload]()
     {
         // if (auto* editor = dynamic_cast<SuperSamplerEditor*> (getActiveEditor()))
             // editor->updateUIFromProcessor (payload);
@@ -588,7 +588,7 @@ void SuperSamplerProcessor::broadcastMessage (const juce::String& msg)
     obj->setProperty ("msg", msg);
     juce::var payload (obj);
 
-    juce::MessageManager::callAsync ([this, payload]()
+    juce::MessageManager::callAsync ([payload]()
     {
         // if (auto* editor = dynamic_cast<SuperSamplerEditor*> (getActiveEditor()))
             // editor->updateUIFromProcessor (payload);
@@ -723,9 +723,9 @@ void SuperSamplerProcessor::loadSampleAsync (int playerId, const juce::File& fil
 
         if (cb != nullptr)
         {
-            juce::MessageManager::callAsync ([cb = std::move (cb), ok, error]() mutable
+            juce::MessageManager::callAsync ([cbLocal = std::move (cb), ok, error]() mutable
             {
-                cb (ok, error);
+                cbLocal (ok, error);
             });
         }
     }).detach();

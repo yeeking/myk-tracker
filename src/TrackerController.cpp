@@ -20,7 +20,8 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
     
     // add the info about the current if editing a step 
     if (seqEditor->getEditMode() == SequencerEditorMode::editingStep){
-        int rowsInStep = sequencer->howManyStepDataRows(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        std::size_t rowsInStep = sequencer->howManyStepDataRows(seqEditor->getCurrentSequence(),
+                                                                seqEditor->getCurrentStep());
         cursorStatus += ":" + std::to_string(seqEditor->getCurrentStepRow()) + "[" + std::to_string(rowsInStep) + "]";
     }
 

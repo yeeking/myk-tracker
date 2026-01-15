@@ -12,15 +12,14 @@
 // #include "SimpleClock.h"
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 //==============================================================================
 TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
     : AudioProcessorEditor (&p),
     framesDrawn{0},
     audioProcessor (p),
-    sequencer{p.getSequencer()},
     seqEditor{p.getSequenceEditor()},
-    trackerController{p.getTrackerController()},
     uiComponent(openGLContext),
     rowsInUI{9},
     waitingForPaint{false},
@@ -65,7 +64,9 @@ void TrackerMainUI::newOpenGLContextCreated()
 
 void TrackerMainUI::renderOpenGL()
 {
-    uiComponent.setViewportBounds(seqViewBounds, getHeight(), openGLContext.getRenderingScale());
+    uiComponent.setViewportBounds(seqViewBounds,
+                                  getHeight(),
+                                  static_cast<float>(openGLContext.getRenderingScale()));
     uiComponent.renderUI();
     waitingForPaint = false;
 }
@@ -100,7 +101,12 @@ void TrackerMainUI::timerCallback ()
   prepareControlPanelView();  
   // check what to draw based on the state of the 
   // editor
-  switch(seqEditor->getEditMode()){
+  SequencerEditorMode editMode = SequencerEditorMode::selectingSeqAndStep;
+  audioProcessor.withAudioThreadExclusive([&]()
+  {
+      editMode = seqEditor->getEditMode();
+  });
+  switch(editMode){
 
       case SequencerEditorMode::selectingSeqAndStep:
       {
@@ -123,7 +129,7 @@ void TrackerMainUI::timerCallback ()
           break;
       }
   }
-    if (seqEditor->getEditMode() != SequencerEditorMode::machineConfig)
+    if (editMode != SequencerEditorMode::machineConfig)
     {
       const double bpmValue = audioProcessor.getBPM();
       const int bpmInt = static_cast<int>(std::lround(bpmValue));
@@ -153,7 +159,10 @@ void TrackerMainUI::timerCallback ()
 
   waitingForPaint = true; 
   if (updateSeqStrOnNextDraw || framesDrawn % 60 == 0){
-    sequencer->updateSeqStringGrid();
+    audioProcessor.withAudioThreadExclusive([&]()
+    {
+        audioProcessor.getSequencer()->requestStrUpdate();
+    });
     updateSeqStrOnNextDraw = false; 
   }
   openGLContext.triggerRepaint();
@@ -173,18 +182,33 @@ void TrackerMainUI::prepareSequenceView()
   style.lightDirection = palette.lightDirection;
   uiComponent.setStyle(style);
   uiComponent.setCellSize(cellWidth, cellHeight);
-  // sequencer->tick();
   std::vector<std::pair<int, int>> playHeads;
-  for (size_t col=0;col<audioProcessor.getSequencer()->howManySequences(); ++col){  
-    std::pair<int, int> colRow = {col, audioProcessor.getSequencer()->getCurrentStep(col)};
-    playHeads.push_back(std::move(colRow));
-  }
-  const auto boxes = buildBoxesFromGrid(audioProcessor.getSequencer()->getSequenceAsGridOfStrings(),
-                                        seqEditor->getCurrentSequence(),
-                                        seqEditor->getCurrentStep(),
+  std::vector<std::vector<std::string>> grid;
+  size_t currentSequence = 0;
+  size_t currentStep = 0;
+  size_t armedSequence = SequencerAbs::notArmed;
+  audioProcessor.withAudioThreadExclusive([&]()
+  {
+      currentSequence = seqEditor->getCurrentSequence();
+      currentStep = seqEditor->getCurrentStep();
+      armedSequence = seqEditor->getArmedSequence();
+      auto* seq = audioProcessor.getSequencer();
+      const size_t sequenceCount = seq->howManySequences();
+      playHeads.clear();
+      playHeads.reserve(sequenceCount);
+      for (size_t col = 0; col < sequenceCount; ++col)
+      {
+          playHeads.emplace_back(static_cast<int>(col),
+                                 static_cast<int>(seq->getCurrentStep(col)));
+      }
+      grid = seq->getSequenceAsGridOfStrings();
+  });
+  const auto boxes = buildBoxesFromGrid(grid,
+                                        currentSequence,
+                                        currentStep,
                                         playHeads,
                                         true,
-                                        seqEditor->getArmedSequence());
+                                        armedSequence);
   updateCellStates(boxes, rowsInUI - 1, 6);
 }
 void TrackerMainUI::prepareStepView()
@@ -202,16 +226,31 @@ void TrackerMainUI::prepareStepView()
     // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
     // std::vector<std::vector<std::string>> grid = step->toStringGrid();
     std::vector<std::pair<int, int>> playHeads;
-    if (sequencer->getCurrentStep(seqEditor->getCurrentSequence()) == seqEditor->getCurrentStep()){
-        int cols = static_cast<int>(sequencer->howManyStepDataCols(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep()));
-        for (int col=0;col<cols;++col){
-            playHeads.push_back(std::pair(col, 0));
+    std::vector<std::vector<std::string>> grid;
+    size_t currentSequence = 0;
+    size_t currentStep = 0;
+    size_t currentStepCol = 0;
+    size_t currentStepRow = 0;
+    audioProcessor.withAudioThreadExclusive([&]()
+    {
+        currentSequence = seqEditor->getCurrentSequence();
+        currentStep = seqEditor->getCurrentStep();
+        currentStepCol = seqEditor->getCurrentStepCol();
+        currentStepRow = seqEditor->getCurrentStepRow();
+        auto* seq = audioProcessor.getSequencer();
+        if (seq->getCurrentStep(currentSequence) == currentStep)
+        {
+            const int cols = static_cast<int>(seq->howManyStepDataCols(currentSequence, currentStep));
+            playHeads.clear();
+            playHeads.reserve(static_cast<size_t>(cols));
+            for (int col = 0; col < cols; ++col)
+                playHeads.emplace_back(col, 0);
         }
-    }
-    std::vector<std::vector<std::string>> grid = sequencer->getStepAsGridOfStrings(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
+        grid = seq->getStepAsGridOfStrings(currentSequence, currentStep);
+    });
     const auto boxes = buildBoxesFromGrid(grid,
-                                          seqEditor->getCurrentStepCol(),
-                                          seqEditor->getCurrentStepRow(),
+                                          currentStepCol,
+                                          currentStepRow,
                                           playHeads,
                                           true,
                                           Sequencer::notArmed);
@@ -229,10 +268,18 @@ void TrackerMainUI::prepareSeqConfigView()
     style.lightDirection = palette.lightDirection;
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
-    std::vector<std::vector<std::string>> grid = sequencer->getSequenceConfigsAsGridOfStrings();
+    std::vector<std::vector<std::string>> grid;
+    size_t currentSequence = 0;
+    size_t currentSeqParam = 0;
+    audioProcessor.withAudioThreadExclusive([&]()
+    {
+        currentSequence = seqEditor->getCurrentSequence();
+        currentSeqParam = seqEditor->getCurrentSeqParam();
+        grid = audioProcessor.getSequencer()->getSequenceConfigsAsGridOfStrings();
+    });
     const auto boxes = buildBoxesFromGrid(grid,
-                                          seqEditor->getCurrentSequence(),
-                                          seqEditor->getCurrentSeqParam(),
+                                          currentSequence,
+                                          currentSeqParam,
                                           std::vector<std::pair<int, int>>(),
                                           true,
                                           Sequencer::notArmed);
@@ -244,9 +291,20 @@ void TrackerMainUI::prepareMachineConfigView()
     samplerViewActive = false;
     samplerColumnWidths.clear();
 
-    const auto* sequence = sequencer->getSequence(seqEditor->getCurrentSequence());
-    const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-    const int machineId = static_cast<int>(sequence->getMachineId());
+    CommandType machineType = CommandType::MidiNote;
+    int machineId = 0;
+    std::vector<std::vector<UIBox>> machineBoxes;
+    audioProcessor.withAudioThreadExclusive([&]()
+    {
+        auto* seq = audioProcessor.getSequencer();
+        if (auto* sequence = seq->getSequence(seqEditor->getCurrentSequence()))
+        {
+            machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
+            machineId = static_cast<int>(sequence->getMachineId());
+        }
+        seqEditor->refreshMachineStateForCurrentSequence();
+        machineBoxes = seqEditor->getMachineCells();
+    });
 
     if (machineType == CommandType::Sampler)
     {
@@ -262,11 +320,9 @@ void TrackerMainUI::prepareMachineConfigView()
         uiComponent.setStyle(style);
         uiComponent.setCellSize(1.2f, 1.1f);
 
-        seqEditor->refreshMachineStateForCurrentSequence();
-        const auto& boxes = seqEditor->getMachineCells();
-        const size_t rows = boxes.empty() ? 1 : boxes[0].size();
-        const size_t cols = boxes.empty() ? 1 : boxes.size();
-        updateCellStates(boxes, rows, cols);
+        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
         overlayState.text = "SAMPLER ID " + std::to_string(machineId)
                             + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
         overlayState.color = samplerPalette.textPrimary;
@@ -285,11 +341,9 @@ void TrackerMainUI::prepareMachineConfigView()
         uiComponent.setStyle(style);
         uiComponent.setCellSize(cellWidth, cellHeight);
 
-        seqEditor->refreshMachineStateForCurrentSequence();
-        const auto& boxes = seqEditor->getMachineCells();
-        const size_t rows = boxes.empty() ? 1 : boxes[0].size();
-        const size_t cols = boxes.empty() ? 1 : boxes.size();
-        updateCellStates(boxes, rows, cols);
+        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
         overlayState.text = "ARP ID " + std::to_string(machineId)
                             + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
         overlayState.color = palette.textPrimary;
@@ -501,7 +555,7 @@ TrackerUIComponent::CellState TrackerMainUI::makeDefaultCell() const
 juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
 {
     if (cell.isSelected && cell.hasNote)
-        return PaletteDefaults::errorRed.withAlpha(0.6f);
+        return palette.gridWithContentSelected;
     if (cell.isSelected)
         return palette.gridSelected;
     if (cell.isArmed)
@@ -629,294 +683,310 @@ float TrackerMainUI::getSamplerCellDepthScale(const UIBox& cell) const
 bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
     juce::ignoreUnused(originatingComponent);
-    // 
-    // space key always stops and starts.
-    if (key.isKeyCode(juce::KeyPress::spaceKey)){
-        CommandProcessor::sendAllNotesOff();
-        if (audioProcessor.getSequencer()->isPlaying()){
-            audioProcessor.getSequencer()->stop();
-        }
-        else{
-            audioProcessor.getSequencer()->rewindAtNextZero();
-            audioProcessor.getSequencer()->play();
-
-        }
-        return true; 
-    }
-    if (key.getModifiers().isShiftDown())
+    // Wrap UI-triggered edits/reads so they wait for the audio thread to finish processBlock.
+    return audioProcessor.withAudioThreadExclusive([&]() -> bool
     {
-        const juce::juce_wchar ch = key.getTextCharacter();
-        if (ch == 'C' || ch == 'c')
-        {
-            const bool enabled = audioProcessor.isInternalClockEnabled();
-            audioProcessor.setInternalClockEnabled(!enabled);
-            return true;
-        }
-    }
-
-    // deal with with the user pressing a key when the sequencer is stopped. 
-    if (!audioProcessor.getSequencer()->isPlaying())
-    {
-        const char ch = static_cast<char>(key.getTextCharacter());
-        const std::map<char, double> key_to_note = MachineUtilsAbs::getKeyboardToMidiNotes(0);
-        const auto it = key_to_note.find(ch);
-        // this block of code deals
-        if (it != key_to_note.end())
-        {
-            const size_t seqIndex = seqEditor->getCurrentSequence();
-            const size_t stepIndex = seqEditor->getCurrentStep();
-            const size_t rowIndex = seqEditor->getCurrentStepRow();
-            if (Sequence* sequence = sequencer->getSequence(seqIndex))
+        // space key always stops and starts.
+        if (key.isKeyCode(juce::KeyPress::spaceKey)){
+            CommandProcessor::sendAllNotesOff();
+            if (audioProcessor.getSequencer()->isPlaying())
             {
-                auto data = sequence->getStepData(stepIndex);
-                const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
-                double note = it->second + (12 * seqEditor->getCurrentOctave());
-                
-                seqEditor->machineLearnNote(static_cast<int>(note));
-                auto context = sequence->getReadOnlyContext();
-                bool useDefaults = data.empty();
-                if (data.empty())
+                audioProcessor.getSequencer()->stop();
+            }
+            else
+            {
+                audioProcessor.getSequencer()->rewindAtNextZero();
+                audioProcessor.getSequencer()->play();
+            }
+            return true; 
+        }
+        if (key.getModifiers().isShiftDown())
+        {
+            const juce::juce_wchar ch = key.getTextCharacter();
+            if (ch == 'C' || ch == 'c')
+            {
+                const bool enabled = audioProcessor.isInternalClockEnabled();
+                audioProcessor.setInternalClockEnabled(!enabled);
+                return true;
+            }
+        }
+
+        // deal with with the user pressing a key when the sequencer is stopped. 
+        if (!audioProcessor.getSequencer()->isPlaying())
+        {
+            const char ch = static_cast<char>(key.getTextCharacter());
+            const std::map<char, double> key_to_note = MachineUtilsAbs::getKeyboardToMidiNotes(0);
+            const auto it = key_to_note.find(ch);
+            // this block of code deals
+            if (it != key_to_note.end())
+            {
+                const size_t seqIndex = seqEditor->getCurrentSequence();
+                const size_t stepIndex = seqEditor->getCurrentStep();
+                const size_t rowIndex = seqEditor->getCurrentStepRow();
+                if (Sequence* sequence = audioProcessor.getSequencer()->getSequence(seqIndex))
                 {
-                    data.resize(1);
-                    data[0].assign(Step::maxInd + 1, 0.0);
-                }
-                if (data[safeRow].size() < Step::maxInd + 1)
-                {
-                    data[safeRow].resize(Step::maxInd + 1, 0.0);
-                }
-                if (!useDefaults && data[safeRow][Step::noteInd] == 0.0)
-                {
-                    useDefaults = true;
-                }
-                if (useDefaults)
-                {
-                    data[safeRow][Step::cmdInd] = context.machineType;
-                    const Command& cmd = CommandProcessor::getCommand(context.machineType);
-                    for (std::size_t i = 0; i < cmd.parameters.size() && i < Step::maxInd; ++i)
+                    auto data = sequence->getStepData(stepIndex);
+                    const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
+                    double note = it->second + (12 * seqEditor->getCurrentOctave());
+
+                    seqEditor->machineLearnNote(static_cast<int>(note));
+                    auto context = sequence->getReadOnlyContext();
+                    bool useDefaults = data.empty();
+                    if (data.empty())
                     {
-                        data[safeRow][i + 1] = cmd.parameters[i].defaultValue;
+                        data.resize(1);
+                        data[0].assign(Step::maxInd + 1, 0.0);
+                    }
+                    if (data[safeRow].size() < Step::maxInd + 1)
+                    {
+                        data[safeRow].resize(Step::maxInd + 1, 0.0);
+                    }
+                    if (!useDefaults && data[safeRow][Step::noteInd] == 0.0)
+                    {
+                        useDefaults = true;
+                    }
+                    if (useDefaults)
+                    {
+                        data[safeRow][Step::cmdInd] = context.machineType;
+                        const Command& cmd = CommandProcessor::getCommand(context.machineType);
+                        for (std::size_t i = 0; i < cmd.parameters.size() && i < Step::maxInd; ++i)
+                        {
+                            data[safeRow][i + 1] = cmd.parameters[i].defaultValue;
+                        }
+                    }
+                    data[safeRow][Step::noteInd] = note;
+                    data[safeRow][Step::probInd] = 1.0;
+                    context.triggerProbability = 1.0;
+
+                    CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
+                }
+            }
+        }// end dealing with user pressing a key when sequencer is stopped.
+
+        SequencerEditorMode editMode = seqEditor->getEditMode();
+        if (editMode == SequencerEditorMode::machineConfig)
+        {
+            // if (key.isKeyCode(juce::KeyPress::returnKey))
+            // {
+            //     seqEditor->enterAtCursor();
+            //     return true;
+            // }
+            if (key == juce::KeyPress::escapeKey)
+            {
+                // escape goes back to previous edit mode
+                seqEditor->enterAtCursor();
+                return true;
+            }
+
+            CommandType machineType = CommandType::MidiNote;
+            if (const auto* sequence = audioProcessor.getSequencer()->getSequence(seqEditor->getCurrentSequence()))
+            {
+                machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
+            }
+            if (machineType == CommandType::Sampler || machineType == CommandType::Arpeggiator)
+            {
+                const char samplerKey = static_cast<char>(key.getTextCharacter());
+                if (machineType == CommandType::Sampler)
+                {
+                    if (samplerKey == '=')
+                    {
+                        seqEditor->machineAddEntry();
+                        return true;
+                    }
+                    if (samplerKey == '-')
+                    {
+                        seqEditor->machineRemoveEntry();
+                        return true;
                     }
                 }
-                data[safeRow][Step::noteInd] = note;
-                data[safeRow][Step::probInd] = 1.0;
-                context.triggerProbability = 1.0;
+                if (samplerKey == '[')
+                {
+                    seqEditor->decrementAtCursor();
+                    return true;
+                }
+                if (samplerKey == ']')
+                {
+                    seqEditor->incrementAtCursor();
+                    return true;
+                }
 
-                CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
+                if (key.getKeyCode() == juce::KeyPress::leftKey)
+                {
+                    seqEditor->moveCursorLeft();
+                    return true;
+                }
+                if (key.getKeyCode() == juce::KeyPress::rightKey)
+                {
+                    seqEditor->moveCursorRight();
+                    return true;
+                }
+                if (key.getKeyCode() == juce::KeyPress::upKey)
+                {
+                    seqEditor->moveCursorUp();
+                    return true;
+                }
+                if (key.getKeyCode() == juce::KeyPress::downKey)
+                {
+                    seqEditor->moveCursorDown();
+                    return true;
+                }
+                if (key.getKeyCode() == juce::KeyPress::returnKey)
+                {
+                    // return will trigger the button
+                    // it its an add or play button
+                    seqEditor->cycleAtCursor();
+                    return true;
+                }
             }
-
-        }
-    }// end dealing with user pressing a key when sequencer is stopped.
-
-    if (seqEditor->getEditMode() == SequencerEditorMode::machineConfig)
-    {
-        // if (key.isKeyCode(juce::KeyPress::returnKey))
-        // {
-        //     seqEditor->enterAtCursor();
-        //     return true;
-        // }
-        if (key == juce::KeyPress::escapeKey)
-        {
-            // escape goes back to previous edit mode
-            seqEditor->enterAtCursor();
             return true;
         }
 
-        const auto* sequence = sequencer->getSequence(seqEditor->getCurrentSequence());
-        const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-        if (machineType == CommandType::Sampler || machineType == CommandType::Arpeggiator)
+        switch (key.getTextCharacter())
         {
-            const char samplerKey = static_cast<char>(key.getTextCharacter());
-            if (machineType == CommandType::Sampler)
-            {
-                if (samplerKey == '=')
-                {
-                    seqEditor->machineAddEntry();
-                    return true;
-                }
-                if (samplerKey == '-')
-                {
-                    seqEditor->machineRemoveEntry();
-                    return true;
-                }
-            }
-            if (samplerKey == '[')
-            {
-                seqEditor->decrementAtCursor();
-                return true;
-            }
-            if (samplerKey == ']')
-            {
-                seqEditor->incrementAtCursor();
-                return true;
-            }
-
-            if (key.getKeyCode() == juce::KeyPress::leftKey)
-            {
-                seqEditor->moveCursorLeft();
-                return true;
-            }
-            if (key.getKeyCode() == juce::KeyPress::rightKey)
-            {
-                seqEditor->moveCursorRight();
-                return true;
-            }
-            if (key.getKeyCode() == juce::KeyPress::upKey)
-            {
-                seqEditor->moveCursorUp();
-                return true;
-            }
-            if (key.getKeyCode() == juce::KeyPress::downKey)
-            {
-                seqEditor->moveCursorDown();
-                return true;
-            }
-            if (key.getKeyCode() == juce::KeyPress::returnKey)
-            {
-                // return will trigger the button
-                // it its an add or play button
-                seqEditor->cycleAtCursor();
-                return true;
-            }
-        }
-        return true;
-    }
-
-    switch (key.getTextCharacter())
-    {
-        case 'A':// arm a sequence for live MIDI input 
-            seqEditor->setArmedSequence(seqEditor->getCurrentSequence());
-            break; 
-        case 'R':// re-e-wind
-            CommandProcessor::sendAllNotesOff();
-            audioProcessor.getSequencer()->rewindAtNextZero();
-            break;
-        // case ' ':
-        //     CommandProcessor::sendAllNotesOff();
-        //     if (audioProcessor.getSequencer()->isPlaying()){
-        //         audioProcessor.getSequencer()->stop();
-        //     }
-        //     else{
-        //         audioProcessor.getSequencer()->rewindAtNextZero();
-        //         audioProcessor.getSequencer()->play();
-
-        //     }
-        //     break;
-        case '\t':
-            seqEditor->nextStep();
-            break;
-        case '-':
-           seqEditor->removeRow();
-            break;
-
-        case '=':
-           seqEditor->addRow();
-            break;
-
-        case '_':
-            trackerController->decrementBPM();
-            break;
-
-        case '+':
-            trackerController->incrementBPM();
-            break;
-
-        case '[':
-           seqEditor->decrementAtCursor();
-            break;
-
-        case ']':
-           seqEditor->incrementAtCursor();
-            break;
-
-        case ',':
-           seqEditor->decrementOctave();
-           
-           break;
-
-        case '.':
-           seqEditor->incrementOctave();
-            break;
-
-        case 'M':
-            seqEditor->gotoMachineConfigPage();
-            break;
-
-        // case juce::KeyPress::deleteKey:
-        //    seqEditor->resetAtCursor();
-        //     CommandProcessor::sendAllNotesOff();
-        //     break;
-
-        case '\n':
-           seqEditor->enterAtCursor();
-            break;
-
-        case 'S':
-           seqEditor->gotoSequenceConfigPage();
-            break;
-
-
-        case 'p':
-            // if (seqEditor->getEditMode() == SequencerEditor::EditingStep) {
-            //     // sequencer.triggerStep(seqEditor->getCurrentSequence(),seqEditor->getCurrentStep(),seqEditor->getCurrentStepRow());
-            // }
-            break;
-
-        default:
-            char ch = static_cast<char>(key.getTextCharacter()); // sketch as converting wchar unicode to char... 
-            std::map<char, double> key_to_note = MachineUtilsAbs::getKeyboardToMidiNotes(0);
-            for (const std::pair<const char, double>& key_note : key_to_note)
-            {
-              if (ch == key_note.first){ 
-                // key_note_match = true;
-                seqEditor->enterStepData(key_note.second, Step::noteInd);
-                break;// break the for loop
-                
-              }
-            }
-            // do the velocity controls
-            for (int num=1;num<5;++num){
-              if (ch == num + 48){
-                seqEditor->enterStepData(num * (128/4), Step::velInd);
+            case 'A':// arm a sequence for live MIDI input 
+                seqEditor->setArmedSequence(seqEditor->getCurrentSequence());
                 break; 
-              }
-            }
-            // for (int i=0;i<lenKeys.size();++i){
-            //   if (lenKeys[i] == ch){
-            //     editor.enterStepData(i+1, Step::lengthInd);
-            //     break;
-            //   }
-            // }
-            // Handle arrow and other non character keys
-            if (key.isKeyCode(juce::KeyPress::backspaceKey)) {
-                seqEditor->resetAtCursor();
+            case 'R':// re-e-wind
                 CommandProcessor::sendAllNotesOff();
+                audioProcessor.getSequencer()->rewindAtNextZero();
+                break;
+            // case ' ':
+            //     CommandProcessor::sendAllNotesOff();
+            //     if (audioProcessor.getSequencer()->isPlaying()){
+            //         audioProcessor.getSequencer()->stop();
+            //     }
+            //     else{
+            //         audioProcessor.getSequencer()->rewindAtNextZero();
+            //         audioProcessor.getSequencer()->play();
+
+            //     }
+            //     break;
+            case '\t':
+                seqEditor->nextStep();
+                break;
+            case '-':
+               seqEditor->removeRow();
+                break;
+
+            case '=':
+               seqEditor->addRow();
+                break;
+
+            case '_':
+            {
+                const double bpm = audioProcessor.getBPM();
+                const double nextBpm = bpm <= 1.0 ? 1.0 : bpm - 1.0;
+                audioProcessor.setBPM(nextBpm);
                 break;
             }
-            if (key.isKeyCode(juce::KeyPress::returnKey)) {
+
+            case '+':
+            {
+                const double bpm = audioProcessor.getBPM();
+                audioProcessor.setBPM(bpm + 1.0);
+                break;
+            }
+
+            case '[':
+               seqEditor->decrementAtCursor();
+                break;
+
+            case ']':
+               seqEditor->incrementAtCursor();
+                break;
+
+            case ',':
+               seqEditor->decrementOctave();
+               
+               break;
+
+            case '.':
+               seqEditor->incrementOctave();
+                break;
+
+            case 'M':
+                seqEditor->gotoMachineConfigPage();
+                break;
+
+            // case juce::KeyPress::deleteKey:
+            //    seqEditor->resetAtCursor();
+            //     CommandProcessor::sendAllNotesOff();
+            //     break;
+
+            case '\n':
                seqEditor->enterAtCursor();
                 break;
-            }
-            if (key.isKeyCode(juce::KeyPress::upKey)) {
-               seqEditor->moveCursorUp();
-                break;
-            }
-            if (key.isKeyCode(juce::KeyPress::downKey)) {
 
-               seqEditor->moveCursorDown();
+            case 'S':
+               seqEditor->gotoSequenceConfigPage();
                 break;
-            }
-            if (key.isKeyCode(juce::KeyPress::leftKey)) {
-               seqEditor->moveCursorLeft();
-                break;
-            }
-            if (key.isKeyCode(juce::KeyPress::rightKey)) {
-               seqEditor->moveCursorRight();
-                break;
-            }
 
-    }
-    audioProcessor.getSequencer()->updateSeqStringGrid();
-    return true; // Key was handled
+
+            case 'p':
+                // if (seqEditor->getEditMode() == SequencerEditor::EditingStep) {
+                //     // sequencer.triggerStep(seqEditor->getCurrentSequence(),seqEditor->getCurrentStep(),seqEditor->getCurrentStepRow());
+                // }
+                break;
+
+            default:
+            {
+                char ch = static_cast<char>(key.getTextCharacter()); // sketch as converting wchar unicode to char... 
+                std::map<char, double> key_to_note = MachineUtilsAbs::getKeyboardToMidiNotes(0);
+                for (const std::pair<const char, double>& key_note : key_to_note)
+                {
+                  if (ch == key_note.first){ 
+                    // key_note_match = true;
+                    seqEditor->enterStepData(key_note.second, Step::noteInd);
+                    break;// break the for loop
+                    
+                  }
+                }
+                // do the velocity controls
+                for (int num=1;num<5;++num){
+                  if (ch == num + 48){
+                    seqEditor->enterStepData(num * (128/4), Step::velInd);
+                    break; 
+                  }
+                }
+                // for (int i=0;i<lenKeys.size();++i){
+                //   if (lenKeys[i] == ch){
+                //     editor.enterStepData(i+1, Step::lengthInd);
+                //     break;
+                //   }
+                // }
+                // Handle arrow and other non character keys
+                if (key.isKeyCode(juce::KeyPress::backspaceKey)) {
+                    seqEditor->resetAtCursor();
+                    CommandProcessor::sendAllNotesOff();
+                    break;
+                }
+                if (key.isKeyCode(juce::KeyPress::returnKey)) {
+                   seqEditor->enterAtCursor();
+                    break;
+                }
+                if (key.isKeyCode(juce::KeyPress::upKey)) {
+                   seqEditor->moveCursorUp();
+                    break;
+                }
+                if (key.isKeyCode(juce::KeyPress::downKey)) {
+
+                   seqEditor->moveCursorDown();
+                    break;
+                }
+                if (key.isKeyCode(juce::KeyPress::leftKey)) {
+                   seqEditor->moveCursorLeft();
+                    break;
+                }
+                if (key.isKeyCode(juce::KeyPress::rightKey)) {
+                   seqEditor->moveCursorRight();
+                    break;
+                }
+                break;
+            }
+        }
+        audioProcessor.getSequencer()->requestStrUpdate();
+        return true; // Key was handled
+    });
 }
 
 bool TrackerMainUI::keyStateChanged(bool isKeyDown, juce::Component* originatingComponent)

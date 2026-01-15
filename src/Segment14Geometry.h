@@ -129,7 +129,7 @@ private:
 
     void appendSegmentQuad(Mesh& m, Segment seg, float penX) const
     {
-        const auto& q = segmentQuads[static_cast<int>(seg)];
+        const auto& q = segmentQuads[static_cast<std::size_t>(seg)];
         const uint32_t base = static_cast<uint32_t>(m.vertices.size());
 
         const Vec2 t0 = transform(q.p0, penX);

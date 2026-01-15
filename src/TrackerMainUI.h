@@ -11,9 +11,7 @@
 #include <JuceHeader.h>
 #include "TrackerMainProcessor.h"
 // #include "StringTable.h"
-#include "Sequencer.h"
 #include "SequencerEditor.h"
-#include "TrackerController.h"
 #include "TrackerUIComponent.h"
 #include "Palette.h"
 #include "UIBox.h"
@@ -63,9 +61,7 @@ private:
     TrackerMainProcessor& audioProcessor;
 
     // StringTable controlPanelTable;
-    Sequencer* sequencer; 
     SequencerEditor* seqEditor;
-    TrackerController* trackerController; 
     juce::OpenGLContext openGLContext;
     TrackerUIComponent uiComponent;
 
