@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="210mm"
+   height="297mm"
+   viewBox="0 0 210 297"
+   version="1.1"
+   id="svg962"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   sodipodi:docname="led_all_parts.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview964"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     showgrid="false"
+     inkscape:zoom="0.2102413"
+     inkscape:cx="394.78447"
+     inkscape:cy="563.63806"
+     inkscape:window-width="1280"
+     inkscape:window-height="744"
+     inkscape:window-x="0"
+     inkscape:window-y="24"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs959" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <path
+       d="m 84.575779,137.7071 56.865351,0.57668 -0.21272,9.96575 -0.27236,10.36449 -56.380271,0.25976 -10.583337,-10.58334 z"
+       id="path4-3-5"
+       sodipodi:nodetypes="ccccccc"
+       style="stroke-width:0.264583" />
+    <path
+       d="m 171.30664,187.91679 -56.86543,0.57668 0.21273,9.96575 0.27236,10.36448 56.38034,0.25976 10.58333,-10.58334 z"
+       id="path4-3-1-7"
+       sodipodi:nodetypes="ccccccc"
+       style="stroke-width:0.264583" />
+    <path
+       d="M 16.840428,57.089488 27.423761,46.506155 38.007081,57.089488 V 115.29783 L 27.423761,125.88117 16.840428,115.29783 Z"
+       id="path10-3-3"
+       style="stroke-width:0.264583" />
+    <path
+       d="m 31.099559,188.3225 h 41.804156 l 10.583338,10.58333 -10.583338,10.58333 H 31.099559 l -7.9375,-10.58333 z"
+       id="path18-2-5"
+       style="stroke-width:0.264583" />
+    <path
+       d="m 74.84843,93.673676 -0.76163,12.497424 0.0026,12.06784 39.44885,-35.897026 -0.0574,-8.970925 -0.4149,-13.335312 z"
+       id="path20-3-6-7-5-6-6"
+       style="stroke-width:0.247961"
+       sodipodi:nodetypes="ccccccc" />
+    <path
+       d="m 193.63097,97.367879 0.76163,12.497421 -0.003,12.06784 -39.44887,-35.897021 0.0574,-8.970925 0.41489,-13.335317 z"
+       id="path20-3-6-7-5-6-6-3-5-6"
+       style="stroke-width:0.247961"
+       sodipodi:nodetypes="ccccccc" />
+  </g>
+</svg>
