@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 
+import select
 import socket
 import struct
 import sys
+import time
 
 from pylcdsysinfo import LCDSysInfo, BackgroundColours, TextLines
-from test_display_string import (
-    _draw_char,
-    _layout_positions,
-    _segment_slots,
-    CHAR_MAP,
+from led_display_lib import (
     CHAR_GRID,
+    CHAR_MAP,
     CYAN_FIRST_SLOT,
     GREY_FIRST_SLOT,
     GRID,
     ORIGIN_X,
     ORIGIN_Y,
+    draw_char,
+    layout_positions,
+    segment_slots,
 )
 
 
-_DEF_HOST = "0.0.0.0"
+_DEF_HOST = "localhost"
 _DEF_PORT = 9000
+_DEF_GAP_SECONDS = 0.2
 
 
 def _align4(n):
@@ -38,6 +41,7 @@ def _read_osc_string(buf, idx):
 
 
 def _parse_osc_message(data):
+    print(f"parse_osc_message")
     if not data:
         return None
     if data.startswith(b"#bundle\x00"):
@@ -51,6 +55,7 @@ def _parse_osc_message(data):
     if not types or not types.startswith(","):
         return None
 
+    print(f"Message types: {types}")
     for t in types[1:]:
         if t == "s":
             s, idx = _read_osc_string(data, idx)
@@ -98,13 +103,13 @@ def _parse_osc_bundle(data):
 
 def _display_text(d, seg_slots, char_step, text):
     d.clear_lines(TextLines.ALL, BackgroundColours.BLACK)
-    for ch, row, col in _layout_positions(text):
+    for ch, row, col in layout_positions(text):
         mask = CHAR_MAP.get(ch, CHAR_MAP.get(ch.upper(), 0))
         if not mask:
             continue
         xoff = ORIGIN_X + col * char_step
         yoff = ORIGIN_Y + row * char_step
-        _draw_char(d, mask, xoff, yoff, seg_slots)
+        draw_char(d, mask, xoff, yoff, seg_slots)
 
 
 def _format_value(value):
@@ -119,9 +124,27 @@ def _format_value(value):
     return str(value)
 
 
+def _recv_latest_text(recvfrom, parse_message, format_value):
+    latest = None
+    while True:
+        try:
+            data, _ = recvfrom(4096)
+        except BlockingIOError:
+            break
+        value = parse_message(data)
+        if value is None:
+            continue
+        text = format_value(value)
+        if text:
+            latest = text
+    return latest
+
+
 def main(argv):
     host = _DEF_HOST
     port = _DEF_PORT
+    gap_seconds = _DEF_GAP_SECONDS
+    print(f"Starting LCDsysinfo display OSC server on {host}:{port}")
     use_cyan = False
 
     i = 1
@@ -139,8 +162,15 @@ def main(argv):
             use_cyan = True
             i += 1
             continue
+        if arg == "--gap" and i + 1 < len(argv):
+            gap_seconds = float(argv[i + 1])
+            i += 2
+            continue
         if arg in {"-h", "--help"}:
-            print("Usage: osc_to_lcdsysinfo.py [--host HOST] [--port PORT] [--cyan]")
+            print(
+                "Usage: osc_to_lcdsysinfo.py [--host HOST] [--port PORT] [--cyan]"
+                " [--gap SECONDS]"
+            )
             return 0
         i += 1
 
@@ -149,26 +179,46 @@ def main(argv):
     d.set_brightness(255)
 
     first_slot = CYAN_FIRST_SLOT if use_cyan else GREY_FIRST_SLOT
-    seg_slots = _segment_slots(first_slot)
+    seg_slots = segment_slots(first_slot)
     char_step = GRID * CHAR_GRID
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((host, port))
+    sock.setblocking(False)
 
     display_text = _display_text
     format_value = _format_value
     recvfrom = sock.recvfrom
+    parse_message = _parse_osc_message
+    pending_text = None
+    last_recv_time = None
 
     while True:
-        data, _ = recvfrom(4096)
-        value = _parse_osc_message(data)
-        if value is None:
+        timeout = None
+        if pending_text is not None and last_recv_time is not None:
+            elapsed = time.monotonic() - last_recv_time
+            timeout = max(0.0, gap_seconds - elapsed)
+
+        readable, _, _ = select.select([sock], [], [], timeout)
+        if readable:
+            latest_text = _recv_latest_text(recvfrom, parse_message, format_value)
+            if latest_text:
+                pending_text = latest_text
+                last_recv_time = time.monotonic()
             continue
-        text = format_value(value)
-        if not text:
+
+        if not pending_text:
             continue
-        display_text(d, seg_slots, char_step, text)
+
+        display_text(d, seg_slots, char_step, pending_text)
+        pending_text = None
+        last_recv_time = None
+
+        latest_text = _recv_latest_text(recvfrom, parse_message, format_value)
+        if latest_text:
+            pending_text = latest_text
+            last_recv_time = time.monotonic()
 
 
 if __name__ == "__main__":
