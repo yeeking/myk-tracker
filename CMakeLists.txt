@@ -31,6 +31,35 @@ juce_add_plugin(myk-tracker-plug
 
 juce_generate_juce_header(myk-tracker-plug)
 
+juce_add_gui_app(tracker-hardware-emulator
+    COMPANY_NAME Yee-King
+    PRODUCT_NAME "MYK Tracker Hardware Emulator")
+
+juce_generate_juce_header(tracker-hardware-emulator)
+
+target_sources(tracker-hardware-emulator
+    PRIVATE
+    src/hardware_emulator/Main.cpp
+    src/hardware_emulator/MainComponent.cpp
+    src/hardware_emulator/MainComponent.h
+)
+
+target_compile_definitions(tracker-hardware-emulator
+    PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:tracker-hardware-emulator,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:tracker-hardware-emulator,JUCE_VERSION>")
+
+target_link_libraries(tracker-hardware-emulator
+    PRIVATE
+        juce::juce_gui_extra
+        juce::juce_osc
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
 target_sources(myk-tracker-plug
     PRIVATE
     src/TrackerMainUI.cpp
@@ -70,6 +99,7 @@ target_link_libraries(myk-tracker-plug
 #        seq-lib
         # AudioPluginData           
         juce::juce_audio_utils
+        juce::juce_osc
         juce::juce_opengl
     PUBLIC
         juce::juce_recommended_config_flags

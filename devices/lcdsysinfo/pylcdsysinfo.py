@@ -289,7 +289,9 @@ class LCDSysInfo(object):
     """
 
     usb_timeout_ms = 5000
-    clear_line_wait_ms = 1000
+    # clear_line_wait_ms = 100
+    clear_line_wait_ms = 10
+    
     erase_sector_wait_ms = 220
     min_display_icon_wait_ms = 10
     max_display_icon_wait_ms = 700

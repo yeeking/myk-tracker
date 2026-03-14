@@ -98,6 +98,11 @@ void TrackerMainUI::timerCallback ()
     ++framesDrawn;
 
     if (waitingForPaint) {return;}// already waiting for a repaint
+  for (const auto& zoomCommand : audioProcessor.consumePendingZoomCommands())
+  {
+      adjustZoomAroundPoint(zoomCommand.delta,
+                            { zoomCommand.normalizedX, zoomCommand.normalizedY });
+  }
   prepareControlPanelView();  
   // check what to draw based on the state of the 
   // editor
@@ -129,6 +134,10 @@ void TrackerMainUI::timerCallback ()
           break;
       }
   }
+  audioProcessor.withAudioThreadExclusive([&]()
+  {
+      audioProcessor.sendCurrentCellValueOverOscIfChanged();
+  });
     if (editMode != SequencerEditorMode::machineConfig)
     {
       const double bpmValue = audioProcessor.getBPM();
@@ -554,10 +563,8 @@ TrackerUIComponent::CellState TrackerMainUI::makeDefaultCell() const
 /** select colour based on cell state  */
 juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
 {
-    if (cell.isSelected && cell.hasNote)
-        return palette.gridWithContentSelected;
     if (cell.isSelected)
-        return palette.gridSelected;
+        return PaletteDefaults::cursor.fill;
     if (cell.isArmed)
         return palette.statusOk;
 
@@ -567,7 +574,7 @@ juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
 juce::Colour TrackerMainUI::getTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
-        return palette.gridSelected;
+        return PaletteDefaults::cursor.text;
     if (cell.isArmed)
         return palette.statusOk;
     if (cell.hasNote)
@@ -590,6 +597,38 @@ void TrackerMainUI::adjustZoom(float delta)
     const float minZoom = 0.5f;
     const float maxZoom = 2.5f;
     zoomLevel = juce::jlimit(minZoom, maxZoom, zoomLevel + delta);
+}
+
+void TrackerMainUI::adjustZoomAroundPoint(float delta, juce::Point<float> normalizedPoint)
+{
+    const float minZoom = 0.5f;
+    const float maxZoom = 2.5f;
+    const float oldZoom = zoomLevel;
+    const float newZoom = juce::jlimit(minZoom, maxZoom, zoomLevel + delta);
+
+    if (std::abs(newZoom - oldZoom) < 0.0001f)
+        return;
+
+    const float aspectRatio = seqViewBounds.getHeight() > 0
+        ? static_cast<float>(seqViewBounds.getWidth()) / static_cast<float>(seqViewBounds.getHeight())
+        : 1.0f;
+    const float nearPlane = 6.0f;
+    const float frustumHalfHeight = 3.0f;
+    const float frustumHalfWidth = frustumHalfHeight * aspectRatio;
+    const float baseDistance = 20.0f;
+    const float oldDistance = baseDistance / oldZoom;
+    const float newDistance = baseDistance / newZoom;
+
+    const float normalizedX = juce::jlimit(0.0f, 1.0f, normalizedPoint.x);
+    const float normalizedY = juce::jlimit(0.0f, 1.0f, normalizedPoint.y);
+    const float oldViewX = ((normalizedX * 2.0f) - 1.0f) * frustumHalfWidth * (oldDistance / nearPlane);
+    const float newViewX = ((normalizedX * 2.0f) - 1.0f) * frustumHalfWidth * (newDistance / nearPlane);
+    const float oldViewY = (1.0f - (normalizedY * 2.0f)) * frustumHalfHeight * (oldDistance / nearPlane);
+    const float newViewY = (1.0f - (normalizedY * 2.0f)) * frustumHalfHeight * (newDistance / nearPlane);
+
+    panOffsetX += (newViewX - oldViewX);
+    panOffsetY += (newViewY - oldViewY);
+    zoomLevel = newZoom;
 }
 
 void TrackerMainUI::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
@@ -649,9 +688,9 @@ juce::Colour TrackerMainUI::getSamplerCellColour(const UIBox& cell) const
     if (cell.isDisabled)
         return samplerPalette.cellDisabled;
     if (cell.isEditing)
-        return PaletteDefaults::errorRed.withAlpha(0.6f);
+        return PaletteDefaults::cursor.fill;
     if (cell.isSelected)
-        return PaletteDefaults::errorRed.withAlpha(0.6f);
+        return PaletteDefaults::cursor.fill;
     if (cell.kind == UIBox::Kind::SamplerAction && cell.isActive)
         return samplerPalette.cellAccent;
     if (cell.kind == UIBox::Kind::SamplerWaveform)
@@ -662,7 +701,7 @@ juce::Colour TrackerMainUI::getSamplerCellColour(const UIBox& cell) const
 juce::Colour TrackerMainUI::getSamplerTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
-        return palette.gridSelected;
+        return PaletteDefaults::cursor.text;
     if (cell.kind == UIBox::Kind::SamplerAction && cell.isActive)
         return samplerPalette.glowActive;
     if (cell.kind == UIBox::Kind::SamplerWaveform)

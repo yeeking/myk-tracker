@@ -11,6 +11,18 @@
 #include "TrackerMainUI.h"
 #include <cmath>
 
+namespace
+{
+constexpr int oscListenPort = 9001;
+constexpr int lcdDisplayPort = 9000;
+constexpr const char* lcdDisplayHost = "127.0.0.1";
+constexpr const char* cellValueAddress = "/cell";
+constexpr const char* zoomInAddress = "/zoom_in";
+constexpr const char* zoomOutAddress = "/zoom_out";
+constexpr const char* incrementAddress = "/increment";
+constexpr const char* decrementAddress = "/decrement";
+}
+
 //==============================================================================
 TrackerMainProcessor::TrackerMainProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -51,11 +63,13 @@ TrackerMainProcessor::TrackerMainProcessor()
     // sequencer.decrementSeqParam(0, 1);
 
     // put some test notes into the sequencer to see if they flow through
-  
+    initialiseOsc();
 }
 
 TrackerMainProcessor::~TrackerMainProcessor()
 {
+    oscReceiver.removeListener(this);
+    oscReceiver.disconnect();
 }
 
 
@@ -122,6 +136,197 @@ const juce::String TrackerMainProcessor::getProgramName (int index)
 void TrackerMainProcessor::changeProgramName (int index, const juce::String& newName)
 {
     juce::ignoreUnused(index, newName);
+}
+
+void TrackerMainProcessor::initialiseOsc()
+{
+    oscReceiver.addListener(this);
+
+    oscReceiverReady = oscReceiver.connect(oscListenPort);
+    if (!oscReceiverReady)
+        DBG("OSC receiver failed to listen on port " << oscListenPort);
+    else
+        DBG("OSC receiver listening on port " << oscListenPort);
+
+    oscSenderReady = oscSender.connect(lcdDisplayHost, lcdDisplayPort);
+    if (!oscSenderReady)
+        DBG("OSC sender failed to connect to " << lcdDisplayHost << ":" << lcdDisplayPort);
+    else
+        DBG("OSC sender connected to " << lcdDisplayHost << ":" << lcdDisplayPort);
+}
+
+juce::String TrackerMainProcessor::formatOscMessage(const juce::OSCMessage& message)
+{
+    juce::StringArray parts;
+    parts.add(message.getAddressPattern().toString());
+
+    juce::StringArray argStrings;
+    for (auto arg : message)
+    {
+        if (arg.isInt32())
+            argStrings.add(juce::String(arg.getInt32()));
+        else if (arg.isFloat32())
+            argStrings.add(juce::String(arg.getFloat32()));
+        else if (arg.isString())
+            argStrings.add(arg.getString());
+        else if (arg.isBlob())
+            argStrings.add("<blob>");
+        else if (arg.isColour())
+            argStrings.add("<colour>");
+        else
+            argStrings.add("<arg>");
+    }
+
+    if (!argStrings.isEmpty())
+        parts.add("(" + argStrings.joinIntoString(", ") + ")");
+
+    return parts.joinIntoString(" ");
+}
+
+void TrackerMainProcessor::oscMessageReceived(const juce::OSCMessage& message)
+{
+    if (!oscReceiverReady)
+        return;
+    DBG("OSC in: " << formatOscMessage(message));
+    handleIncomingOscControlMessage(message);
+}
+
+void TrackerMainProcessor::oscBundleReceived(const juce::OSCBundle& bundle)
+{
+    for (auto element : bundle)
+    {
+        if (element.isMessage())
+            oscMessageReceived(element.getMessage());
+    }
+}
+
+juce::String TrackerMainProcessor::getCurrentCellOscPayload()
+{
+    const auto mode = seqEditor.getEditMode();
+
+    switch (mode)
+    {
+        case SequencerEditorMode::selectingSeqAndStep:
+        {
+            auto& grid = sequencer.getSequenceAsGridOfStrings();
+            const auto seq = seqEditor.getCurrentSequence();
+            const auto step = seqEditor.getCurrentStep();
+            if (seq < grid.size() && step < grid[seq].size())
+                return juce::String(grid[seq][step]);
+            break;
+        }
+        case SequencerEditorMode::editingStep:
+        {
+            const auto grid = sequencer.getStepAsGridOfStrings(seqEditor.getCurrentSequence(),
+                                                               seqEditor.getCurrentStep());
+            const auto col = seqEditor.getCurrentStepCol();
+            const auto row = seqEditor.getCurrentStepRow();
+            if (col < grid.size() && row < grid[col].size())
+                return juce::String(grid[col][row]);
+            break;
+        }
+        case SequencerEditorMode::configuringSequence:
+        {
+            const auto grid = sequencer.getSequenceConfigsAsGridOfStrings();
+            const auto seq = seqEditor.getCurrentSequence();
+            const auto param = seqEditor.getCurrentSeqParam();
+            if (seq < grid.size() && param < grid[seq].size())
+                return juce::String(grid[seq][param]);
+            break;
+        }
+        case SequencerEditorMode::machineConfig:
+        {
+            seqEditor.refreshMachineStateForCurrentSequence();
+            const auto& cells = seqEditor.getMachineCells();
+            for (const auto& column : cells)
+            {
+                for (const auto& cell : column)
+                {
+                    if (cell.isSelected)
+                        return juce::String(cell.text);
+                }
+            }
+            break;
+        }
+    }
+
+    return {};
+}
+
+void TrackerMainProcessor::sendCurrentCellValueOverOscIfChanged()
+{
+    if (!oscSenderReady)
+        return;
+
+    const auto payload = getCurrentCellOscPayload().trim();
+    if (payload.isEmpty() || payload == lastSentCellOscPayload)
+        return;
+
+    if (!oscSender.send(cellValueAddress, payload))
+        DBG("OSC send failed for " << juce::String(cellValueAddress) << " " << payload);
+    else
+        lastSentCellOscPayload = payload;
+}
+
+void TrackerMainProcessor::handleIncomingOscControlMessage(const juce::OSCMessage& message)
+{
+    const auto address = message.getAddressPattern().toString();
+
+    if (address == zoomInAddress || address == zoomOutAddress)
+    {
+        if (message.size() < 2 || !message[0].isFloat32() || !message[1].isFloat32())
+            return;
+
+        const float normalizedX = juce::jlimit(0.0f, 1.0f, message[0].getFloat32());
+        const float normalizedY = juce::jlimit(0.0f, 1.0f, message[1].getFloat32());
+        const float delta = (address == zoomInAddress) ? 0.2f : -0.2f;
+        queueZoomCommand(delta, normalizedX, normalizedY);
+        return;
+    }
+
+    if (address == incrementAddress || address == decrementAddress)
+    {
+        if (message.size() < 1 || !message[0].isInt32())
+            return;
+
+        const int steps = juce::jlimit(0, 1024, message[0].getInt32());
+        if (steps <= 0)
+            return;
+
+        withAudioThreadExclusive([&]()
+        {
+            for (int i = 0; i < steps; ++i)
+            {
+                if (address == incrementAddress)
+                    seqEditor.incrementAtCursor();
+                else
+                    seqEditor.decrementAtCursor();
+            }
+            sequencer.requestStrUpdate();
+        });
+        return;
+    }
+}
+
+void TrackerMainProcessor::queueZoomCommand(float delta, float normalizedX, float normalizedY)
+{
+    std::lock_guard<std::mutex> lock(pendingZoomMutex);
+    pendingZoomCommands.push_back(PendingZoomCommand { delta, normalizedX, normalizedY });
+}
+
+std::vector<TrackerMainProcessor::PendingZoomCommand> TrackerMainProcessor::consumePendingZoomCommands()
+{
+    std::lock_guard<std::mutex> lock(pendingZoomMutex);
+    std::vector<PendingZoomCommand> commands;
+    commands.reserve(pendingZoomCommands.size());
+
+    while (!pendingZoomCommands.empty())
+    {
+        commands.push_back(pendingZoomCommands.front());
+        pendingZoomCommands.pop_front();
+    }
+
+    return commands;
 }
 
 //==============================================================================

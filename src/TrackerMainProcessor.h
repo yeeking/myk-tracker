@@ -12,6 +12,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <deque>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -33,7 +34,8 @@ class TrackerMainProcessor  :    public MachineUtilsAbs,
                             public ClockAbs, 
                             public juce::AudioProcessor, 
                             public juce::ChangeBroadcaster,
-                            public MachineHost
+                            public MachineHost,
+                            private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 
                             #if JucePlugin_Enable_ARA
                              , public juce::AudioProcessorARAExtension
@@ -98,6 +100,14 @@ public:
     std::size_t getMachineCount(CommandType type) const override;
     MachineInterface* getMachine(CommandType type, std::size_t index) override;
     const MachineInterface* getMachine(CommandType type, std::size_t index) const override;
+    void sendCurrentCellValueOverOscIfChanged();
+    struct PendingZoomCommand
+    {
+        float delta = 0.0f;
+        float normalizedX = 0.5f;
+        float normalizedY = 0.5f;
+    };
+    std::vector<PendingZoomCommand> consumePendingZoomCommands();
 
     template <typename Fn>
     auto withAudioThreadExclusive(Fn&& fn) -> decltype(fn())
@@ -170,6 +180,21 @@ private:
     const MachineInterface* getSamplerForIndex(std::size_t samplerIndex) const;
     ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex);
     const ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex) const;
+    void oscMessageReceived(const juce::OSCMessage& message) override;
+    void oscBundleReceived(const juce::OSCBundle& bundle) override;
+    juce::String getCurrentCellOscPayload();
+    static juce::String formatOscMessage(const juce::OSCMessage& message);
+    void handleIncomingOscControlMessage(const juce::OSCMessage& message);
+    void queueZoomCommand(float delta, float normalizedX, float normalizedY);
+    void initialiseOsc();
     //==============================================================================
+    juce::OSCReceiver oscReceiver;
+    juce::OSCSender oscSender;
+    juce::String lastSentCellOscPayload;
+    bool oscReceiverReady = false;
+    bool oscSenderReady = false;
+    std::mutex pendingZoomMutex;
+    std::deque<PendingZoomCommand> pendingZoomCommands;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackerMainProcessor)
 };

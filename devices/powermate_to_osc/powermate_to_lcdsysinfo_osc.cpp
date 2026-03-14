@@ -113,7 +113,8 @@ char getChar(int file_ref)
 
 int main(int argc, char *argv[])
 {
-    int port = 57110; // supercollider port 
+//    int port = 57110; // supercollider port 
+    int port = 9000; // default for lcdsysinfo server 
     if (argc == 2){
         port = std::stoi(std::string(argv[1]));
     }

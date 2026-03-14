@@ -82,6 +82,7 @@ private:
     juce::Colour getTextColour(const UIBox& cell) const;
     float getCellDepthScale(const UIBox& cell) const;
     void adjustZoom(float delta);
+    void adjustZoomAroundPoint(float delta, juce::Point<float> normalizedPoint);
     void moveUp(float amount);
     void moveDown(float amount);
     void moveLeft(float amount);
