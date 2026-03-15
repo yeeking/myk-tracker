@@ -1,5 +1,6 @@
 #include "SequencerEditor.h"
 #include "MachineInterface.h"
+#include "MachineUtilsAbs.h"
 #include "Sequencer.h"
 #include "SequencerCommands.h"
 #include <JuceHeader.h>
@@ -42,6 +43,10 @@ void SequencerEditor::setMachineHost(MachineHost *host)
 {
   machineHost = host;
 }
+void SequencerEditor::setResetConfirmationHandler(std::function<void()> handler)
+{
+  resetConfirmationHandler = std::move(handler);
+}
 SequencerAbs *SequencerEditor::getSequencer()
 {
   return this->sequencer;
@@ -68,6 +73,26 @@ SequencerEditorMode SequencerEditor::getEditMode() const
 {
   return this->editMode;
 }
+
+SequencerEditorPage SequencerEditor::getCurrentPage() const
+{
+  switch (editMode)
+  {
+  case SequencerEditorMode::selectingSeqAndStep:
+    return SequencerEditorPage::sequence;
+  case SequencerEditorMode::editingStep:
+    return SequencerEditorPage::step;
+  case SequencerEditorMode::configuringSequence:
+    return SequencerEditorPage::sequenceConfig;
+  case SequencerEditorMode::machineConfig:
+    return SequencerEditorPage::machine;
+  case SequencerEditorMode::resetConfirmation:
+    return SequencerEditorPage::resetConfirmation;
+  }
+
+  return SequencerEditorPage::sequence;
+}
+
 SequencerEditorSubMode SequencerEditor::getEditSubMode() const
 {
   return this->editSubMode;
@@ -77,6 +102,49 @@ void SequencerEditor::setEditMode(SequencerEditorMode mode)
   this->editMode = mode;
   if (mode != SequencerEditorMode::machineConfig)
     machineEditMode = false;
+}
+
+void SequencerEditor::selectPage(SequencerEditorPage page)
+{
+  switch (page)
+  {
+  case SequencerEditorPage::sequence:
+    gotoSequencePage();
+    break;
+  case SequencerEditorPage::step:
+    gotoStepPage();
+    break;
+  case SequencerEditorPage::sequenceConfig:
+    gotoSequenceConfigPage();
+    break;
+  case SequencerEditorPage::machine:
+    gotoMachineConfigPage();
+    break;
+  case SequencerEditorPage::resetConfirmation:
+    gotoResetConfirmationPage();
+    break;
+  }
+}
+
+bool SequencerEditor::selectPageShortcut(int shortcut)
+{
+  switch (shortcut)
+  {
+  case 1:
+    selectPage(SequencerEditorPage::sequence);
+    return true;
+  case 2:
+    selectPage(SequencerEditorPage::step);
+    return true;
+  case 3:
+    selectPage(SequencerEditorPage::sequenceConfig);
+    return true;
+  case 4:
+    selectPage(SequencerEditorPage::machine);
+    return true;
+  default:
+    return false;
+  }
 }
 /** cycle through the edit modes in the sequence:
  * settingSeqLength (start mode)
@@ -96,6 +164,8 @@ void SequencerEditor::cycleEditMode()
     this->editSubMode = SequencerEditor::cycleSubModeRight(this->editSubMode);
     return;
   case SequencerEditorMode::machineConfig:
+    return;
+  case SequencerEditorMode::resetConfirmation:
     return;
   }
 }
@@ -129,45 +199,48 @@ void SequencerEditor::cycleAtCursor()
   case SequencerEditorMode::editingStep:
     sequencer->toggleStepActive(currentSequence, currentStep);
     return;
+  case SequencerEditorMode::resetConfirmation:
+    return;
+  }
+}
+
+void SequencerEditor::click()
+{
+  switch (getCurrentPage())
+  {
+  case SequencerEditorPage::sequence:
+    clickOnSequencePage();
+    break;
+  case SequencerEditorPage::step:
+    clickOnStepPage();
+    break;
+  case SequencerEditorPage::sequenceConfig:
+    break;
+  case SequencerEditorPage::machine:
+    clickOnMachinePage();
+    break;
+  case SequencerEditorPage::resetConfirmation:
+    clickOnResetConfirmationPage();
+    break;
   }
 }
 /** mode dependent reset function. Might reset */
 void SequencerEditor::resetAtCursor()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
-  {
-    // delete a step
-    const auto rowCount = sequencer->howManyStepDataRows(currentSequence, currentStep);
-    for (std::size_t row = 0; row < rowCount; ++row)
-    {
-      sequencer->resetStepRow(currentSequence, currentStep, row);
-    }
-
-    // sequencer->resetSequence(currentSequence);
+  case SequencerEditorPage::sequence:
+    resetOnSequencePage();
     break;
-  }
-  case SequencerEditorMode::editingStep:
-    // enterNoteData(0);
-    // sequencer->resetSequence(currentSequence);
-    // enterDataAtCursor(0);
-    sequencer->resetStepRow(currentSequence, currentStep, currentStepRow);
-
+  case SequencerEditorPage::step:
+    resetOnStepPage();
     break;
-
-  case SequencerEditorMode::configuringSequence:
-
+  case SequencerEditorPage::sequenceConfig:
     break;
-  case SequencerEditorMode::machineConfig:
-    // if (!isSamplerMachineForCurrentSequence())
-    //   break;
-    // if (samplerEditMode)
-    // {
-    //   adjustSamplerEditValue(-1);
-    //   break;
-    // }
-    // moveSamplerCursor(-1, 0);
+  case SequencerEditorPage::machine:
+    break;
+  case SequencerEditorPage::resetConfirmation:
+    resetOnResetConfirmationPage();
     break;
   }
 }
@@ -177,31 +250,23 @@ void SequencerEditor::resetAtCursor()
  */
 void SequencerEditor::enterAtCursor()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
-  {
-    editMode = SequencerEditorMode::editingStep;
-    // check if we are in the right bounds with our cursor
-    const std::size_t maxRows = sequencer->howManyStepDataRows(currentSequence, currentStep);
-    if (maxRows > 0 && currentStepRow >= maxRows)
-      currentStepRow = maxRows - 1; //
-    const std::size_t maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
-    if (maxCols > 0 && currentStepCol >= maxCols)
-      currentStepCol = maxCols - 1;
+  case SequencerEditorPage::sequence:
+    gotoStepPage();
     break;
-  }
-  case SequencerEditorMode::configuringSequence:
-    // editMode = SequencerEditorMode::settingSeqLength;
-    editMode = SequencerEditorMode::selectingSeqAndStep;
+  case SequencerEditorPage::sequenceConfig:
+    gotoSequencePage();
     break;
-
-  case SequencerEditorMode::editingStep:
-    editMode = SequencerEditorMode::selectingSeqAndStep;
+  case SequencerEditorPage::step:
+    gotoSequencePage();
     break;
-  case SequencerEditorMode::machineConfig:
+  case SequencerEditorPage::machine:
     machineEditMode = false;
-    editMode = SequencerEditorMode::selectingSeqAndStep;
+    gotoSequencePage();
+    break;
+  case SequencerEditorPage::resetConfirmation:
+    resetOnResetConfirmationPage();
     break;
   }
 }
@@ -291,6 +356,10 @@ void SequencerEditor::incrementOctave()
   {
     break;
   }
+  case SequencerEditorMode::resetConfirmation:
+  {
+    break;
+  }
   }
 }
 /** decrease the octave offset applied when entering notes  */
@@ -326,6 +395,10 @@ void SequencerEditor::decrementOctave()
     break;
   }
   case SequencerEditorMode::machineConfig:
+  {
+    break;
+  }
+  case SequencerEditorMode::resetConfirmation:
   {
     break;
   }
@@ -455,240 +528,88 @@ void SequencerEditor::nextStep()
 
 void SequencerEditor::moveCursorLeft()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-
-  case SequencerEditorMode::selectingSeqAndStep:
-  {
-    if (currentSequence == 0)
-      return;
-
-    currentSequence -= 1;
-    if (currentStep >= sequencer->howManySteps(currentSequence))
-      currentStep = sequencer->howManySteps(currentSequence) - 1;
-    break;
+  case SequencerEditorPage::sequence: moveCursorLeftOnSequencePage(); break;
+  case SequencerEditorPage::step: moveCursorLeftOnStepPage(); break;
+  case SequencerEditorPage::sequenceConfig: moveCursorLeftOnSequenceConfigPage(); break;
+  case SequencerEditorPage::machine: moveCursorLeftOnMachinePage(); break;
+  case SequencerEditorPage::resetConfirmation: moveCursorLeftOnResetConfirmationPage(); break;
   }
-  case SequencerEditorMode::editingStep:
-  {
-    // move left to previous column in the step data
-    if (currentStepCol == 0)
-      return;
-    currentStepCol--;
-    break;
-  }
-  case SequencerEditorMode::configuringSequence:
-  {
-    // increment the value of the currently selected
-    // parameter (channel, sequence type,ticks per second)
-    // incrementSeqConfigParam();
-    if (currentSequence == 0)
-      return;
-    currentSequence -= 1;
-    if (currentStep >= sequencer->howManySteps(currentSequence))
-      currentStep = sequencer->howManySteps(currentSequence) - 1;
-    break;
-  }
-  case SequencerEditorMode::machineConfig:
-  {
-    if (!isMachineUiForCurrentSequence())
-      break;
-    moveMachineCursor(0, -1);
-    break;
-  }
-  }// end sw
 }
 
 void SequencerEditor::moveCursorRight()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
-  {
-    currentSequence += 1;
-    if (currentSequence >= sequencer->howManySequences())
-      currentSequence = sequencer->howManySequences() - 1;
-    if (currentStep >= sequencer->howManySteps(currentSequence))
-      currentStep = sequencer->howManySteps(currentSequence) - 1;
-    break;
-  }
-  case SequencerEditorMode::editingStep:
-  {
-    // move right to next step col
-    currentStepCol++;
-    // int naxCols = sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow)
-    const std::size_t maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
-    // sequencer->getStepDataDirect(currentSequence, currentStep)->at(currentStepRow).size();
-    if (maxCols > 0 && currentStepCol >= maxCols)
-      currentStepCol = maxCols - 1;
-    break;
-  }
-  case SequencerEditorMode::configuringSequence:
-  {
-    // decrementSeqConfigParam();
-    currentSequence += 1;
-    if (currentSequence >= sequencer->howManySequences())
-      currentSequence = sequencer->howManySequences() - 1;
-    if (currentStep >= sequencer->howManySteps(currentSequence))
-      currentStep = sequencer->howManySteps(currentSequence) - 1;
-    break;
-  }
-  case SequencerEditorMode::machineConfig:
-  {
-    if (!isMachineUiForCurrentSequence())
-      break;
-    moveMachineCursor(0, 1);
-    break;
-  }
+  case SequencerEditorPage::sequence: moveCursorRightOnSequencePage(); break;
+  case SequencerEditorPage::step: moveCursorRightOnStepPage(); break;
+  case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
+  case SequencerEditorPage::machine: moveCursorRightOnMachinePage(); break;
+  case SequencerEditorPage::resetConfirmation: moveCursorRightOnResetConfirmationPage(); break;
   }
 }
 
 void SequencerEditor::moveCursorUp()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-
-  case SequencerEditorMode::selectingSeqAndStep:
-  {
-    if (currentStep == 0)
-    {
-      return;
-    }
-
-    currentStep -= 1;
-    break;
-  }
-  case SequencerEditorMode::editingStep:
-  {
-    if (currentStepRow == 0)
-    {
-      return;
-    }
-
-    // cycles which data field we are editing
-    // this->editSubMode = SequencerEditor::cycleSubModeLeft(this->editSubMode);
-    currentStepRow -= 1;
-    break;
-  }
-  case SequencerEditorMode::configuringSequence:
-  {
-    if (currentSeqParam == 0)
-    {
-      return;
-    }
-
-    // SequencerEditor::nextSequenceType(sequencer, currentSequence);
-    currentSeqParam--;
-    break;
-  }
-  case SequencerEditorMode::machineConfig:
-    if (!isMachineUiForCurrentSequence())
-      break;
-    moveMachineCursor(-1, 0);
-    break;
+  case SequencerEditorPage::sequence: moveCursorUpOnSequencePage(); break;
+  case SequencerEditorPage::step: moveCursorUpOnStepPage(); break;
+  case SequencerEditorPage::sequenceConfig: moveCursorUpOnSequenceConfigPage(); break;
+  case SequencerEditorPage::machine: moveCursorUpOnMachinePage(); break;
+  case SequencerEditorPage::resetConfirmation: moveCursorUpOnResetConfirmationPage(); break;
   }
 }
 
 void SequencerEditor::moveCursorDown()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
-  {
-    currentStep += 1;
-    if (currentStep >= sequencer->howManySteps(currentSequence))
-      currentStep = sequencer->howManySteps(currentSequence) - 1;
-    break;
-  }
-  case SequencerEditorMode::editingStep:
-  {
-    currentStepRow += 1;
-    const std::size_t rowsInStep = sequencer->howManyStepDataRows(currentSequence, currentStep);
-    if (rowsInStep > 0 && currentStepRow >= rowsInStep) // sequencer->howManySteps(currentSequence))
-      currentStepRow = rowsInStep - 1;
-    break;
-  }
-  case SequencerEditorMode::configuringSequence:
-  {
-    // moving down moves to the next parameter for this track
-    currentSeqParam++;
-    const std::size_t max = sequencer->getSeqConfigSpecs().size();
-    if (max == 0)
-    {
-      currentSeqParam = 0;
-    }
-    else if (currentSeqParam >= max)
-    {
-      currentSeqParam = max - 1;
-    }
-    break;
-  }
-  case SequencerEditorMode::machineConfig:
-  {
-    if (!isMachineUiForCurrentSequence())
-      break;
-    moveMachineCursor(1, 0);
-    break;
-  }
+  case SequencerEditorPage::sequence: moveCursorDownOnSequencePage(); break;
+  case SequencerEditorPage::step: moveCursorDownOnStepPage(); break;
+  case SequencerEditorPage::sequenceConfig: moveCursorDownOnSequenceConfigPage(); break;
+  case SequencerEditorPage::machine: moveCursorDownOnMachinePage(); break;
+  case SequencerEditorPage::resetConfirmation: moveCursorDownOnResetConfirmationPage(); break;
   }
 }
 
 /** increase the value at the cursor */
 void SequencerEditor::addRow()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
-    // expand the sequence length
-    sequencer->extendSequence(getCurrentSequence());
+  case SequencerEditorPage::sequence:
+    addRowOnSequencePage();
     break;
-  case SequencerEditorMode::editingStep:
-  {
-    // add another row to the data at this step
-    std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
-    // decrementStepData(data, sequencer->getSequenceType(currentSequence));
-    std::vector<double> newRow(data[0].size(), 0.0);
-    newRow[Step::cmdInd] = sequencer->getSequence(currentSequence)->getMachineType();
-    data.push_back(newRow);
-    writeStepData(data);
+  case SequencerEditorPage::step:
+    addRowOnStepPage();
     break;
-  }
-  case SequencerEditorMode::configuringSequence:
+  case SequencerEditorPage::sequenceConfig:
     break;
-  case SequencerEditorMode::machineConfig:
-    if (isMachineUiForCurrentSequence())
-      machineAdjustCurrentCell(-1);
+  case SequencerEditorPage::machine:
+    addRowOnMachinePage();
+    break;
+  case SequencerEditorPage::resetConfirmation:
     break;
   }
 }
 /** decreae the value at the cursor */
 void SequencerEditor::removeRow()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
-    // expand the sequence length
-    sequencer->shrinkSequence(getCurrentSequence());
-    if (currentStep >= sequencer->howManySteps(currentSequence))
-      currentStep = sequencer->howManySteps(currentSequence) - 1;
+  case SequencerEditorPage::sequence:
+    removeRowOnSequencePage();
     break;
-  case SequencerEditorMode::editingStep:
-  {
-    // add another row to the data at this step
-    std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
-    if (data.size() > 1)
-    {
-      data.pop_back();
-      writeStepData(data); // only shrink if small enough
-    }
-    // make sure the cursor is in range
-    const std::size_t rowsInStep = data.size();
-    if (rowsInStep > 0 && currentStepRow >= rowsInStep) // sequencer->howManySteps(currentSequence))
-      currentStepRow = rowsInStep - 1;
+  case SequencerEditorPage::step:
+    removeRowOnStepPage();
     break;
-  }
-  case SequencerEditorMode::configuringSequence:
+  case SequencerEditorPage::sequenceConfig:
     break;
-  case SequencerEditorMode::machineConfig:
+  case SequencerEditorPage::machine:
+    break;
+  case SequencerEditorPage::resetConfirmation:
     break;
   }
 }
@@ -696,47 +617,40 @@ void SequencerEditor::removeRow()
 /** increase the value at the current cursor position, e.g. increasing note number */
 void SequencerEditor::incrementAtCursor()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
-    // nothing for now
+  case SequencerEditorPage::sequence:
     break;
-  case SequencerEditorMode::editingStep:
-  {
-    sequencer->incrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
+  case SequencerEditorPage::step:
+    incrementOnStepPage();
     break;
-  }
-  case SequencerEditorMode::configuringSequence:
-  {
-    sequencer->incrementSeqParam(currentSequence, currentSeqParam);
+  case SequencerEditorPage::sequenceConfig:
+    incrementOnSequenceConfigPage();
     break;
-  }
-  case SequencerEditorMode::machineConfig:
-    if (isMachineUiForCurrentSequence())
-      machineAdjustCurrentCell(1);
+  case SequencerEditorPage::machine:
+    incrementOnMachinePage();
+    break;
+  case SequencerEditorPage::resetConfirmation:
     break;
   }
 }
 /** decrease the value at the current cursor position, e.g. increasing note number */
 void SequencerEditor::decrementAtCursor()
 {
-  switch (editMode)
+  switch (getCurrentPage())
   {
-  case SequencerEditorMode::selectingSeqAndStep:
+  case SequencerEditorPage::sequence:
     break;
-  case SequencerEditorMode::editingStep:
-  {
-    sequencer->decrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
+  case SequencerEditorPage::step:
+    decrementOnStepPage();
     break;
-  }
-  case SequencerEditorMode::configuringSequence:
-  {
-    sequencer->decrementSeqParam(currentSequence, currentSeqParam);
+  case SequencerEditorPage::sequenceConfig:
+    decrementOnSequenceConfigPage();
     break;
-  }
-  case SequencerEditorMode::machineConfig:
-    if (isMachineUiForCurrentSequence())
-      machineAdjustCurrentCell(-1);
+  case SequencerEditorPage::machine:
+    decrementOnMachinePage();
+    break;
+  case SequencerEditorPage::resetConfirmation:
     break;
   }
 }
@@ -1024,6 +938,279 @@ double SequencerEditor::getCurrentOctave() const
   return octave; 
 }
 
+void SequencerEditor::moveCursorLeftOnSequencePage()
+{
+  if (currentSequence == 0)
+    return;
+
+  --currentSequence;
+  if (currentStep >= sequencer->howManySteps(currentSequence))
+    currentStep = sequencer->howManySteps(currentSequence) - 1;
+}
+
+void SequencerEditor::moveCursorLeftOnStepPage()
+{
+  if (currentStepCol == 0)
+    return;
+
+  --currentStepCol;
+}
+
+void SequencerEditor::moveCursorLeftOnSequenceConfigPage()
+{
+  if (currentSequence == 0)
+    return;
+
+  --currentSequence;
+  if (currentStep >= sequencer->howManySteps(currentSequence))
+    currentStep = sequencer->howManySteps(currentSequence) - 1;
+}
+
+void SequencerEditor::moveCursorLeftOnMachinePage()
+{
+  if (!isMachineUiForCurrentSequence())
+    return;
+
+  moveMachineCursor(0, -1);
+}
+
+void SequencerEditor::moveCursorLeftOnResetConfirmationPage()
+{
+  resetConfirmationYesSelected = true;
+}
+
+void SequencerEditor::moveCursorRightOnSequencePage()
+{
+  ++currentSequence;
+  if (currentSequence >= sequencer->howManySequences())
+    currentSequence = sequencer->howManySequences() - 1;
+  if (currentStep >= sequencer->howManySteps(currentSequence))
+    currentStep = sequencer->howManySteps(currentSequence) - 1;
+}
+
+void SequencerEditor::moveCursorRightOnStepPage()
+{
+  ++currentStepCol;
+  const std::size_t maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
+  if (maxCols > 0 && currentStepCol >= maxCols)
+    currentStepCol = maxCols - 1;
+}
+
+void SequencerEditor::moveCursorRightOnSequenceConfigPage()
+{
+  ++currentSequence;
+  if (currentSequence >= sequencer->howManySequences())
+    currentSequence = sequencer->howManySequences() - 1;
+  if (currentStep >= sequencer->howManySteps(currentSequence))
+    currentStep = sequencer->howManySteps(currentSequence) - 1;
+}
+
+void SequencerEditor::moveCursorRightOnMachinePage()
+{
+  if (!isMachineUiForCurrentSequence())
+    return;
+
+  moveMachineCursor(0, 1);
+}
+
+void SequencerEditor::moveCursorRightOnResetConfirmationPage()
+{
+  resetConfirmationYesSelected = false;
+}
+
+void SequencerEditor::moveCursorUpOnSequencePage()
+{
+  if (currentStep == 0)
+    return;
+
+  --currentStep;
+}
+
+void SequencerEditor::moveCursorUpOnStepPage()
+{
+  if (currentStepRow == 0)
+    return;
+
+  --currentStepRow;
+}
+
+void SequencerEditor::moveCursorUpOnSequenceConfigPage()
+{
+  if (currentSeqParam == 0)
+    return;
+
+  --currentSeqParam;
+}
+
+void SequencerEditor::moveCursorUpOnMachinePage()
+{
+  if (!isMachineUiForCurrentSequence())
+    return;
+
+  moveMachineCursor(-1, 0);
+}
+
+void SequencerEditor::moveCursorUpOnResetConfirmationPage()
+{
+  resetConfirmationYesSelected = true;
+}
+
+void SequencerEditor::moveCursorDownOnSequencePage()
+{
+  ++currentStep;
+  if (currentStep >= sequencer->howManySteps(currentSequence))
+    currentStep = sequencer->howManySteps(currentSequence) - 1;
+}
+
+void SequencerEditor::moveCursorDownOnStepPage()
+{
+  ++currentStepRow;
+  const std::size_t rowsInStep = sequencer->howManyStepDataRows(currentSequence, currentStep);
+  if (rowsInStep > 0 && currentStepRow >= rowsInStep)
+    currentStepRow = rowsInStep - 1;
+}
+
+void SequencerEditor::moveCursorDownOnSequenceConfigPage()
+{
+  ++currentSeqParam;
+  const std::size_t max = sequencer->getSeqConfigSpecs().size();
+  if (max == 0)
+    currentSeqParam = 0;
+  else if (currentSeqParam >= max)
+    currentSeqParam = max - 1;
+}
+
+void SequencerEditor::moveCursorDownOnMachinePage()
+{
+  if (!isMachineUiForCurrentSequence())
+    return;
+
+  moveMachineCursor(1, 0);
+}
+
+void SequencerEditor::moveCursorDownOnResetConfirmationPage()
+{
+  resetConfirmationYesSelected = false;
+}
+
+void SequencerEditor::addRowOnSequencePage()
+{
+  sequencer->extendSequence(getCurrentSequence());
+}
+
+void SequencerEditor::addRowOnStepPage()
+{
+  std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
+  std::vector<double> newRow(data[0].size(), 0.0);
+  newRow[Step::cmdInd] = sequencer->getSequence(currentSequence)->getMachineType();
+  data.push_back(newRow);
+  writeStepData(data);
+}
+
+void SequencerEditor::addRowOnMachinePage()
+{
+  if (isMachineUiForCurrentSequence())
+    machineAdjustCurrentCell(-1);
+}
+
+void SequencerEditor::removeRowOnSequencePage()
+{
+  sequencer->shrinkSequence(getCurrentSequence());
+  if (currentStep >= sequencer->howManySteps(currentSequence))
+    currentStep = sequencer->howManySteps(currentSequence) - 1;
+}
+
+void SequencerEditor::removeRowOnStepPage()
+{
+  std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
+  if (data.size() > 1)
+  {
+    data.pop_back();
+    writeStepData(data);
+  }
+
+  const std::size_t rowsInStep = data.size();
+  if (rowsInStep > 0 && currentStepRow >= rowsInStep)
+    currentStepRow = rowsInStep - 1;
+}
+
+void SequencerEditor::clickOnSequencePage()
+{
+  const auto length = sequencer->getSequence(currentSequence)->getLength();
+  for (std::size_t i = 0; i < length; ++i)
+    sequencer->toggleStepActive(currentSequence, i);
+}
+
+void SequencerEditor::clickOnStepPage()
+{
+  sequencer->toggleStepActive(currentSequence, currentStep);
+}
+
+void SequencerEditor::clickOnMachinePage()
+{
+  if (isMachineUiForCurrentSequence())
+    machineActivateCurrentCell();
+}
+
+void SequencerEditor::clickOnResetConfirmationPage()
+{
+  if (resetConfirmationYesSelected && resetConfirmationHandler){
+    DBG("SequencerEditor is about to call the resetConfirmationHandler  ");
+    resetConfirmationHandler();
+  }
+
+  gotoSequencePage();
+}
+
+void SequencerEditor::resetOnSequencePage()
+{
+  const auto rowCount = sequencer->howManyStepDataRows(currentSequence, currentStep);
+  for (std::size_t row = 0; row < rowCount; ++row)
+    sequencer->resetStepRow(currentSequence, currentStep, row);
+}
+
+void SequencerEditor::resetOnStepPage()
+{
+  sequencer->resetStepRow(currentSequence, currentStep, currentStepRow);
+}
+
+void SequencerEditor::resetOnResetConfirmationPage()
+{
+  gotoSequencePage();
+}
+
+void SequencerEditor::incrementOnStepPage()
+{
+  sequencer->incrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
+}
+
+void SequencerEditor::incrementOnSequenceConfigPage()
+{
+  sequencer->incrementSeqParam(currentSequence, currentSeqParam);
+}
+
+void SequencerEditor::incrementOnMachinePage()
+{
+  if (isMachineUiForCurrentSequence())
+    machineAdjustCurrentCell(1);
+}
+
+void SequencerEditor::decrementOnStepPage()
+{
+  sequencer->decrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
+}
+
+void SequencerEditor::decrementOnSequenceConfigPage()
+{
+  sequencer->decrementSeqParam(currentSequence, currentSeqParam);
+}
+
+void SequencerEditor::decrementOnMachinePage()
+{
+  if (isMachineUiForCurrentSequence())
+    machineAdjustCurrentCell(-1);
+}
+
 /** move the cursor to a specific sequence*/
 void SequencerEditor::setCurrentSequence(int seq)
 {
@@ -1057,6 +1244,79 @@ void SequencerEditor::writeSequenceData(std::vector<std::vector<double>> data)
   }
 }
 
+Sequencer* SequencerEditor::getSequencerImpl() const
+{
+  return dynamic_cast<Sequencer*>(sequencer);
+}
+
+void SequencerEditor::requestStringRefresh()
+{
+  if (auto* impl = getSequencerImpl())
+    impl->requestStrUpdate();
+}
+
+std::optional<double> SequencerEditor::lookupKeyboardMidiNote(char key) const
+{
+  const auto noteMap = MachineUtilsAbs::getKeyboardToMidiNotes(0);
+  const auto it = noteMap.find(key);
+  if (it == noteMap.end())
+    return std::nullopt;
+  return it->second;
+}
+
+void SequencerEditor::previewEnteredNote(double midiNote)
+{
+  if (isSequencerPlaying(sequencer))
+    return;
+
+  const size_t seqIndex = getCurrentSequence();
+  const size_t stepIndex = getCurrentStep();
+  const size_t rowIndex = getCurrentStepRow();
+  if (Sequence* sequence = sequencer->getSequence(seqIndex))
+  {
+    auto data = sequence->getStepData(stepIndex);
+    const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
+
+    machineLearnNote(static_cast<int>(midiNote));
+    auto context = sequence->getReadOnlyContext();
+    bool useDefaults = data.empty();
+    if (data.empty())
+    {
+      data.resize(1);
+      data[0].assign(Step::maxInd + 1, 0.0);
+    }
+    if (data[safeRow].size() < Step::maxInd + 1)
+      data[safeRow].resize(Step::maxInd + 1, 0.0);
+
+    if (!useDefaults && std::abs(data[safeRow][Step::noteInd]) < std::numeric_limits<double>::epsilon())
+      useDefaults = true;
+
+    if (useDefaults)
+    {
+      data[safeRow][Step::cmdInd] = context.machineType;
+      const Command& cmd = CommandProcessor::getCommand(context.machineType);
+      for (std::size_t i = 0; i < cmd.parameters.size() && i < Step::maxInd; ++i)
+        data[safeRow][i + 1] = cmd.parameters[i].defaultValue;
+    }
+
+    data[safeRow][Step::noteInd] = midiNote;
+    data[safeRow][Step::probInd] = 1.0;
+    context.triggerProbability = 1.0;
+    CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
+  }
+}
+
+void SequencerEditor::clampStepCursorToCurrentStep()
+{
+  const std::size_t maxRows = sequencer->howManyStepDataRows(currentSequence, currentStep);
+  if (maxRows > 0 && currentStepRow >= maxRows)
+    currentStepRow = maxRows - 1;
+
+  const std::size_t maxCols = sequencer->howManyStepDataCols(currentSequence, currentStep);
+  if (maxCols > 0 && currentStepCol >= maxCols)
+    currentStepCol = maxCols - 1;
+}
+
 void SequencerEditor::gotoSequenceConfigPage()
 {
   setEditMode(SequencerEditorMode::configuringSequence);
@@ -1066,6 +1326,83 @@ void SequencerEditor::gotoMachineConfigPage()
 {
   setEditMode(SequencerEditorMode::machineConfig);
   machineEditMode = false;
+}
+
+void SequencerEditor::gotoSequencePage()
+{
+  setEditMode(SequencerEditorMode::selectingSeqAndStep);
+}
+
+void SequencerEditor::gotoStepPage()
+{
+  setEditMode(SequencerEditorMode::editingStep);
+  clampStepCursorToCurrentStep();
+}
+
+void SequencerEditor::gotoResetConfirmationPage()
+{
+  setEditMode(SequencerEditorMode::resetConfirmation);
+  resetConfirmationYesSelected = true;
+}
+
+bool SequencerEditor::isResetConfirmationYesSelected() const
+{
+  return resetConfirmationYesSelected;
+}
+
+void SequencerEditor::togglePlayback()
+{
+  if (auto* impl = getSequencerImpl())
+  {
+    CommandProcessor::sendAllNotesOff();
+    if (impl->isPlaying())
+      impl->stop();
+    else
+    {
+      impl->rewindAtNextZero();
+      impl->play();
+    }
+  }
+}
+
+void SequencerEditor::rewindTransport()
+{
+  if (auto* impl = getSequencerImpl())
+  {
+    CommandProcessor::sendAllNotesOff();
+    impl->rewindAtNextZero();
+  }
+}
+
+void SequencerEditor::toggleArmCurrentSequence()
+{
+  setArmedSequence(getCurrentSequence());
+}
+
+void SequencerEditor::toggleMuteCurrentSequence()
+{
+  if (auto* impl = getSequencerImpl())
+    impl->toggleSequenceMute(getCurrentSequence());
+}
+
+bool SequencerEditor::handleNoteKey(char key)
+{
+  if (getCurrentPage() == SequencerEditorPage::resetConfirmation)
+    return false;
+
+  const auto midiNote = lookupKeyboardMidiNote(key);
+  if (!midiNote.has_value())
+    return false;
+
+  const double note = midiNote.value() + (12 * getCurrentOctave());
+  previewEnteredNote(note);
+  enterStepData(midiNote.value(), Step::noteInd);
+  return true;
+}
+
+void SequencerEditor::requestTrackerReset()
+{
+  gotoResetConfirmationPage();
 }
 
 /** write the sent data to a sequence - 1D data version */

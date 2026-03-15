@@ -46,18 +46,12 @@ TrackerMainProcessor::TrackerMainProcessor()
     
     CommandProcessor::assignMasterClock(this);
     CommandProcessor::assignMachineUtils(this);
-
-    samplers.reserve(4);
-    for (int i = 0; i < 4; ++i)
-    {
-        samplers.push_back(std::make_unique<SuperSamplerProcessor>());
-    }
-    arpeggiators.reserve(4);
-    for (int i = 0; i < 4; ++i)
-    {
-        arpeggiators.push_back(std::make_unique<ArpeggiatorMachine>());
-    }
+    initialiseMachines();
     seqEditor.setMachineHost(this);
+    seqEditor.setResetConfirmationHandler([this]()
+    {
+        recreateSequencersAndMachines();
+    });
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
@@ -155,6 +149,42 @@ void TrackerMainProcessor::initialiseOsc()
         DBG("OSC sender connected to " << lcdDisplayHost << ":" << lcdDisplayPort);
 }
 
+void TrackerMainProcessor::initialiseMachines()
+{
+    samplers.clear();
+    samplers.reserve(4);
+    for (int i = 0; i < 4; ++i)
+        samplers.push_back(std::make_unique<SuperSamplerProcessor>());
+
+    arpeggiators.clear();
+    arpeggiators.reserve(4);
+    for (int i = 0; i < 4; ++i)
+        arpeggiators.push_back(std::make_unique<ArpeggiatorMachine>());
+}
+
+void TrackerMainProcessor::recreateSequencersAndMachines()
+{
+    suspendProcessing(true);
+    CommandProcessor::sendAllNotesOff();
+    sequencer.stop();
+    clearPendingEvents();
+    resetTicks();
+    Sequencer newSequencer{16, 8};
+    sequencer = std::move(newSequencer);
+    seqEditor.setSequencer(&sequencer);
+    seqEditor.resetCursor();
+    seqEditor.gotoSequencePage();
+    seqEditor.setMachineHost(this);
+    seqEditor.setResetConfirmationHandler([this]()
+    {
+        recreateSequencersAndMachines();
+    });
+    trackerController = TrackerController{&sequencer, this, &seqEditor};
+    initialiseMachines();
+    sequencer.requestStrUpdate();
+    suspendProcessing(false);
+}
+
 juce::String TrackerMainProcessor::formatOscMessage(const juce::OSCMessage& message)
 {
     juce::StringArray parts;
@@ -248,6 +278,8 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
             }
             break;
         }
+        case SequencerEditorMode::resetConfirmation:
+            return "RESET?";
     }
 
     return {};
@@ -724,6 +756,9 @@ juce::var TrackerMainProcessor::getUiState()
             break;
         case SequencerEditorMode::machineConfig:
             modeStr = "machine";
+            break;
+        case SequencerEditorMode::resetConfirmation:
+            modeStr = "reset";
             break;
     }
     state->setProperty("mode", modeStr);

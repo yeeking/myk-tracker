@@ -316,9 +316,11 @@ class Sequencer : public SequencerAbs {
     const static std::size_t notArmed{SequencerAbs::notArmed};
     
     
-    /** create a sequencer: channels,stepsPerChannel*/
+      /** create a sequencer: channels,stepsPerChannel*/
       Sequencer(std::size_t seqCount = 4, std::size_t seqLength = 16);
       ~Sequencer();
+      Sequencer(Sequencer&& other) noexcept = default;
+      Sequencer& operator=(Sequencer&& other) noexcept = default;
 
       /** set seq channels and seq types of this sequence to the same as the sent sequence*/
       void copyChannelAndTypeSettings(Sequencer* otherSeq);

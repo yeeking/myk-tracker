@@ -50,7 +50,10 @@ struct TrackerPalette
     /** cell outline colour when cell has content */
     juce::Colour gridNote { 0xFF00F6FF };
     /** glow colour for playhead-highlighted cells */
-    juce::Colour gridPlayhead { 0xFFFF3B2F };
+    // juce::Colour gridPlayhead { 0xFFFF3B2F };
+    /** playhead highlight colour; hex literals use 0xAARRGGBB channel order */
+    juce::Colour gridPlayhead { 0xFFFF0000 };
+    
     /** primary cell text colour */
     juce::Colour textPrimary { 0xFF3DE6C0 };
     /** warning/emphasis text colour */

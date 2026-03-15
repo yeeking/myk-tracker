@@ -73,6 +73,7 @@ private:
     void prepareStepView();
     void prepareSeqConfigView();
     void prepareMachineConfigView();
+    void prepareResetConfirmationView();
     void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                           size_t rowsToDisplay,
                           size_t colsToDisplay);

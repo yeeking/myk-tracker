@@ -101,6 +101,7 @@ public:
     MachineInterface* getMachine(CommandType type, std::size_t index) override;
     const MachineInterface* getMachine(CommandType type, std::size_t index) const override;
     void sendCurrentCellValueOverOscIfChanged();
+    void recreateSequencersAndMachines();
     struct PendingZoomCommand
     {
         float delta = 0.0f;
@@ -187,6 +188,7 @@ private:
     void handleIncomingOscControlMessage(const juce::OSCMessage& message);
     void queueZoomCommand(float delta, float normalizedX, float normalizedY);
     void initialiseOsc();
+    void initialiseMachines();
     //==============================================================================
     juce::OSCReceiver oscReceiver;
     juce::OSCSender oscSender;

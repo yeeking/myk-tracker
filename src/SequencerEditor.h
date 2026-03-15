@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,6 +16,7 @@ class var;
 
 class MachineInterface;
 class Sequence;
+class Sequencer;
 enum class SequenceType;
 enum class CommandType : std::size_t;
 struct Parameter;
@@ -68,7 +71,8 @@ enum class SequencerEditorMode
   // settingSeqLength,// deprecate as set length happens in selectedSeqAndStep mode now
   configuringSequence,
   editingStep,
-  machineConfig
+  machineConfig,
+  resetConfirmation
 };
 
 /**
@@ -79,6 +83,15 @@ enum class SequencerEditorSubMode
   editCol1,
   editCol2,
   editCol3
+};
+
+enum class SequencerEditorPage
+{
+  sequence,
+  step,
+  sequenceConfig,
+  machine,
+  resetConfirmation
 };
 
 /** Represents an editor for a sequencer, which allows stateful edit operations to be applied
@@ -92,15 +105,19 @@ public:
   SequencerEditor(SequencerAbs *_sequencer);
   void setSequencer(SequencerAbs *sequencer);
   void setMachineHost(MachineHost *host);
+  void setResetConfirmationHandler(std::function<void()> handler);
   SequencerAbs *getSequencer();
   /** resets editor, e.g. when changing sequence*/
   void resetCursor();
   /** returns current major edit mode which is a SequencerEditorMode*/
   SequencerEditorMode getEditMode() const;
+  SequencerEditorPage getCurrentPage() const;
   /** returns current minor edit mode which is a SequencerEditorSubMode*/
   SequencerEditorSubMode getEditSubMode() const;
   /** directly set major edit mode */
   void setEditMode(SequencerEditorMode mode);
+  void selectPage(SequencerEditorPage page);
+  bool selectPageShortcut(int shortcut);
     // -> enterMidiNoteData
     // -> enterNumberData
     // -> enterLengthData 
@@ -151,6 +168,18 @@ public:
   void gotoSequenceConfigPage();
   /** enter machine configuration page */
   void gotoMachineConfigPage();
+  void gotoSequencePage();
+  void gotoStepPage();
+  void gotoResetConfirmationPage();
+  bool isResetConfirmationYesSelected() const;
+
+  void click();
+  void togglePlayback();
+  void rewindTransport();
+  void toggleArmCurrentSequence();
+  void toggleMuteCurrentSequence();
+  bool handleNoteKey(char key);
+  void requestTrackerReset();
 
   void refreshMachineStateForCurrentSequence();
   const std::vector<std::vector<UIBox>> &getMachineCells() const;
@@ -219,6 +248,50 @@ public:
   bool isArmedForLiveMIDI();
   
 private:
+  Sequencer* getSequencerImpl() const;
+  void requestStringRefresh();
+  std::optional<double> lookupKeyboardMidiNote(char key) const;
+  void previewEnteredNote(double midiNote);
+  void clampStepCursorToCurrentStep();
+
+  void moveCursorLeftOnSequencePage();
+  void moveCursorLeftOnStepPage();
+  void moveCursorLeftOnSequenceConfigPage();
+  void moveCursorLeftOnMachinePage();
+  void moveCursorLeftOnResetConfirmationPage();
+  void moveCursorRightOnSequencePage();
+  void moveCursorRightOnStepPage();
+  void moveCursorRightOnSequenceConfigPage();
+  void moveCursorRightOnMachinePage();
+  void moveCursorRightOnResetConfirmationPage();
+  void moveCursorUpOnSequencePage();
+  void moveCursorUpOnStepPage();
+  void moveCursorUpOnSequenceConfigPage();
+  void moveCursorUpOnMachinePage();
+  void moveCursorUpOnResetConfirmationPage();
+  void moveCursorDownOnSequencePage();
+  void moveCursorDownOnStepPage();
+  void moveCursorDownOnSequenceConfigPage();
+  void moveCursorDownOnMachinePage();
+  void moveCursorDownOnResetConfirmationPage();
+  void addRowOnSequencePage();
+  void addRowOnStepPage();
+  void addRowOnMachinePage();
+  void removeRowOnSequencePage();
+  void removeRowOnStepPage();
+  void clickOnSequencePage();
+  void clickOnStepPage();
+  void clickOnMachinePage();
+  void clickOnResetConfirmationPage();
+  void resetOnSequencePage();
+  void resetOnStepPage();
+  void resetOnResetConfirmationPage();
+  void incrementOnStepPage();
+  void incrementOnSequenceConfigPage();
+  void incrementOnMachinePage();
+  void decrementOnStepPage();
+  void decrementOnSequenceConfigPage();
+  void decrementOnMachinePage();
   bool isMachineUiForCurrentSequence() const;
   std::size_t getActiveMachineIndex(CommandType type) const;
   MachineInterface* getActiveMachine(CommandType type) const;
@@ -227,6 +300,7 @@ private:
 
   SequencerAbs *sequencer;
   MachineHost *machineHost = nullptr;
+  std::function<void()> resetConfirmationHandler;
   /** which sequence*/
   size_t currentSequence;
   /** which step */
@@ -250,4 +324,5 @@ private:
   bool machineEditMode = false;
   std::size_t machineEditCol = 0;
   std::size_t machineEditRow = 0;
+  bool resetConfirmationYesSelected = true;
 };
