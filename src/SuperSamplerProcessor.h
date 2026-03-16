@@ -67,6 +67,7 @@ public:
     void setSampleRangeFromWeb (int playerId, int low, int high);
     void triggerFromWeb (int playerId);
     void setGainFromUI (int playerId, float gain);
+    std::string describeNoteForSequencer (int midiNote) const;
 
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     bool handleIncomingNote(unsigned short note,

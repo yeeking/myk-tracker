@@ -2,6 +2,7 @@
 
 #include <map>
 #include <cstddef>
+#include <string>
 
 enum class CommandType : std::size_t;
 
@@ -15,6 +16,7 @@ class MachineUtilsAbs{
          * and schedule a note off for later
          */
         virtual void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
+        virtual std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const = 0;
         /**
          * send any queued notes, e.g. note offs 
          * q'd by sendMessageToMachine

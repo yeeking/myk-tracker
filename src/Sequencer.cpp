@@ -43,33 +43,24 @@ std::size_t Step::howManyDataCols() const
 //   return &data;
 // }
 
-std::string Step::toStringFlat() const
+std::string Step::toStringFlat(const SequenceReadOnly* sequenceContext) const
 {
-  // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  if (sequenceContext == nullptr)
+    return "----";
+
   if (std::abs(this->data[0][Step::noteInd]) < std::numeric_limits<double>::epsilon()){
     return "----";
   }
-  else {
-    std::string disp = "";
-    int noteInt = static_cast<int>(this->data[0][Step::noteInd]);
-    if (noteInt < 0)
-      noteInt = 0;
-    std::size_t note = static_cast<std::size_t>(noteInt);
-    char nchar = MachineUtilsAbs::getIntToNoteMap()[note % 12];
-    std::size_t oct = note / 12; 
-    disp.push_back(nchar);
-    disp += "-" + std::to_string(oct) + " ";
-    int velInt = static_cast<int>(this->data[0][Step::velInd]);
-    if (velInt < 0)
-      velInt = 0;
-    std::size_t power = static_cast<std::size_t>(velInt / 32);
-    for (std::size_t p=0;p<power;++p){
-      disp += "+";
-    }
-    return disp; 
-    // return std::string(1, note);
+
+  std::string disp = CommandProcessor::describeStepNote(sequenceContext, this->data[0][Step::noteInd]);
+  int velInt = static_cast<int>(this->data[0][Step::velInd]);
+  if (velInt < 0)
+    velInt = 0;
+  std::size_t power = static_cast<std::size_t>(velInt / 32);
+  for (std::size_t p=0;p<power;++p){
+    disp += "+";
   }
-  // return std::to_string((int)this->data[0][Step::noteInd]);
+  return disp; 
 }
 
 std::vector<std::vector<std::string>> Step::toStringGrid(const SequenceReadOnly* sequenceContext) const 
@@ -582,8 +573,8 @@ void Sequence::setTranspose(double _transpose)
 std::string Sequence::stepToStringFlat(std::size_t step)
 {
   if (isMuted()) return "";
-  
-  return steps[step].toStringFlat();
+  SequenceReadOnly context = getReadOnlyContext();
+  return steps[step].toStringFlat(&context);
 }
 
 void Sequence::reset()

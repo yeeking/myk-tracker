@@ -63,7 +63,7 @@ class Step{
     /** get the memory address of the data in this step for direct access*/
     // std::vector<std::vector<double>>* getDataDirect();
     /** returns a one line string representation of the step's data */
-    std::string toStringFlat() const ;
+    std::string toStringFlat(const SequenceReadOnly* sequenceContext) const ;
     /** returns a grid representation of the step's data*/
     std::vector<std::vector<std::string>> toStringGrid(const SequenceReadOnly* sequenceContext) const;
     

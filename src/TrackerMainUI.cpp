@@ -14,6 +14,40 @@
 #include <cmath>
 #include <utility>
 
+namespace
+{
+const char* getOverlayTitleForEditMode(SequencerEditorMode mode)
+{
+    switch (mode)
+    {
+        case SequencerEditorMode::selectingSeqAndStep:
+            return "SEQUENCE";
+        case SequencerEditorMode::editingStep:
+            return "STEP";
+        case SequencerEditorMode::configuringSequence:
+            return "SEQ CONFIG";
+        case SequencerEditorMode::machineConfig:
+            return "MACHINE";
+        case SequencerEditorMode::resetConfirmation:
+            return "RESET TRACKER?";
+    }
+
+    return "";
+}
+
+std::string makeHudTitle(SequencerEditorMode mode, int bpmInt, bool internalClock)
+{
+    std::string title = getOverlayTitleForEditMode(mode);
+    if (mode == SequencerEditorMode::machineConfig || mode == SequencerEditorMode::resetConfirmation)
+        return title;
+
+    title += " @";
+    title += std::to_string(bpmInt);
+    title += internalClock ? " INT" : " HOST";
+    return title;
+}
+}
+
 //==============================================================================
 TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
     : AudioProcessorEditor (&p),
@@ -83,6 +117,20 @@ void TrackerMainUI::paint (juce::Graphics& g)
     waitingForPaint = false; 
 }
 
+void TrackerMainUI::parentHierarchyChanged()
+{
+    AudioProcessorEditor::parentHierarchyChanged();
+
+#if JucePlugin_Build_Standalone
+    if (auto* window = dynamic_cast<juce::DocumentWindow*>(getTopLevelComponent()))
+    {
+        window->setUsingNativeTitleBar(false);
+        window->setTitleBarHeight(0);
+        window->setFullScreen(true);
+    }
+#endif
+}
+
 void TrackerMainUI::resized()
 {
     // This is generally where you'll want topip install tf-keras lay out the positions of any
@@ -143,14 +191,18 @@ void TrackerMainUI::timerCallback ()
   {
       audioProcessor.sendCurrentCellValueOverOscIfChanged();
   });
-    if (editMode != SequencerEditorMode::machineConfig)
+    if (editMode != SequencerEditorMode::machineConfig
+        && editMode != SequencerEditorMode::resetConfirmation)
     {
       const double bpmValue = audioProcessor.getBPM();
       const int bpmInt = static_cast<int>(std::lround(bpmValue));
       const bool internalClock = audioProcessor.isInternalClockEnabled();
-      if (bpmInt != lastHudBpm || internalClock != lastHudInternalClock)
+      const std::string hudTitle = makeHudTitle(editMode, bpmInt, internalClock);
+      if (bpmInt != lastHudBpm
+          || internalClock != lastHudInternalClock
+          || overlayState.text != hudTitle)
       {
-          overlayState.text = "@BPM " + std::to_string(bpmInt) + (internalClock ? " INT" : " HOST");
+          overlayState.text = hudTitle;
           lastHudBpm = bpmInt;
           lastHudInternalClock = internalClock;
       }
@@ -829,12 +881,18 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         {
             switch (ch)
             {
-                case 'a':
-                    seqEditor->toggleArmCurrentSequence();
+                case 'q':
+                    seqEditor->toggleMuteCurrentSequence();
                     handled = true;
                     break;
-                case 'm':
-                    seqEditor->toggleMuteCurrentSequence();
+                case 'w':
+                // toggle solo
+                    // seqEditor->toggleMuteCurrentSequence();
+                    handled = true;
+                    break;
+                    
+                case 'e':
+                    seqEditor->toggleArmCurrentSequence();
                     handled = true;
                     break;
                 case 'r':

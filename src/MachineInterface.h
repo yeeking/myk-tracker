@@ -41,6 +41,11 @@ public:
                                     unsigned short velocity,
                                     unsigned short durationTicks,
                                     MachineNoteEvent& outEvent) = 0;
+    virtual bool handleClockTick(MachineNoteEvent& outEvent)
+    {
+        (void)outEvent;
+        return false;
+    }
 
     virtual void applyLearnedNote(int midiNote) { (void)midiNote; }
     virtual void addEntry() {}

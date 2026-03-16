@@ -9,6 +9,14 @@
 class ArpeggiatorMachine final : public MachineInterface
 {
 public:
+    enum class PlayMode
+    {
+        pingPong,
+        up,
+        down,
+        random
+    };
+
     ArpeggiatorMachine();
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
@@ -21,6 +29,7 @@ public:
                             unsigned short velocity,
                             unsigned short durationTicks,
                             MachineNoteEvent& outEvent) override;
+    bool handleClockTick(MachineNoteEvent& outEvent) override;
 
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
@@ -35,14 +44,26 @@ private:
     };
 
     static constexpr int kMaxLength = 16;
+    static constexpr int kMaxWidth = 8;
+    static constexpr int kMaxTicksPerBeat = 8;
 
     int length = 8;
+    int ticksPerBeat = kMaxTicksPerBeat;
     bool recordEnabled = false;
     int recordHead = 0;
     int playHead = -1;
+    int pingPongDirection = 1;
+    int tickAccumulator = 0;
+    PlayMode playMode = PlayMode::pingPong;
     std::vector<NoteSlot> slots;
     mutable std::mutex stateMutex;
 
     void clampLength();
+    void resetPlaybackState();
+    int countActiveSlots() const;
+    void sortActiveSlots();
+    int advancePlayHead();
+    int getRandomPlayableIndex() const;
+    static const char* formatPlayMode(PlayMode mode);
     static std::string formatNote(int midiNote);
 };

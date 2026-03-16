@@ -49,6 +49,7 @@ public:
     // the MachineUtils interface 
     void allNotesOff() override;
     void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
+    std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const override;
     void sendQueuedMessages(long tick) override; 
     // the ClockAbs interface
     void setBPM(double bpm) override; 
@@ -189,6 +190,12 @@ private:
     void queueZoomCommand(float delta, float normalizedX, float normalizedY);
     void initialiseOsc();
     void initialiseMachines();
+    void enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
+                            unsigned short channel,
+                            unsigned short outNote,
+                            unsigned short outVelocity,
+                            unsigned short outDurTicks);
+    void tickMachineClocks();
     //==============================================================================
     juce::OSCReceiver oscReceiver;
     juce::OSCSender oscSender;

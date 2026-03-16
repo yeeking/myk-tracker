@@ -79,6 +79,7 @@ public:
     static void assignMachineUtils(MachineUtilsAbs* _machineUtils);
     static void sendAllNotesOff();
     static void sendQueuedMIDI(long tick);
+    static std::string describeStepNote(const SequenceReadOnly* sequenceContext, double noteValue);
 
     static Command& getCommand(double commandInd);
     static Command& getCommand(const std::string& commandName);

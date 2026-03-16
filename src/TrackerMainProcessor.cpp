@@ -21,6 +21,51 @@ constexpr const char* zoomInAddress = "/zoom_in";
 constexpr const char* zoomOutAddress = "/zoom_out";
 constexpr const char* incrementAddress = "/increment";
 constexpr const char* decrementAddress = "/decrement";
+
+std::string formatMidiNoteLabel(unsigned short note)
+{
+    const std::size_t noteIndex = static_cast<std::size_t>(note % 12);
+    const std::size_t octave = static_cast<std::size_t>(note / 12);
+    const char nchar = MachineUtilsAbs::getIntToNoteMap()[static_cast<int>(noteIndex)];
+    std::string disp;
+    disp.push_back(nchar);
+    disp += "-" + std::to_string(octave) + " ";
+    return disp;
+}
+}
+
+void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
+                                              unsigned short channel,
+                                              unsigned short outNote,
+                                              unsigned short outVelocity,
+                                              unsigned short outDurTicks)
+{
+    const int samplesPerTickInt = static_cast<int>(samplesPerTick);
+    const int offsetSamples = (samplesPerTickInt * static_cast<int>(outDurTicks)) % maxHorizon;
+    const int offSample = elapsedSamples + offsetSamples;
+    targetBuffer.addEvent(MidiMessage::noteOn((int)channel, (int)outNote, (uint8)outVelocity), elapsedSamples);
+    targetBuffer.addEvent(MidiMessage::noteOff((int)channel, (int)outNote, (uint8)outVelocity), offSample);
+    outstandingNoteOffs++;
+}
+
+void TrackerMainProcessor::tickMachineClocks()
+{
+    for (std::size_t i = 0; i < arpeggiators.size(); ++i)
+    {
+        auto* machine = static_cast<MachineInterface*>(arpeggiators[i].get());
+        if (machine == nullptr)
+            continue;
+
+        MachineNoteEvent outEvent;
+        if (!machine->handleClockTick(outEvent))
+            continue;
+
+        enqueueMachineMidi(midiToSend,
+                           static_cast<unsigned short>(i + 1),
+                           outEvent.note,
+                           outEvent.velocity,
+                           outEvent.durationTicks);
+    }
 }
 
 //==============================================================================
@@ -513,6 +558,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                     // this will cause any pending messages to be added to 'midiToSend'
                     // and trigger any sample players
                     sequencer.tick();
+                    tickMachineClocks();
                 }
                 elapsedSamples = blockEndSample;
             }
@@ -543,6 +589,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 // this will cause any pending messages to be added to 'midiToSend'
                 // and trigger any sample players
                 sequencer.tick();
+                tickMachineClocks();
             }
         }
     }
@@ -1156,32 +1203,29 @@ void TrackerMainProcessor::allNotesOff()
         midiToSendToSampler.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
 }
+
+std::string TrackerMainProcessor::describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const
+{
+    if (note == 0)
+        return "----";
+
+    if (machineType == CommandType::Sampler)
+    {
+        if (const auto* sampler = dynamic_cast<const SuperSamplerProcessor*>(getSamplerForIndex(static_cast<std::size_t>(machineId))))
+            return sampler->describeNoteForSequencer(static_cast<int>(note));
+    }
+
+    return formatMidiNoteLabel(note);
+}
+
 void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks)
 {
-    auto enqueueMidiNote = [this](juce::MidiBuffer& targetBuffer,
-                                  unsigned short channel,
-                                  unsigned short outNote,
-                                  unsigned short outVelocity,
-                                  unsigned short outDurTicks)
-    {
-        const int samplesPerTickInt = static_cast<int>(samplesPerTick);
-        const int offsetSamples = (samplesPerTickInt * static_cast<int>(outDurTicks)) % maxHorizon;
-        const int offSample = elapsedSamples + offsetSamples;
-        targetBuffer.addEvent(MidiMessage::noteOn((int)channel, (int)outNote, (uint8)outVelocity), elapsedSamples);
-        targetBuffer.addEvent(MidiMessage::noteOff((int)channel, (int)outNote, (uint8)outVelocity), offSample);
-        outstandingNoteOffs++;
-    };
-
     if (machineType == CommandType::Arpeggiator)
     {
         if (auto* arp = getArpeggiatorForIndex(static_cast<std::size_t>(machineId)))
         {
-            MachineNoteEvent outEvent;
-            if (arp->handleIncomingNote(note, velocity, durInTicks, outEvent))
-            {
-                const unsigned short channel = machineId + 1;
-                enqueueMidiNote(midiToSend, channel, outEvent.note, outEvent.velocity, outEvent.durationTicks);
-            }
+            MachineNoteEvent ignoredEvent;
+            arp->handleIncomingNote(note, velocity, durInTicks, ignoredEvent);
         }
         return;
     }
@@ -1193,7 +1237,7 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
     unsigned short channel = machineId + 1; // channels come in 0-15 but we want 1-16
     // offtick is an absolute tick from the start of time 
     // but we have a max horizon which is how far in the future we can set things 
-    enqueueMidiNote(*targetBuffer, channel, note, velocity, durInTicks);
+    enqueueMachineMidi(*targetBuffer, channel, note, velocity, durInTicks);
 }
 void TrackerMainProcessor::sendQueuedMessages(long tick)
 {

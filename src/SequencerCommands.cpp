@@ -67,6 +67,21 @@ void CommandProcessor::assignMasterClock(ClockAbs* masterClock)
     CommandData::masterClock = masterClock;
 }
 
+std::string CommandProcessor::describeStepNote(const SequenceReadOnly* sequenceContext, double noteValue)
+{
+    if (sequenceContext == nullptr || CommandData::machineUtils == nullptr)
+        return "----";
+
+    const int midiNote = static_cast<int>(noteValue);
+    if (midiNote <= 0)
+        return "----";
+
+    return CommandData::machineUtils->describeStepNote(
+        static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
+        static_cast<unsigned short>(sequenceContext->machineId),
+        static_cast<unsigned short>(midiNote));
+}
+
 
 /** get the commands ready and verify they have the data they need
 */

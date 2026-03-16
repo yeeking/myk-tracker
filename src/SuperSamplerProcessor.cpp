@@ -573,6 +573,23 @@ std::vector<float> SuperSamplerProcessor::getWaveformPointsForPlayer (int player
     return getWaveformPoints (playerId);
 }
 
+std::string SuperSamplerProcessor::describeNoteForSequencer (int midiNote) const
+{
+    const std::lock_guard<std::mutex> lock (playerMutex);
+    int visibleIndex = 0;
+    for (const auto& player : players)
+    {
+        if (player == nullptr)
+            continue;
+
+        ++visibleIndex;
+        if (player->acceptsNote (midiNote))
+            return "S" + std::to_string (visibleIndex);
+    }
+
+    return "US-" + std::to_string (midiNote);
+}
+
 std::string SuperSamplerProcessor::getVuStateJson() const
 {
     auto ptr = getVuJson();
