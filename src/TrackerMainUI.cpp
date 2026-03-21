@@ -126,7 +126,7 @@ void TrackerMainUI::parentHierarchyChanged()
     {
         window->setUsingNativeTitleBar(false);
         window->setTitleBarHeight(0);
-        window->setFullScreen(true);
+        juce::Desktop::getInstance().setKioskModeComponent(window, false);
     }
 #endif
 }
