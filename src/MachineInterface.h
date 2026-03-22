@@ -47,6 +47,8 @@ public:
         return false;
     }
 
+    virtual void setSecondsPerTick(double secondsPerTick) { (void)secondsPerTick; }
+    virtual void allNotesOff() {}
     virtual void applyLearnedNote(int midiNote) { (void)midiNote; }
     virtual void addEntry() {}
     virtual void removeEntry(int entryIndex) { (void)entryIndex; }

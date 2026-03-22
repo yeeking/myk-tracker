@@ -118,6 +118,7 @@ private:
     SamplerPalette samplerPalette;
     std::vector<float> samplerColumnWidths;
     bool samplerViewActive = false;
+    bool customMachineColumnWidthsActive = false;
 
     bool waitingForPaint;
     bool updateSeqStrOnNextDraw;

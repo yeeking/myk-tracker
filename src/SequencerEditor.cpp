@@ -1510,7 +1510,9 @@ bool SequencerEditor::isMachineUiForCurrentSequence() const
   if (sequence == nullptr)
     return false;
   const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-  return machineType == CommandType::Sampler || machineType == CommandType::Arpeggiator;
+  return machineType == CommandType::Sampler
+      || machineType == CommandType::Arpeggiator
+      || machineType == CommandType::WavetableSynth;
 }
 
 std::size_t SequencerEditor::getActiveMachineIndex(CommandType type) const

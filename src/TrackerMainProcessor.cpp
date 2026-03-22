@@ -32,6 +32,11 @@ std::string formatMidiNoteLabel(unsigned short note)
     disp += "-" + std::to_string(octave) + " ";
     return disp;
 }
+
+double getSecondsPerTickFromBpm(double bpm)
+{
+    return bpm > 0.0 ? (60.0 / bpm) / 8.0 : (60.0 / 120.0) / 8.0;
+}
 }
 
 void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
@@ -250,6 +255,15 @@ void TrackerMainProcessor::initialiseMachines()
     for (int i = 0; i < 4; ++i)
         arpeggiators.push_back(std::make_unique<ArpeggiatorMachine>());
     arpeggiatorClockActive.assign(arpeggiators.size(), false);
+
+    wavetableSynths.clear();
+    wavetableSynths.reserve(4);
+    for (int i = 0; i < 4; ++i)
+        wavetableSynths.push_back(std::make_unique<WavetableSynthMachine>());
+
+    const double secondsPerTick = getSecondsPerTickFromBpm(getBPM());
+    for (auto& synth : wavetableSynths)
+        synth->setSecondsPerTick(secondsPerTick);
 }
 
 void TrackerMainProcessor::recreateSequencersAndMachines()
@@ -464,6 +478,11 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     {
         arp->prepareToPlay(sampleRate, samplesPerBlock);
     }
+    for (auto& synth : wavetableSynths)
+    {
+        synth->prepareToPlay(sampleRate, samplesPerBlock);
+        synth->setSecondsPerTick(getSecondsPerTickFromBpm(getBPM()));
+    }
 }
 
 void TrackerMainProcessor::releaseResources()
@@ -477,6 +496,10 @@ void TrackerMainProcessor::releaseResources()
     for (auto& arp : arpeggiators)
     {
         arp->releaseResources();
+    }
+    for (auto& synth : wavetableSynths)
+    {
+        synth->releaseResources();
     }
 }
 
@@ -639,6 +662,10 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     }
     hostClockActive.store(usingHostClock, std::memory_order_relaxed);
+    const bool sequencerPlaying = sequencer.isPlaying();
+    if (sequencerWasPlaying && !sequencerPlaying)
+        allNotesOff();
+    sequencerWasPlaying = sequencerPlaying;
     // to get sample-accurate midi as opposed to block-accurate midi (!)
     // now add any midi that should have occurred within this block
     // to the outgoing midibuffer 
@@ -743,6 +770,10 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (auto& arp : arpeggiators)
     {
         arp->processBlock(buffer, emptyMidi);
+    }
+    for (auto& synth : wavetableSynths)
+    {
+        synth->processBlock(buffer, emptyMidi);
     }
     processing.store(false, std::memory_order_release);
 }
@@ -984,6 +1015,23 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     }
     root->setProperty("arpeggiators", arpeggiatorStates);
 
+    juce::Array<juce::var> synthStates;
+    for (auto& synth : wavetableSynths)
+    {
+        juce::MemoryBlock synthState;
+        if (synth != nullptr)
+        {
+            synth->getStateInformation(synthState);
+            const auto encoded = juce::Base64::toBase64(synthState.getData(), synthState.getSize());
+            synthStates.add(encoded);
+        }
+        else
+        {
+            synthStates.add(juce::String());
+        }
+    }
+    root->setProperty("wavetableSynths", synthStates);
+
     return root.get();
 }
 
@@ -1162,6 +1210,25 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         }
     }
 
+    const auto synthsVar = stateVar.getProperty("wavetableSynths", juce::var());
+    if (synthsVar.isArray())
+    {
+        const auto& synthArray = *synthsVar.getArray();
+        const auto synthCount = juce::jmin<std::size_t>(static_cast<std::size_t>(synthArray.size()), wavetableSynths.size());
+        for (std::size_t i = 0; i < synthCount; ++i)
+        {
+            const auto encoded = synthArray[static_cast<int>(i)].toString();
+            if (encoded.isEmpty())
+                continue;
+            juce::MemoryBlock synthState;
+            juce::MemoryOutputStream stream(synthState, false);
+            if (! juce::Base64::convertFromBase64(stream, encoded))
+                continue;
+            if (wavetableSynths[i] != nullptr)
+                wavetableSynths[i]->setStateInformation(synthState.getData(), static_cast<int>(synthState.getSize()));
+        }
+    }
+
     // syncSequenceStrings();
     
     sequencer.updateSeqStringGrid();
@@ -1206,6 +1273,8 @@ std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
             return samplers.size();
         case CommandType::Arpeggiator:
             return arpeggiators.size();
+        case CommandType::WavetableSynth:
+            return wavetableSynths.size();
         default:
             return 0;
     }
@@ -1219,6 +1288,8 @@ MachineInterface* TrackerMainProcessor::getMachine(CommandType type, std::size_t
             return getSamplerForIndex(index);
         case CommandType::Arpeggiator:
             return getArpeggiatorForIndex(index);
+        case CommandType::WavetableSynth:
+            return getWavetableSynthForIndex(index);
         default:
             return nullptr;
     }
@@ -1232,6 +1303,8 @@ const MachineInterface* TrackerMainProcessor::getMachine(CommandType type, std::
             return getSamplerForIndex(index);
         case CommandType::Arpeggiator:
             return getArpeggiatorForIndex(index);
+        case CommandType::WavetableSynth:
+            return getWavetableSynthForIndex(index);
         default:
             return nullptr;
     }
@@ -1247,6 +1320,11 @@ void TrackerMainProcessor::allNotesOff()
         midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
         midiToSendToSampler.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
+    for (auto& arp : arpeggiators)
+        arp->resetPlayback();
+    std::fill(arpeggiatorClockActive.begin(), arpeggiatorClockActive.end(), false);
+    for (auto& synth : wavetableSynths)
+        synth->allNotesOff();
 }
 
 std::string TrackerMainProcessor::describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const
@@ -1271,6 +1349,15 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
         {
             MachineNoteEvent ignoredEvent;
             arp->handleIncomingNote(note, velocity, durInTicks, ignoredEvent);
+        }
+        return;
+    }
+    if (machineType == CommandType::WavetableSynth)
+    {
+        if (auto* synth = getWavetableSynthForIndex(static_cast<std::size_t>(machineId)))
+        {
+            MachineNoteEvent ignoredEvent;
+            synth->handleIncomingNote(note, velocity, durInTicks, ignoredEvent);
         }
         return;
     }
@@ -1301,6 +1388,9 @@ void TrackerMainProcessor::setBPM(double _bpm)
     samplesPerTick = static_cast<unsigned int>(
         std::lround(getSampleRate() * (60.0 / _bpm) / 8.0));
     bpm.store(_bpm, std::memory_order_relaxed);
+    const double secondsPerTick = getSecondsPerTickFromBpm(_bpm);
+    for (auto& synth : wavetableSynths)
+        synth->setSecondsPerTick(secondsPerTick);
 }
 
 double TrackerMainProcessor::getBPM()
@@ -1360,4 +1450,20 @@ const ArpeggiatorMachine* TrackerMainProcessor::getArpeggiatorForIndex(std::size
         return nullptr;
     const std::size_t safeIndex = machineIndex % arpeggiators.size();
     return arpeggiators[safeIndex].get();
+}
+
+WavetableSynthMachine* TrackerMainProcessor::getWavetableSynthForIndex(std::size_t machineIndex)
+{
+    if (wavetableSynths.empty())
+        return nullptr;
+    const std::size_t safeIndex = machineIndex % wavetableSynths.size();
+    return wavetableSynths[safeIndex].get();
+}
+
+const WavetableSynthMachine* TrackerMainProcessor::getWavetableSynthForIndex(std::size_t machineIndex) const
+{
+    if (wavetableSynths.empty())
+        return nullptr;
+    const std::size_t safeIndex = machineIndex % wavetableSynths.size();
+    return wavetableSynths[safeIndex].get();
 }

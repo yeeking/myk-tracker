@@ -24,6 +24,7 @@
 #include "TrackerController.h"
 #include "SuperSamplerProcessor.h"
 #include "ArpeggiatorMachine.h"
+#include "WavetableSynthMachine.h"
 
 
 //==============================================================================
@@ -147,6 +148,7 @@ private:
     juce::MidiBuffer midiToSendToSampler;
     std::vector<std::unique_ptr<MachineInterface>> samplers;
     std::vector<std::unique_ptr<ArpeggiatorMachine>> arpeggiators;
+    std::vector<std::unique_ptr<WavetableSynthMachine>> wavetableSynths;
     std::vector<bool> arpeggiatorClockActive;
     std::mutex audioMutex;
     std::atomic<bool> processing { false };
@@ -161,6 +163,7 @@ private:
     bool hostPpqValid {false};
     bool hostWasPlaying {false};
     bool pendingHostBeatReset {false};
+    bool sequencerWasPlaying {false};
     std::atomic<bool> internalClockEnabled { true };
     std::atomic<bool> hostClockActive { false };
     std::atomic<double> bpm; 
@@ -183,6 +186,8 @@ private:
     const MachineInterface* getSamplerForIndex(std::size_t samplerIndex) const;
     ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex);
     const ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex) const;
+    WavetableSynthMachine* getWavetableSynthForIndex(std::size_t machineIndex);
+    const WavetableSynthMachine* getWavetableSynthForIndex(std::size_t machineIndex) const;
     void oscMessageReceived(const juce::OSCMessage& message) override;
     void oscBundleReceived(const juce::OSCBundle& bundle) override;
     juce::String getCurrentCellOscPayload();

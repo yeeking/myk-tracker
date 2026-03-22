@@ -232,7 +232,7 @@ void TrackerMainUI::timerCallback ()
                             overlayState,
                             zoomState,
                             dragState,
-                            samplerViewActive ? &samplerColumnWidths : nullptr);
+                            customMachineColumnWidthsActive ? &samplerColumnWidths : nullptr);
 
   waitingForPaint = true; 
   if (updateSeqStrOnNextDraw || framesDrawn % 60 == 0){
@@ -250,6 +250,7 @@ void TrackerMainUI::timerCallback ()
 void TrackerMainUI::prepareSequenceView()
 {
   samplerViewActive = false;
+  customMachineColumnWidthsActive = false;
   samplerColumnWidths.clear();
   TrackerUIComponent::Style style;
   style.background = palette.background;
@@ -290,8 +291,9 @@ void TrackerMainUI::prepareSequenceView()
 }
 void TrackerMainUI::prepareStepView()
 {
-    samplerViewActive = false;
-    samplerColumnWidths.clear();
+  samplerViewActive = false;
+  customMachineColumnWidthsActive = false;
+  samplerColumnWidths.clear();
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;
@@ -335,8 +337,9 @@ void TrackerMainUI::prepareStepView()
 }
 void TrackerMainUI::prepareSeqConfigView()
 {
-    samplerViewActive = false;
-    samplerColumnWidths.clear();
+  samplerViewActive = false;
+  customMachineColumnWidthsActive = false;
+  samplerColumnWidths.clear();
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;
@@ -366,6 +369,7 @@ void TrackerMainUI::prepareSeqConfigView()
 void TrackerMainUI::prepareMachineConfigView()
 {
     samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
     samplerColumnWidths.clear();
 
     CommandType machineType = CommandType::MidiNote;
@@ -386,6 +390,7 @@ void TrackerMainUI::prepareMachineConfigView()
     if (machineType == CommandType::Sampler)
     {
         samplerViewActive = true;
+        customMachineColumnWidthsActive = true;
         bool browserActive = false;
         if (auto* sampler = dynamic_cast<SuperSamplerProcessor*>(audioProcessor.getMachine(CommandType::Sampler, static_cast<std::size_t>(machineId))))
             browserActive = sampler->isBrowsingFiles();
@@ -443,6 +448,37 @@ void TrackerMainUI::prepareMachineConfigView()
         overlayState.glowStrength = 0.25f;
         return;
     }
+    if (machineType == CommandType::WavetableSynth)
+    {
+        customMachineColumnWidthsActive = true;
+        samplerColumnWidths.assign(machineBoxes.size(), 1.0f);
+        for (std::size_t col = 0; col < machineBoxes.size(); ++col)
+        {
+            float columnWidth = 1.0f;
+            for (const auto& cell : machineBoxes[col])
+                columnWidth = std::max(columnWidth, cell.width);
+            samplerColumnWidths[col] = columnWidth;
+        }
+
+        TrackerUIComponent::Style style;
+        style.background = palette.background;
+        style.lightColor = palette.lightColor;
+        style.defaultGlowColor = palette.gridPlayhead;
+        style.ambientStrength = palette.ambientStrength;
+        style.lightDirection = palette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(cellWidth, cellHeight);
+
+        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
+        overlayState.text = "WAVE SYNTH ID " + std::to_string(machineId)
+                            + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
+        overlayState.color = palette.textPrimary;
+        overlayState.glowColor = palette.gridPlayhead;
+        overlayState.glowStrength = 0.25f;
+        return;
+    }
 
     TrackerUIComponent::Style style;
     style.background = palette.background;
@@ -474,7 +510,8 @@ void TrackerMainUI::prepareControlPanelView()
 
 void TrackerMainUI::prepareResetConfirmationView()
 {
-    samplerViewActive = false;
+  samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
     samplerColumnWidths.clear();
 
     TrackerUIComponent::Style style;

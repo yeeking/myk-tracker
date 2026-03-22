@@ -293,7 +293,7 @@ void Sequence::tick(bool trigger)
     if (trigger && !muted)
     {
       SequenceReadOnly context = getReadOnlyContext();
-      steps[currentStep].trigger(0, &context);
+      steps[currentStep].trigger(steps[currentStep].howManyDataRows(), &context);
     }
 
     const long long adjustedLength =
