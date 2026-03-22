@@ -68,6 +68,9 @@ bool TrackerMainProcessor::isStackAssigned(std::size_t stackIndex)
         if (sequence == nullptr)
             continue;
 
+        if (sequence->isMuted())
+            continue;
+
         if (static_cast<std::size_t>(sequence->getMachineId()) == stackIndex)
             return true;
     }

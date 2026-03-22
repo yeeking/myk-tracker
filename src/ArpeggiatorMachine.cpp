@@ -145,7 +145,6 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
                 playMode = static_cast<PlayMode>(modeIndex);
                 if (playMode == PlayMode::up || playMode == PlayMode::down)
                     sortActiveSlots();
-                resetPlaybackState();
             };
         }
         else
@@ -192,11 +191,11 @@ bool ArpeggiatorMachine::handleClockTick(MachineNoteEvent& outEvent)
     if (length <= 0 || countActiveSlots() == 0)
         return false;
 
-    tickAccumulator += ticksPerBeat;
-    if (tickAccumulator < kMaxTicksPerBeat)
+    ++tickAccumulator;
+    if (tickAccumulator < ticksPerBeat)
         return false;
 
-    tickAccumulator -= kMaxTicksPerBeat;
+    tickAccumulator -= ticksPerBeat;
     const int nextIndex = advancePlayHead();
     if (nextIndex < 0)
         return false;

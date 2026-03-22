@@ -273,6 +273,7 @@ private:
   void requestStringRefresh();
   std::optional<double> lookupKeyboardMidiNote(char key) const;
   void previewEnteredNote(double midiNote);
+  void syncOctaveFromMidiNote(double midiNote);
   void clampStepCursorToCurrentStep();
   bool applyChordToCurrentStep(const std::vector<int>& intervals);
   std::vector<std::vector<UIBox>> buildMachineStackCells(std::size_t stackIndex);

@@ -362,6 +362,8 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
 
     // always used the mutex protected function to update the data
     sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, static_cast<std::size_t>(column), value);
+    if (column == Step::noteInd)
+      syncOctaveFromMidiNote(value);
     // move to the next step down
     moveCursorDown();
   }
@@ -948,6 +950,7 @@ void SequencerEditor::shiftCurrentSequenceStepNote(int semitones)
 
   const int shifted = juce::jlimit(0, 127, static_cast<int>(currentNote) + semitones);
   sequencer->setStepDataAt(currentSequence, currentStep, 0, Step::noteInd, static_cast<double>(shifted));
+  syncOctaveFromMidiNote(static_cast<double>(shifted));
 }
 
 void SequencerEditor::nextSequenceType(SequencerAbs *seqr, unsigned int sequence)
@@ -1258,6 +1261,8 @@ void SequencerEditor::resetOnResetConfirmationPage()
 void SequencerEditor::incrementOnStepPage()
 {
   sequencer->incrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
+  if (currentStepCol == Step::noteInd)
+    syncOctaveFromMidiNote(sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol));
 }
 
 void SequencerEditor::incrementOnSequenceConfigPage()
@@ -1274,6 +1279,8 @@ void SequencerEditor::incrementOnMachinePage()
 void SequencerEditor::decrementOnStepPage()
 {
   sequencer->decrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
+  if (currentStepCol == Step::noteInd)
+    syncOctaveFromMidiNote(sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol));
 }
 
 void SequencerEditor::decrementOnSequenceConfigPage()
@@ -1380,6 +1387,15 @@ void SequencerEditor::previewEnteredNote(double midiNote)
     context.triggerProbability = 1.0;
     CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
   }
+}
+
+void SequencerEditor::syncOctaveFromMidiNote(double midiNote)
+{
+  if (midiNote < 0.0)
+    return;
+
+  const int octaveFromNote = juce::jlimit(0, 9, static_cast<int>(midiNote) / 12);
+  octave = static_cast<double>(octaveFromNote);
 }
 
 void SequencerEditor::clampStepCursorToCurrentStep()
