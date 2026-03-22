@@ -147,6 +147,7 @@ private:
     juce::MidiBuffer midiToSendToSampler;
     std::vector<std::unique_ptr<MachineInterface>> samplers;
     std::vector<std::unique_ptr<ArpeggiatorMachine>> arpeggiators;
+    std::vector<bool> arpeggiatorClockActive;
     std::mutex audioMutex;
     std::atomic<bool> processing { false };
 
@@ -195,6 +196,8 @@ private:
                             unsigned short outNote,
                             unsigned short outVelocity,
                             unsigned short outDurTicks);
+    bool isMachineAssigned(CommandType machineType, std::size_t machineIndex);
+    void deactivateArpeggiator(std::size_t machineIndex);
     void tickMachineClocks();
     //==============================================================================
     juce::OSCReceiver oscReceiver;

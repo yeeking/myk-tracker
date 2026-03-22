@@ -211,6 +211,12 @@ bool ArpeggiatorMachine::handleClockTick(MachineNoteEvent& outEvent)
     return true;
 }
 
+void ArpeggiatorMachine::resetPlayback()
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    resetPlaybackState();
+}
+
 void ArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
 {
     const std::lock_guard<std::mutex> lock(stateMutex);

@@ -50,6 +50,7 @@ public:
     virtual void applyLearnedNote(int midiNote) { (void)midiNote; }
     virtual void addEntry() {}
     virtual void removeEntry(int entryIndex) { (void)entryIndex; }
+    virtual bool dismissTransientUi() { return false; }
 
     virtual void getStateInformation(juce::MemoryBlock& destData) = 0;
     virtual void setStateInformation(const void* data, int sizeInBytes) = 0;

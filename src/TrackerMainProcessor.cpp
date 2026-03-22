@@ -48,13 +48,57 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
     outstandingNoteOffs++;
 }
 
+bool TrackerMainProcessor::isMachineAssigned(CommandType machineType, std::size_t machineIndex)
+{
+    for (std::size_t seq = 0; seq < sequencer.howManySequences(); ++seq)
+    {
+        const auto* sequence = sequencer.getSequence(seq);
+        if (sequence == nullptr)
+            continue;
+
+        if (static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType())) == machineType
+            && static_cast<std::size_t>(sequence->getMachineId()) == machineIndex)
+            return true;
+    }
+
+    return false;
+}
+
+void TrackerMainProcessor::deactivateArpeggiator(std::size_t machineIndex)
+{
+    if (machineIndex >= arpeggiators.size())
+        return;
+
+    if (machineIndex < arpeggiatorClockActive.size() && !arpeggiatorClockActive[machineIndex])
+        return;
+
+    if (auto* arp = arpeggiators[machineIndex].get())
+        arp->resetPlayback();
+
+    midiToSend.addEvent(MidiMessage::allNotesOff(static_cast<int>(machineIndex + 1)), elapsedSamples);
+
+    if (machineIndex < arpeggiatorClockActive.size())
+        arpeggiatorClockActive[machineIndex] = false;
+}
+
 void TrackerMainProcessor::tickMachineClocks()
 {
+    const bool sequencerPlaying = sequencer.isPlaying();
     for (std::size_t i = 0; i < arpeggiators.size(); ++i)
     {
+        const bool shouldBeActive = sequencerPlaying && isMachineAssigned(CommandType::Arpeggiator, i);
+        if (!shouldBeActive)
+        {
+            deactivateArpeggiator(i);
+            continue;
+        }
+
         auto* machine = static_cast<MachineInterface*>(arpeggiators[i].get());
         if (machine == nullptr)
             continue;
+
+        if (i < arpeggiatorClockActive.size())
+            arpeggiatorClockActive[i] = true;
 
         MachineNoteEvent outEvent;
         if (!machine->handleClockTick(outEvent))
@@ -205,6 +249,7 @@ void TrackerMainProcessor::initialiseMachines()
     arpeggiators.reserve(4);
     for (int i = 0; i < 4; ++i)
         arpeggiators.push_back(std::make_unique<ArpeggiatorMachine>());
+    arpeggiatorClockActive.assign(arpeggiators.size(), false);
 }
 
 void TrackerMainProcessor::recreateSequencersAndMachines()

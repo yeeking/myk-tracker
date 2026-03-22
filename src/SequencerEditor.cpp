@@ -47,6 +47,10 @@ void SequencerEditor::setResetConfirmationHandler(std::function<void()> handler)
 {
   resetConfirmationHandler = std::move(handler);
 }
+void SequencerEditor::setQuitConfirmationHandler(std::function<void()> handler)
+{
+  quitConfirmationHandler = std::move(handler);
+}
 SequencerAbs *SequencerEditor::getSequencer()
 {
   return this->sequencer;
@@ -620,6 +624,7 @@ void SequencerEditor::incrementAtCursor()
   switch (getCurrentPage())
   {
   case SequencerEditorPage::sequence:
+    shiftCurrentSequenceStepNote(12);
     break;
   case SequencerEditorPage::step:
     incrementOnStepPage();
@@ -640,6 +645,7 @@ void SequencerEditor::decrementAtCursor()
   switch (getCurrentPage())
   {
   case SequencerEditorPage::sequence:
+    shiftCurrentSequenceStepNote(-12);
     break;
   case SequencerEditorPage::step:
     decrementOnStepPage();
@@ -879,6 +885,23 @@ void SequencerEditor::decrementTicksPerStep()
   else
     --tps;
   sequencer->getSequence(currentSequence)->setTicksPerStep(tps);
+}
+
+void SequencerEditor::shiftCurrentSequenceStepNote(int semitones)
+{
+  if (sequencer == nullptr)
+    return;
+
+  auto data = sequencer->getStepData(currentSequence, currentStep);
+  if (data.empty() || data[0].size() <= Step::noteInd)
+    return;
+
+  const double currentNote = data[0][Step::noteInd];
+  if (currentNote <= 0.0)
+    return;
+
+  const int shifted = juce::jlimit(0, 127, static_cast<int>(currentNote) + semitones);
+  sequencer->setStepDataAt(currentSequence, currentStep, 0, Step::noteInd, static_cast<double>(shifted));
 }
 
 void SequencerEditor::nextSequenceType(SequencerAbs *seqr, unsigned int sequence)
@@ -1154,9 +1177,17 @@ void SequencerEditor::clickOnMachinePage()
 
 void SequencerEditor::clickOnResetConfirmationPage()
 {
-  if (resetConfirmationYesSelected && resetConfirmationHandler){
-    DBG("SequencerEditor is about to call the resetConfirmationHandler  ");
-    resetConfirmationHandler();
+  if (resetConfirmationYesSelected)
+  {
+    if (pendingConfirmationAction == ConfirmationAction::resetTracker && resetConfirmationHandler)
+    {
+      DBG("SequencerEditor is about to call the resetConfirmationHandler");
+      resetConfirmationHandler();
+    }
+    else if (pendingConfirmationAction == ConfirmationAction::quitApplication && quitConfirmationHandler)
+    {
+      quitConfirmationHandler();
+    }
   }
 
   gotoSequencePage();
@@ -1277,7 +1308,7 @@ void SequencerEditor::previewEnteredNote(double midiNote)
     auto data = sequence->getStepData(stepIndex);
     const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
 
-    machineLearnNote(static_cast<int>(midiNote));
+    machineInsertCurrentCell(midiNote);
     auto context = sequence->getReadOnlyContext();
     bool useDefaults = data.empty();
     if (data.empty())
@@ -1319,6 +1350,7 @@ void SequencerEditor::clampStepCursorToCurrentStep()
 
 void SequencerEditor::gotoSequenceConfigPage()
 {
+  dismissMachineTransientUiIfNeeded();
   setEditMode(SequencerEditorMode::configuringSequence);
 }
 
@@ -1330,17 +1362,20 @@ void SequencerEditor::gotoMachineConfigPage()
 
 void SequencerEditor::gotoSequencePage()
 {
+  dismissMachineTransientUiIfNeeded();
   setEditMode(SequencerEditorMode::selectingSeqAndStep);
 }
 
 void SequencerEditor::gotoStepPage()
 {
+  dismissMachineTransientUiIfNeeded();
   setEditMode(SequencerEditorMode::editingStep);
   clampStepCursorToCurrentStep();
 }
 
 void SequencerEditor::gotoResetConfirmationPage()
 {
+  dismissMachineTransientUiIfNeeded();
   setEditMode(SequencerEditorMode::resetConfirmation);
   resetConfirmationYesSelected = true;
 }
@@ -1348,6 +1383,19 @@ void SequencerEditor::gotoResetConfirmationPage()
 bool SequencerEditor::isResetConfirmationYesSelected() const
 {
   return resetConfirmationYesSelected;
+}
+
+std::string SequencerEditor::getConfirmationPrompt() const
+{
+  switch (pendingConfirmationAction)
+  {
+    case ConfirmationAction::resetTracker:
+      return "RESET TRACKER?";
+    case ConfirmationAction::quitApplication:
+      return "QUIT TRACKER?";
+  }
+
+  return "CONFIRM?";
 }
 
 void SequencerEditor::togglePlayback()
@@ -1396,12 +1444,23 @@ bool SequencerEditor::handleNoteKey(char key)
 
   const double note = midiNote.value() + (12 * getCurrentOctave());
   previewEnteredNote(note);
+
+  if (getCurrentPage() == SequencerEditorPage::machine)
+    return machineInsertCurrentCell(note);
+
   enterStepData(midiNote.value(), Step::noteInd);
   return true;
 }
 
 void SequencerEditor::requestTrackerReset()
 {
+  pendingConfirmationAction = ConfirmationAction::resetTracker;
+  gotoResetConfirmationPage();
+}
+
+void SequencerEditor::requestApplicationQuit()
+{
+  pendingConfirmationAction = ConfirmationAction::quitApplication;
   gotoResetConfirmationPage();
 }
 
@@ -1478,6 +1537,12 @@ MachineInterface* SequencerEditor::getActiveMachine(CommandType type) const
 
 void SequencerEditor::refreshMachineStateForCurrentSequence()
 {
+  const std::size_t previousRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
+  const std::size_t previousCols = machineCells.size();
+  const std::string previousHeader = (previousCols > 0 && previousRows > 0) ? machineCells[0][0].text : std::string{};
+  const bool cursorWasOnControlRow = previousRows > 0 && machineCursorRow == previousRows - 1;
+  const bool editWasOnControlRow = previousRows > 0 && machineEditRow == previousRows - 1;
+
   if (!isMachineUiForCurrentSequence() || machineHost == nullptr)
   {
     machineCells.assign(1, std::vector<UIBox>(1));
@@ -1501,6 +1566,21 @@ void SequencerEditor::refreshMachineStateForCurrentSequence()
   MachineUiContext context;
   context.disableLearning = isSequencerPlaying(sequencer);
   machineCells = machine->getUIBoxes(context);
+  const std::size_t newRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
+  const std::size_t newCols = machineCells.size();
+  const std::string newHeader = (newCols > 0 && newRows > 0) ? machineCells[0][0].text : std::string{};
+  const bool browserFolderChanged = previousCols == 1 && newCols == 1 && previousHeader != newHeader;
+  if (browserFolderChanged)
+  {
+    machineCursorRow = 0;
+    machineCursorCol = 0;
+    machineEditRow = 0;
+    machineEditCol = 0;
+  }
+  if (cursorWasOnControlRow && newRows > previousRows)
+    machineCursorRow += (newRows - previousRows);
+  if (editWasOnControlRow && newRows > previousRows)
+    machineEditRow += (newRows - previousRows);
   rebuildMachineCells();
 }
 
@@ -1549,16 +1629,45 @@ void SequencerEditor::machineActivateCurrentCell()
     cell.onActivate();
 }
 
-void SequencerEditor::machineLearnNote(int midiNote)
+bool SequencerEditor::machineInsertCurrentCell(double value)
 {
   if (!isMachineUiForCurrentSequence())
-    return;
+    return false;
+  if (machineCells.empty() || machineCells[0].empty())
+    return false;
+  if (machineCursorCol >= machineCells.size() || machineCursorRow >= machineCells[machineCursorCol].size())
+    return false;
+
+  auto& cell = machineCells[machineCursorCol][machineCursorRow];
+  if (!cell.onInsert)
+    return false;
+
+  machineEditCol = machineCursorCol;
+  machineEditRow = machineCursorRow;
+  cell.onInsert(value);
+  return true;
+}
+
+bool SequencerEditor::dismissCurrentTransientUi()
+{
+  if (!isMachineUiForCurrentSequence())
+    return false;
+
   const auto* sequence = sequencer->getSequence(currentSequence);
   if (sequence == nullptr)
-    return;
+    return false;
+
   const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
   if (auto* machine = getActiveMachine(machineType))
-    machine->applyLearnedNote(midiNote);
+  {
+    if (machine->dismissTransientUi())
+    {
+      refreshMachineStateForCurrentSequence();
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void SequencerEditor::machineAdjustCurrentCell(int direction)
@@ -1621,4 +1730,11 @@ void SequencerEditor::moveMachineCursor(int deltaRow, int deltaCol)
   machineCursorRow = static_cast<std::size_t>(nextRow);
   machineCursorCol = static_cast<std::size_t>(nextCol);
   rebuildMachineCells();
+}
+
+void SequencerEditor::dismissMachineTransientUiIfNeeded()
+{
+  const auto previousMode = editMode;
+  if (previousMode == SequencerEditorMode::machineConfig)
+    dismissCurrentTransientUi();
 }

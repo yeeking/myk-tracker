@@ -68,15 +68,16 @@ public:
     void triggerFromWeb (int playerId);
     void setGainFromUI (int playerId, float gain);
     std::string describeNoteForSequencer (int midiNote) const;
+    bool isBrowsingFiles() const;
 
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     bool handleIncomingNote(unsigned short note,
                             unsigned short velocity,
                             unsigned short durationTicks,
                             MachineNoteEvent& outEvent) override;
-    void applyLearnedNote(int midiNote) override;
     void addEntry() override;
     void removeEntry(int entryIndex) override;
+    bool dismissTransientUi() override;
 
 private:
     struct UiPlayerState
@@ -112,6 +113,12 @@ private:
     void importFromValueTree (const juce::ValueTree& tree);
     bool loadSampleInternal (int playerId, const juce::File& file, juce::String& error);
     SuperSamplePlayer* getPlayer (int playerId) const;
+    std::vector<std::vector<UIBox>> buildBrowserUi();
+    void openFileBrowserForPlayer(int playerId);
+    void closeFileBrowser();
+    void browseUp();
+    void browseInto(const juce::File& target);
+    void loadBrowsedFile(const juce::File& file);
 
     std::vector<std::unique_ptr<SuperSamplePlayer>> players;
     mutable std::mutex playerMutex;
@@ -122,7 +129,8 @@ private:
 
     std::vector<UiPlayerState> uiPlayers;
     std::vector<float> uiGlowLevels;
-    int learningPlayerId { -1 };
+    int browsingPlayerId { -1 };
+    juce::File browsingDirectory;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuperSamplerProcessor)

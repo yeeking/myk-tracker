@@ -81,6 +81,17 @@ TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
     addKeyListener(this);
     setWantsKeyboardFocus(true);
 
+#if JucePlugin_Build_Standalone
+    seqEditor->setQuitConfirmationHandler([]()
+    {
+        juce::MessageManager::callAsync([]()
+        {
+            if (auto* app = juce::JUCEApplicationBase::getInstance())
+                app->systemRequestedQuit();
+        });
+    });
+#endif
+
     startTimer(1000 / 25);
 
 }
@@ -375,7 +386,22 @@ void TrackerMainUI::prepareMachineConfigView()
     if (machineType == CommandType::Sampler)
     {
         samplerViewActive = true;
-        samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
+        bool browserActive = false;
+        if (auto* sampler = dynamic_cast<SuperSamplerProcessor*>(audioProcessor.getMachine(CommandType::Sampler, static_cast<std::size_t>(machineId))))
+            browserActive = sampler->isBrowsingFiles();
+        samplerColumnWidths.clear();
+        samplerColumnWidths.resize(machineBoxes.size(), 1.0f);
+        bool hasCustomWidths = false;
+        for (std::size_t col = 0; col < machineBoxes.size(); ++col)
+        {
+            float columnWidth = 1.0f;
+            for (const auto& cell : machineBoxes[col])
+                columnWidth = std::max(columnWidth, cell.width);
+            samplerColumnWidths[col] = columnWidth;
+            hasCustomWidths = hasCustomWidths || columnWidth > 1.0f;
+        }
+        if (!hasCustomWidths && samplerColumnWidths.size() == 6)
+            samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
 
         TrackerUIComponent::Style style;
         style.background = samplerPalette.background;
@@ -388,7 +414,7 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
+        updateCellStates(machineBoxes, browserActive ? std::min<std::size_t>(rows, 8) : rows, cols);
         overlayState.text = "SAMPLER ID " + std::to_string(machineId)
                             + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
         overlayState.color = samplerPalette.textPrimary;
@@ -472,7 +498,7 @@ void TrackerMainUI::prepareResetConfirmationView()
     boxes[1][0].isSelected = !yesSelected;
 
     updateCellStates(boxes, 1, 2);
-    overlayState.text = "RESET TRACKER?";
+    overlayState.text = seqEditor->getConfirmationPrompt();
     overlayState.color = palette.textWarning;
     overlayState.glowColor = palette.gridPlayhead;
     overlayState.glowStrength = 0.45f;
@@ -830,6 +856,19 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                 return true;
             }
         }
+
+#if JucePlugin_Build_Standalone
+        if (key.getModifiers().isCtrlDown())
+        {
+            const int keyCode = key.getKeyCode();
+            if (keyCode == 'q' || keyCode == 'Q')
+            {
+                seqEditor->requestApplicationQuit();
+                audioProcessor.getSequencer()->requestStrUpdate();
+                return true;
+            }
+        }
+#endif
         bool handled = false;
         const int keyCode = key.getKeyCode();
         const char ch = static_cast<char>(std::tolower(static_cast<unsigned char>(key.getTextCharacter())));
@@ -851,6 +890,10 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         {
             seqEditor->resetAtCursor();
             handled = true;
+        }
+        else if (key.isKeyCode(juce::KeyPress::escapeKey))
+        {
+            handled = seqEditor->dismissCurrentTransientUi();
         }
         else if (key.isKeyCode(juce::KeyPress::returnKey))
         {

@@ -30,6 +30,7 @@ public:
                             unsigned short durationTicks,
                             MachineNoteEvent& outEvent) override;
     bool handleClockTick(MachineNoteEvent& outEvent) override;
+    void resetPlayback();
 
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;

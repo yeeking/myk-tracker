@@ -94,6 +94,12 @@ enum class SequencerEditorPage
   resetConfirmation
 };
 
+enum class ConfirmationAction
+{
+  resetTracker,
+  quitApplication
+};
+
 /** Represents an editor for a sequencer, which allows stateful edit operations to be applied
  * to sequences. For example, select sequemce, select step, enter data
  * Used to build editing interfaces for a sequencer
@@ -106,6 +112,7 @@ public:
   void setSequencer(SequencerAbs *sequencer);
   void setMachineHost(MachineHost *host);
   void setResetConfirmationHandler(std::function<void()> handler);
+  void setQuitConfirmationHandler(std::function<void()> handler);
   SequencerAbs *getSequencer();
   /** resets editor, e.g. when changing sequence*/
   void resetCursor();
@@ -172,6 +179,7 @@ public:
   void gotoStepPage();
   void gotoResetConfirmationPage();
   bool isResetConfirmationYesSelected() const;
+  std::string getConfirmationPrompt() const;
 
   void click();
   void togglePlayback();
@@ -180,6 +188,7 @@ public:
   void toggleMuteCurrentSequence();
   bool handleNoteKey(char key);
   void requestTrackerReset();
+  void requestApplicationQuit();
 
   void refreshMachineStateForCurrentSequence();
   const std::vector<std::vector<UIBox>> &getMachineCells() const;
@@ -187,7 +196,8 @@ public:
   void machineRemoveEntry();
   void machineActivateCurrentCell();
   void machineAdjustCurrentCell(int direction);
-  void machineLearnNote(int midiNote);
+  bool machineInsertCurrentCell(double value);
+  bool dismissCurrentTransientUi();
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);
   static SequencerEditorSubMode cycleSubModeRight(SequencerEditorSubMode subMode);
@@ -215,6 +225,7 @@ public:
   void decrementChannel();
   void incrementTicksPerStep();
   void decrementTicksPerStep();
+  void shiftCurrentSequenceStepNote(int semitones);
   static void nextSequenceType(SequencerAbs *seqr, unsigned int sequence);
   /** returns the index of the sequence that the editor is currently focused on*/
   size_t getCurrentSequence() const;
@@ -295,12 +306,14 @@ private:
   bool isMachineUiForCurrentSequence() const;
   std::size_t getActiveMachineIndex(CommandType type) const;
   MachineInterface* getActiveMachine(CommandType type) const;
+  void dismissMachineTransientUiIfNeeded();
   void rebuildMachineCells();
   void moveMachineCursor(int deltaRow, int deltaCol);
 
   SequencerAbs *sequencer;
   MachineHost *machineHost = nullptr;
   std::function<void()> resetConfirmationHandler;
+  std::function<void()> quitConfirmationHandler;
   /** which sequence*/
   size_t currentSequence;
   /** which step */
@@ -325,4 +338,5 @@ private:
   std::size_t machineEditCol = 0;
   std::size_t machineEditRow = 0;
   bool resetConfirmationYesSelected = true;
+  ConfirmationAction pendingConfirmationAction = ConfirmationAction::resetTracker;
 };
