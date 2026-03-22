@@ -539,7 +539,7 @@ double Sequence::getMachineType() const
 void Sequence::setMachineId(double newMachineId)
 {
   if (newMachineId < 0) newMachineId = 0;
-  if (newMachineId > 15) newMachineId = 15;
+  if (newMachineId > 31) newMachineId = 31;
   this->machineId = newMachineId;
 }
 
@@ -983,7 +983,7 @@ std::vector<Parameter>& Sequencer::getSeqConfigSpecs()
 void Sequencer::setupSeqConfigSpecs()
 {
   seqConfigSpecs.resize(4);
-  seqConfigSpecs[Sequence::machineIdConfig] = Parameter("Machine ID", "ID", 0, 15, 1, 1, -1);
+  seqConfigSpecs[Sequence::machineIdConfig] = Parameter("Machine ID", "ID", 0, 31, 1, 1, -1);
   seqConfigSpecs[Sequence::machineTypeConfig] = Parameter("Machine", "Type", 0, 0, 1, 0, -1);
   seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1);
   seqConfigSpecs[Sequence::probConfig] = Parameter("Trig Prob", "P", 0.0, 1.0, 0.1, 0.0, -1, 2);

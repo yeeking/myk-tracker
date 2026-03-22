@@ -232,9 +232,14 @@ void WavetableSynthMachine::setStateInformation(const void* data, int sizeInByte
 {
     if (data == nullptr || sizeInBytes <= 0)
         return;
+    if (!juce::CharPointer_UTF8::isValidString(static_cast<const char*>(data), sizeInBytes))
+        return;
 
     const std::lock_guard<std::mutex> lock(stateMutex);
-    juce::String json(static_cast<const char*>(data), static_cast<size_t>(sizeInBytes));
+    const auto json = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
+    if (json.isEmpty())
+        return;
+
     const auto parsed = juce::JSON::fromString(json);
     if (!parsed.isObject())
         return;

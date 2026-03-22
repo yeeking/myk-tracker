@@ -372,22 +372,22 @@ void TrackerMainUI::prepareMachineConfigView()
     customMachineColumnWidthsActive = false;
     samplerColumnWidths.clear();
 
-    CommandType machineType = CommandType::MidiNote;
     int machineId = 0;
     std::vector<std::vector<UIBox>> machineBoxes;
+    std::optional<CommandType> detailType;
     audioProcessor.withAudioThreadExclusive([&]()
     {
         auto* seq = audioProcessor.getSequencer();
         if (auto* sequence = seq->getSequence(seqEditor->getCurrentSequence()))
         {
-            machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
             machineId = static_cast<int>(sequence->getMachineId());
         }
         seqEditor->refreshMachineStateForCurrentSequence();
         machineBoxes = seqEditor->getMachineCells();
+        detailType = seqEditor->getFocusedMachineDetailType();
     });
 
-    if (machineType == CommandType::Sampler)
+    if (detailType.has_value() && detailType.value() == CommandType::Sampler)
     {
         samplerViewActive = true;
         customMachineColumnWidthsActive = true;
@@ -420,14 +420,14 @@ void TrackerMainUI::prepareMachineConfigView()
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         updateCellStates(machineBoxes, browserActive ? std::min<std::size_t>(rows, 8) : rows, cols);
-        overlayState.text = "SAMPLER ID " + std::to_string(machineId)
+        overlayState.text = "STACK " + std::to_string(machineId) + " SAMPLER"
                             + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
         overlayState.color = samplerPalette.textPrimary;
         overlayState.glowColor = samplerPalette.glowActive;
         overlayState.glowStrength = 0.35f;
         return;
     }
-    if (machineType == CommandType::Arpeggiator)
+    if (detailType.has_value() && detailType.value() == CommandType::Arpeggiator)
     {
         TrackerUIComponent::Style style;
         style.background = palette.background;
@@ -441,14 +441,14 @@ void TrackerMainUI::prepareMachineConfigView()
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         updateCellStates(machineBoxes, rows, cols);
-        overlayState.text = "ARP ID " + std::to_string(machineId)
+        overlayState.text = "STACK " + std::to_string(machineId) + " ARP"
                             + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
         overlayState.glowStrength = 0.25f;
         return;
     }
-    if (machineType == CommandType::WavetableSynth)
+    if (detailType.has_value() && detailType.value() == CommandType::WavetableSynth)
     {
         customMachineColumnWidthsActive = true;
         samplerColumnWidths.assign(machineBoxes.size(), 1.0f);
@@ -472,7 +472,28 @@ void TrackerMainUI::prepareMachineConfigView()
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         updateCellStates(machineBoxes, rows, cols);
-        overlayState.text = "WAVE SYNTH ID " + std::to_string(machineId)
+        overlayState.text = "STACK " + std::to_string(machineId) + " WAVE"
+                            + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
+        overlayState.color = palette.textPrimary;
+        overlayState.glowColor = palette.gridPlayhead;
+        overlayState.glowStrength = 0.25f;
+        return;
+    }
+    if (detailType.has_value() && detailType.value() == CommandType::MidiNote)
+    {
+        TrackerUIComponent::Style style;
+        style.background = palette.background;
+        style.lightColor = palette.lightColor;
+        style.defaultGlowColor = palette.gridPlayhead;
+        style.ambientStrength = palette.ambientStrength;
+        style.lightDirection = palette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(cellWidth, cellHeight);
+
+        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
+        overlayState.text = "STACK " + std::to_string(machineId) + " MIDI"
                             + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
@@ -489,14 +510,11 @@ void TrackerMainUI::prepareMachineConfigView()
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
 
-    cellStates.assign(1, std::vector<TrackerUIComponent::CellState>(1, makeDefaultCell()));
-    if (machineType == CommandType::MidiNote)
-        overlayState.text = "CHANNEL " + std::to_string(machineId)
-                            + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
-    else if (machineType == CommandType::Log)
-        overlayState.text = std::string("CHECK CONSOLE") + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
-    else
-        overlayState.text = std::string("MACHINE") + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
+    const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+    const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+    updateCellStates(machineBoxes, rows, cols);
+    overlayState.text = "STACK " + std::to_string(machineId)
+                        + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
 }
 
 void TrackerMainUI::prepareControlPanelView()
@@ -885,27 +903,28 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                 audioProcessor.setInternalClockEnabled(!enabled);
                 return true;
             }
-            if (ch == 'R')
+        }
+
+        if (key.getModifiers().isCtrlDown())
+        {
+            const int keyCode = key.getKeyCode();
+            if (keyCode == 'r' || keyCode == 'R')
             {
                 DBG("Going for a reset");
                 seqEditor->requestTrackerReset();
                 audioProcessor.getSequencer()->requestStrUpdate();
                 return true;
             }
-        }
-
 #if JucePlugin_Build_Standalone
-        if (key.getModifiers().isCtrlDown())
-        {
-            const int keyCode = key.getKeyCode();
             if (keyCode == 'q' || keyCode == 'Q')
             {
                 seqEditor->requestApplicationQuit();
                 audioProcessor.getSequencer()->requestStrUpdate();
                 return true;
             }
-        }
 #endif
+        }
+
         bool handled = false;
         const int keyCode = key.getKeyCode();
         const char ch = static_cast<char>(std::tolower(static_cast<unsigned char>(key.getTextCharacter())));
@@ -915,9 +934,17 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             seqEditor->togglePlayback();
             handled = true;
         }
+        else if (keyCode == '5' && seqEditor->getCurrentPage() == SequencerEditorPage::machine)
+        {
+            handled = seqEditor->enterSelectedMachineDetail();
+        }
         else if (keyCode >= '1' && keyCode <= '6')
         {
             handled = seqEditor->selectPageShortcut(keyCode - '0');
+        }
+        else if (seqEditor->handleChordKey(ch))
+        {
+            handled = true;
         }
         else if (seqEditor->handleNoteKey(ch))
         {
@@ -980,8 +1007,13 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                     handled = true;
                     break;
                 case '\t':
-                    seqEditor->nextStep();
-                    handled = true;
+                    if (seqEditor->getCurrentPage() == SequencerEditorPage::machine && seqEditor->isEditingMachineDetail())
+                        handled = seqEditor->cycleMachineDetailNext();
+                    else
+                    {
+                        seqEditor->nextStep();
+                        handled = true;
+                    }
                     break;
                 case '-':
                     seqEditor->removeRow();

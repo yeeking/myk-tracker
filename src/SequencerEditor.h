@@ -29,6 +29,11 @@ public:
   virtual std::size_t getMachineCount(CommandType type) const = 0;
   virtual MachineInterface* getMachine(CommandType type, std::size_t index) = 0;
   virtual const MachineInterface* getMachine(CommandType type, std::size_t index) const = 0;
+  virtual std::size_t getMachineStackCount() const = 0;
+  virtual std::vector<CommandType> getMachineStackTypes(std::size_t stackIndex) const = 0;
+  virtual void addMachineToStack(std::size_t stackIndex) = 0;
+  virtual void removeMachineFromStack(std::size_t stackIndex, std::size_t slotIndex) = 0;
+  virtual void cycleMachineTypeInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
 };
 
 // Abstract interface for editor-facing sequencer access.
@@ -186,7 +191,12 @@ public:
   void rewindTransport();
   void toggleArmCurrentSequence();
   void toggleMuteCurrentSequence();
+  bool handleChordKey(char key);
   bool handleNoteKey(char key);
+  bool enterSelectedMachineDetail();
+  bool cycleMachineDetailNext();
+  bool isEditingMachineDetail() const;
+  std::optional<CommandType> getFocusedMachineDetailType() const;
   void requestTrackerReset();
   void requestApplicationQuit();
 
@@ -264,6 +274,10 @@ private:
   std::optional<double> lookupKeyboardMidiNote(char key) const;
   void previewEnteredNote(double midiNote);
   void clampStepCursorToCurrentStep();
+  bool applyChordToCurrentStep(const std::vector<int>& intervals);
+  std::vector<std::vector<UIBox>> buildMachineStackCells(std::size_t stackIndex);
+  std::optional<CommandType> getSelectedStackMachineType() const;
+  void leaveMachineDetail();
 
   void moveCursorLeftOnSequencePage();
   void moveCursorLeftOnStepPage();
@@ -337,6 +351,8 @@ private:
   bool machineEditMode = false;
   std::size_t machineEditCol = 0;
   std::size_t machineEditRow = 0;
+  bool machineStackDetailMode = false;
+  std::size_t machineSelectedStackSlot = 0;
   bool resetConfirmationYesSelected = true;
   ConfirmationAction pendingConfirmationAction = ConfirmationAction::resetTracker;
 };

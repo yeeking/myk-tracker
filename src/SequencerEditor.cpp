@@ -11,6 +11,8 @@
 
 namespace
 {
+constexpr int kMachineStackCount = 32;
+
 bool isSequencerPlaying(SequencerAbs *sequencer)
 {
   if (sequencer == nullptr)
@@ -18,6 +20,44 @@ bool isSequencerPlaying(SequencerAbs *sequencer)
   if (auto *impl = dynamic_cast<Sequencer *>(sequencer))
     return impl->isPlaying();
   return false;
+}
+
+struct ChordShortcut
+{
+  char key;
+  std::vector<int> intervals;
+};
+
+const std::vector<ChordShortcut> kChordShortcuts = {
+  {'q', {0, 4, 7}},
+  {'w', {0, 3, 7}},
+  {'e', {0, 4, 7, 10}},
+  {'r', {0, 4, 7, 11}},
+  {'t', {0, 3, 7, 10}},
+  {'y', {0, 3, 6, 9}},
+  {'u', {0, 3, 6, 10}},
+  {'i', {0, 5, 7}},
+  {'o', {0, 4, 7, 11, 14}},
+  {'p', {0, 3, 7, 10, 14}}
+};
+
+bool isStackMachineType(CommandType type)
+{
+  return type == CommandType::Sampler
+      || type == CommandType::Arpeggiator
+      || type == CommandType::WavetableSynth;
+}
+
+std::string getStackMachineLabel(CommandType type)
+{
+  switch (type)
+  {
+    case CommandType::MidiNote: return "MIDI";
+    case CommandType::Sampler: return "SAMPLER";
+    case CommandType::Arpeggiator: return "ARP";
+    case CommandType::WavetableSynth: return "WAVE";
+    default: return "MACH";
+  }
 }
 } // namespace
 
@@ -71,6 +111,8 @@ void SequencerEditor::resetCursor()
   machineEditRow = 0;
   machineCursorRow = 0;
   machineCursorCol = 0;
+  machineStackDetailMode = false;
+  machineSelectedStackSlot = 0;
 }
 
 SequencerEditorMode SequencerEditor::getEditMode() const
@@ -105,7 +147,10 @@ void SequencerEditor::setEditMode(SequencerEditorMode mode)
 {
   this->editMode = mode;
   if (mode != SequencerEditorMode::machineConfig)
+  {
     machineEditMode = false;
+    machineStackDetailMode = false;
+  }
 }
 
 void SequencerEditor::selectPage(SequencerEditorPage page)
@@ -465,7 +510,7 @@ void SequencerEditor::enterDataAtCursor(double inValue)
   {
     Sequence* sequence = sequencer->getSequence(currentSequence);
     if (currentSeqParam == Sequence::machineIdConfig){
-      double machineId = fmod(inValue, 16);
+      double machineId = fmod(inValue, kMachineStackCount);
       if (machineId < 0) machineId = 0;
       sequence->setMachineId(machineId);
     }
@@ -509,7 +554,7 @@ void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note
   // align sequence machine id to the incoming channel if supplied
   if (channel >= 0)
   {
-    sequencer->getSequence(sequence)->setMachineId(channel % 16);
+    sequencer->getSequence(sequence)->setMachineId(channel % kMachineStackCount);
   }
 
   sequencer->setStepData(sequence,
@@ -612,6 +657,7 @@ void SequencerEditor::removeRow()
   case SequencerEditorPage::sequenceConfig:
     break;
   case SequencerEditorPage::machine:
+    machineRemoveEntry();
     break;
   case SequencerEditorPage::resetConfirmation:
     break;
@@ -855,7 +901,7 @@ void SequencerEditor::incrementChannel()
 {
   Sequence* sequence = sequencer->getSequence(currentSequence);
   int machineId = static_cast<int>(sequence->getMachineId());
-  machineId = (machineId + 1) % 16;
+  machineId = (machineId + 1) % kMachineStackCount;
   sequence->setMachineId(machineId);
 }
 void SequencerEditor::decrementChannel()
@@ -864,7 +910,7 @@ void SequencerEditor::decrementChannel()
   int machineId = static_cast<int>(sequence->getMachineId());
   machineId = (machineId - 1);
   if (machineId < 0)
-    machineId = 15;
+    machineId = kMachineStackCount - 1;
   sequence->setMachineId(machineId);
 }
 
@@ -1132,8 +1178,7 @@ void SequencerEditor::addRowOnStepPage()
 
 void SequencerEditor::addRowOnMachinePage()
 {
-  if (isMachineUiForCurrentSequence())
-    machineAdjustCurrentCell(-1);
+  machineAddEntry();
 }
 
 void SequencerEditor::removeRowOnSequencePage()
@@ -1358,6 +1403,7 @@ void SequencerEditor::gotoMachineConfigPage()
 {
   setEditMode(SequencerEditorMode::machineConfig);
   machineEditMode = false;
+  machineStackDetailMode = false;
 }
 
 void SequencerEditor::gotoSequencePage()
@@ -1433,6 +1479,20 @@ void SequencerEditor::toggleMuteCurrentSequence()
     impl->toggleSequenceMute(getCurrentSequence());
 }
 
+bool SequencerEditor::handleChordKey(char key)
+{
+  if (getCurrentPage() != SequencerEditorPage::step)
+    return false;
+
+  for (const auto& shortcut : kChordShortcuts)
+  {
+    if (shortcut.key == key)
+      return applyChordToCurrentStep(shortcut.intervals);
+  }
+
+  return false;
+}
+
 bool SequencerEditor::handleNoteKey(char key)
 {
   if (getCurrentPage() == SequencerEditorPage::resetConfirmation)
@@ -1449,6 +1509,69 @@ bool SequencerEditor::handleNoteKey(char key)
     return machineInsertCurrentCell(note);
 
   enterStepData(midiNote.value(), Step::noteInd);
+  return true;
+}
+
+bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
+{
+  if (editMode != SequencerEditorMode::editingStep || intervals.empty())
+    return false;
+
+  auto data = sequencer->getStepData(currentSequence, currentStep);
+  if (data.empty())
+    data.resize(1, std::vector<double>(Step::maxInd + 1, 0.0));
+
+  for (auto& row : data)
+  {
+    if (row.size() < Step::maxInd + 1)
+      row.resize(Step::maxInd + 1, 0.0);
+  }
+
+  std::vector<double> baseRow = data[0];
+  double rootNote = baseRow[Step::noteInd];
+  if ((rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
+      && currentStepRow < data.size())
+  {
+    baseRow = data[currentStepRow];
+    rootNote = baseRow[Step::noteInd];
+  }
+
+  if (rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
+    return true;
+
+  if (std::abs(baseRow[Step::velInd]) < std::numeric_limits<double>::epsilon())
+    baseRow[Step::velInd] = 64.0;
+  if (std::abs(baseRow[Step::lengthInd]) < std::numeric_limits<double>::epsilon())
+    baseRow[Step::lengthInd] = 1.0;
+  if (std::abs(baseRow[Step::probInd]) < std::numeric_limits<double>::epsilon())
+    baseRow[Step::probInd] = 1.0;
+
+  std::vector<std::vector<double>> chordRows;
+  chordRows.reserve(intervals.size());
+  for (const int interval : intervals)
+  {
+    auto row = baseRow;
+    row[Step::noteInd] = juce::jlimit(0.0, 127.0, rootNote + static_cast<double>(interval));
+    chordRows.push_back(std::move(row));
+  }
+
+  if (!isSequencerPlaying(sequencer))
+  {
+    if (Sequence* sequence = sequencer->getSequence(currentSequence))
+    {
+      auto context = sequence->getReadOnlyContext();
+      context.triggerProbability = 1.0;
+      for (auto& row : chordRows)
+      {
+        row[Step::probInd] = 1.0;
+        CommandProcessor::executeCommand(row[Step::cmdInd], &row, &context);
+      }
+    }
+  }
+
+  writeStepData(std::move(chordRows));
+  clampStepCursorToCurrentStep();
+  requestStringRefresh();
   return true;
 }
 
@@ -1504,15 +1627,7 @@ bool SequencerEditor::isArmedForLiveMIDI()
 
 bool SequencerEditor::isMachineUiForCurrentSequence() const
 {
-  if (sequencer == nullptr)
-    return false;
-  const auto* sequence = sequencer->getSequence(currentSequence);
-  if (sequence == nullptr)
-    return false;
-  const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-  return machineType == CommandType::Sampler
-      || machineType == CommandType::Arpeggiator
-      || machineType == CommandType::WavetableSynth;
+  return sequencer != nullptr && sequencer->getSequence(currentSequence) != nullptr;
 }
 
 std::size_t SequencerEditor::getActiveMachineIndex(CommandType type) const
@@ -1537,6 +1652,71 @@ MachineInterface* SequencerEditor::getActiveMachine(CommandType type) const
   return machineHost->getMachine(type, getActiveMachineIndex(type));
 }
 
+std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::size_t stackIndex)
+{
+  std::vector<std::vector<UIBox>> boxes(2);
+
+  UIBox addCell;
+  addCell.kind = UIBox::Kind::TrackerCell;
+  addCell.text = "ADD";
+  addCell.onActivate = [this, stackIndex]()
+  {
+    if (machineHost != nullptr)
+      machineHost->addMachineToStack(stackIndex);
+  };
+  boxes[0].push_back(std::move(addCell));
+  boxes[1].push_back(UIBox{});
+  boxes[1][0].kind = UIBox::Kind::None;
+  boxes[1][0].isDisabled = true;
+
+  if (machineHost == nullptr)
+    return boxes;
+
+  auto stackTypes = machineHost->getMachineStackTypes(stackIndex);
+  if (stackTypes.empty())
+    stackTypes.push_back(CommandType::MidiNote);
+  for (std::size_t slotIndex = 0; slotIndex < stackTypes.size(); ++slotIndex)
+  {
+    UIBox machineCell;
+    machineCell.kind = UIBox::Kind::TrackerCell;
+    machineCell.text = getStackMachineLabel(stackTypes[slotIndex]);
+    machineCell.onAdjust = [this, stackIndex, slotIndex](int direction)
+    {
+      if (machineHost != nullptr)
+        machineHost->cycleMachineTypeInStack(stackIndex, slotIndex, direction);
+    };
+    boxes[0].push_back(std::move(machineCell));
+
+    UIBox deleteCell;
+    deleteCell.kind = UIBox::Kind::TrackerCell;
+    deleteCell.text = "DEL";
+    deleteCell.onActivate = [this, stackIndex, slotIndex]()
+    {
+      if (machineHost != nullptr)
+        machineHost->removeMachineFromStack(stackIndex, slotIndex);
+    };
+    boxes[1].push_back(std::move(deleteCell));
+  }
+
+  return boxes;
+}
+
+std::optional<CommandType> SequencerEditor::getSelectedStackMachineType() const
+{
+  if (machineHost == nullptr)
+    return std::nullopt;
+  const auto stackTypes = machineHost->getMachineStackTypes(getActiveMachineIndex(CommandType::Sampler));
+  if (machineSelectedStackSlot >= stackTypes.size())
+    return std::nullopt;
+  return stackTypes[machineSelectedStackSlot];
+}
+
+void SequencerEditor::leaveMachineDetail()
+{
+  machineStackDetailMode = false;
+  machineEditMode = false;
+}
+
 void SequencerEditor::refreshMachineStateForCurrentSequence()
 {
   const std::size_t previousRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
@@ -1557,17 +1737,37 @@ void SequencerEditor::refreshMachineStateForCurrentSequence()
     return;
   }
 
-  const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-  auto* machine = getActiveMachine(machineType);
-  if (machine == nullptr)
+  const std::size_t stackIndex = getActiveMachineIndex(CommandType::Sampler);
+  if (!machineStackDetailMode)
   {
-    machineCells.assign(1, std::vector<UIBox>(1));
-    return;
+    machineCells = buildMachineStackCells(stackIndex);
   }
-
-  MachineUiContext context;
-  context.disableLearning = isSequencerPlaying(sequencer);
-  machineCells = machine->getUIBoxes(context);
+  else
+  {
+    const auto selectedType = getSelectedStackMachineType();
+    if (!selectedType.has_value())
+    {
+      leaveMachineDetail();
+      machineCells = buildMachineStackCells(stackIndex);
+    }
+    else if (selectedType.value() == CommandType::MidiNote)
+    {
+      machineCells.assign(1, std::vector<UIBox>(1));
+      machineCells[0][0].kind = UIBox::Kind::TrackerCell;
+      machineCells[0][0].text = "MIDI OUT";
+    }
+    else if (auto* machine = getActiveMachine(selectedType.value()))
+    {
+      MachineUiContext context;
+      context.disableLearning = isSequencerPlaying(sequencer);
+      machineCells = machine->getUIBoxes(context);
+    }
+    else
+    {
+      leaveMachineDetail();
+      machineCells = buildMachineStackCells(stackIndex);
+    }
+  }
   const std::size_t newRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
   const std::size_t newCols = machineCells.size();
   const std::string newHeader = (newCols > 0 && newRows > 0) ? machineCells[0][0].text : std::string{};
@@ -1595,26 +1795,34 @@ void SequencerEditor::machineAddEntry()
 {
   if (!isMachineUiForCurrentSequence())
     return;
-  const auto* sequence = sequencer->getSequence(currentSequence);
-  if (sequence == nullptr)
+  if (!machineStackDetailMode)
+  {
+    if (machineHost != nullptr)
+      machineHost->addMachineToStack(getActiveMachineIndex(CommandType::Sampler));
     return;
-  const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-  if (auto* machine = getActiveMachine(machineType))
-    machine->addEntry();
+  }
+  const auto selectedType = getSelectedStackMachineType();
+  if (selectedType.has_value())
+    if (auto* machine = getActiveMachine(selectedType.value()))
+      machine->addEntry();
 }
 
 void SequencerEditor::machineRemoveEntry()
 {
   if (!isMachineUiForCurrentSequence())
     return;
-  if (machineCursorRow == 0)
+  if (!machineStackDetailMode)
+  {
+    if (machineCursorRow == 0)
+      return;
+    if (machineHost != nullptr)
+      machineHost->removeMachineFromStack(getActiveMachineIndex(CommandType::Sampler), machineCursorRow - 1);
     return;
-  const auto* sequence = sequencer->getSequence(currentSequence);
-  if (sequence == nullptr)
-    return;
-  const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-  if (auto* machine = getActiveMachine(machineType))
-    machine->removeEntry(static_cast<int>(machineCursorRow - 1));
+  }
+  const auto selectedType = getSelectedStackMachineType();
+  if (selectedType.has_value())
+    if (auto* machine = getActiveMachine(selectedType.value()))
+      machine->removeEntry(static_cast<int>(machineCursorRow - 1));
 }
 
 void SequencerEditor::machineActivateCurrentCell()
@@ -1654,19 +1862,17 @@ bool SequencerEditor::dismissCurrentTransientUi()
 {
   if (!isMachineUiForCurrentSequence())
     return false;
-
-  const auto* sequence = sequencer->getSequence(currentSequence);
-  if (sequence == nullptr)
+  if (!machineStackDetailMode)
     return false;
-
-  const auto machineType = static_cast<CommandType>(static_cast<std::size_t>(sequence->getMachineType()));
-  if (auto* machine = getActiveMachine(machineType))
+  const auto selectedType = getSelectedStackMachineType();
+  if (selectedType.has_value())
   {
-    if (machine->dismissTransientUi())
-    {
-      refreshMachineStateForCurrentSequence();
-      return true;
-    }
+    if (auto* machine = getActiveMachine(selectedType.value()))
+      if (machine->dismissTransientUi())
+      {
+        refreshMachineStateForCurrentSequence();
+        return true;
+      }
   }
 
   return false;
@@ -1688,6 +1894,55 @@ void SequencerEditor::machineAdjustCurrentCell(int direction)
     machineEditRow = machineCursorRow;
     cell.onAdjust(direction);
   }
+}
+
+bool SequencerEditor::enterSelectedMachineDetail()
+{
+  if (getCurrentPage() != SequencerEditorPage::machine || machineStackDetailMode)
+    return false;
+  if (machineHost == nullptr)
+    return false;
+
+  const auto stackTypes = machineHost->getMachineStackTypes(getActiveMachineIndex(CommandType::Sampler));
+  if (stackTypes.empty())
+    return false;
+
+  const std::size_t slotIndex = machineCursorRow == 0 ? 0 : machineCursorRow - 1;
+  if (slotIndex >= stackTypes.size())
+    return false;
+
+  machineSelectedStackSlot = slotIndex;
+  machineStackDetailMode = true;
+  machineCursorRow = 0;
+  machineCursorCol = 0;
+  machineEditRow = 0;
+  machineEditCol = 0;
+  refreshMachineStateForCurrentSequence();
+  return true;
+}
+
+bool SequencerEditor::isEditingMachineDetail() const
+{
+  return machineStackDetailMode;
+}
+
+std::optional<CommandType> SequencerEditor::getFocusedMachineDetailType() const
+{
+  if (!machineStackDetailMode)
+    return std::nullopt;
+  return getSelectedStackMachineType();
+}
+
+bool SequencerEditor::cycleMachineDetailNext()
+{
+  if (!machineStackDetailMode || machineHost == nullptr)
+    return false;
+  const auto stackTypes = machineHost->getMachineStackTypes(getActiveMachineIndex(CommandType::Sampler));
+  if (stackTypes.empty())
+    return false;
+  machineSelectedStackSlot = (machineSelectedStackSlot + 1) % stackTypes.size();
+  refreshMachineStateForCurrentSequence();
+  return true;
 }
 
 void SequencerEditor::rebuildMachineCells()
@@ -1738,5 +1993,8 @@ void SequencerEditor::dismissMachineTransientUiIfNeeded()
 {
   const auto previousMode = editMode;
   if (previousMode == SequencerEditorMode::machineConfig)
+  {
     dismissCurrentTransientUi();
+    leaveMachineDetail();
+  }
 }

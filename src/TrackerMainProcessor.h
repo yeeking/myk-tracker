@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <deque>
+#include <optional>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -102,6 +103,11 @@ public:
     std::size_t getMachineCount(CommandType type) const override;
     MachineInterface* getMachine(CommandType type, std::size_t index) override;
     const MachineInterface* getMachine(CommandType type, std::size_t index) const override;
+    std::size_t getMachineStackCount() const override;
+    std::vector<CommandType> getMachineStackTypes(std::size_t stackIndex) const override;
+    void addMachineToStack(std::size_t stackIndex) override;
+    void removeMachineFromStack(std::size_t stackIndex, std::size_t slotIndex) override;
+    void cycleMachineTypeInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
     void sendCurrentCellValueOverOscIfChanged();
     void recreateSequencersAndMachines();
     struct PendingZoomCommand
@@ -145,11 +151,22 @@ private:
     /** as for the seqeditor, this is here for easy statefulness*/
     TrackerController trackerController;
     juce::MidiBuffer midiToSend; 
-    juce::MidiBuffer midiToSendToSampler;
-    std::vector<std::unique_ptr<MachineInterface>> samplers;
-    std::vector<std::unique_ptr<ArpeggiatorMachine>> arpeggiators;
-    std::vector<std::unique_ptr<WavetableSynthMachine>> wavetableSynths;
-    std::vector<bool> arpeggiatorClockActive;
+    struct ScheduledSamplerEvent
+    {
+        std::size_t stackIndex = 0;
+        juce::MidiMessage message;
+        int samplePosition = 0;
+    };
+    struct MachineStack
+    {
+        std::unique_ptr<SuperSamplerProcessor> sampler;
+        std::unique_ptr<ArpeggiatorMachine> arpeggiator;
+        std::unique_ptr<WavetableSynthMachine> wavetableSynth;
+        std::vector<CommandType> order;
+        bool arpeggiatorClockActive = false;
+    };
+    std::vector<ScheduledSamplerEvent> samplerEventsToSend;
+    std::vector<MachineStack> machineStacks;
     std::mutex audioMutex;
     std::atomic<bool> processing { false };
 
@@ -182,12 +199,11 @@ private:
     juce::var serializeSequencerState();
     /** retrieve state from var  */
     void restoreSequencerState(const juce::var& stateVar);
-    MachineInterface* getSamplerForIndex(std::size_t samplerIndex);
-    const MachineInterface* getSamplerForIndex(std::size_t samplerIndex) const;
-    ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex);
-    const ArpeggiatorMachine* getArpeggiatorForIndex(std::size_t machineIndex) const;
-    WavetableSynthMachine* getWavetableSynthForIndex(std::size_t machineIndex);
-    const WavetableSynthMachine* getWavetableSynthForIndex(std::size_t machineIndex) const;
+    static constexpr std::size_t kMachineStackCount = 32;
+    MachineStack* getMachineStack(std::size_t stackIndex);
+    const MachineStack* getMachineStack(std::size_t stackIndex) const;
+    MachineInterface* getMachineForStackType(MachineStack& stack, CommandType type);
+    const MachineInterface* getMachineForStackType(const MachineStack& stack, CommandType type) const;
     void oscMessageReceived(const juce::OSCMessage& message) override;
     void oscBundleReceived(const juce::OSCBundle& bundle) override;
     juce::String getCurrentCellOscPayload();
@@ -201,8 +217,20 @@ private:
                             unsigned short outNote,
                             unsigned short outVelocity,
                             unsigned short outDurTicks);
-    bool isMachineAssigned(CommandType machineType, std::size_t machineIndex);
-    void deactivateArpeggiator(std::size_t machineIndex);
+    void enqueueStackSamplerMidi(std::size_t stackIndex,
+                                 unsigned short outNote,
+                                 unsigned short outVelocity,
+                                 unsigned short outDurTicks);
+    bool isStackAssigned(std::size_t stackIndex);
+    bool stackContainsType(std::size_t stackIndex, CommandType machineType) const;
+    std::optional<std::size_t> findMachineInStack(std::size_t stackIndex, CommandType type) const;
+    void dispatchNoteThroughStack(std::size_t stackIndex,
+                                  unsigned short note,
+                                  unsigned short velocity,
+                                  unsigned short durInTicks,
+                                  std::size_t startSlotIndex = 0);
+    void deactivateStackArpeggiator(std::size_t stackIndex);
+    void allNotesOffForStack(std::size_t stackIndex);
     void tickMachineClocks();
     //==============================================================================
     juce::OSCReceiver oscReceiver;
