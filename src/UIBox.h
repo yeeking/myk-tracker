@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -25,10 +26,15 @@ struct UIBox
     bool isHighlighted = false;
     bool isArmed = false;
     bool hasNote = false;
+    bool useCustomFillColour = false;
+    bool useCustomTextColour = false;
+    std::uint32_t customFillArgb = 0;
+    std::uint32_t customTextArgb = 0;
     Kind kind = Kind::None;
 
     std::function<void()> onActivate;
     std::function<void(int)> onAdjust;
     std::function<void(double)> onInsert;
+    std::function<void()> onPreview;
     std::function<void()> onReset;
 };

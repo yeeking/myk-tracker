@@ -58,6 +58,11 @@ bool isBrowsableAudioFile(const juce::File& file)
 
     return false;
 }
+
+bool isPreviewableAudioFile(const juce::File& file)
+{
+    return file.existsAsFile() && file.hasFileExtension(".wav");
+}
 } // namespace
 
 //==============================================================================
@@ -71,6 +76,7 @@ SuperSamplerProcessor::SuperSamplerProcessor()
        apvts (*this, nullptr, "Params", createParameterLayout())
 {
     formatManager.registerBasicFormats();
+    previewPlayer = std::make_unique<SuperSamplePlayer>(-1);
     vuJson = "{\"dB_out\":[]}";
     // apiServer.startThread();  // Launch server in the background
 }
@@ -441,6 +447,14 @@ bool SuperSamplerProcessor::dismissTransientUi()
     return true;
 }
 
+void SuperSamplerProcessor::onCursorMoved(int row, int col)
+{
+    juce::ignoreUnused(row, col);
+    const std::lock_guard<std::mutex> lock(playerMutex);
+    if (browsingPlayerId >= 0)
+        stopPreviewPlayback();
+}
+
 //==============================================================================
 bool SuperSamplerProcessor::hasEditor() const
 {
@@ -615,6 +629,8 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
 
     for (auto& player : players)
         player->beginBlock();
+    if (previewPlayer != nullptr)
+        previewPlayer->beginBlock();
 
     const int numChannels = buffer.getNumChannels();
 
@@ -642,12 +658,16 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
             float acc = 0.0f;
             for (auto& player : players)
                 acc += player->getNextSampleForChannel (ch);
+            if (previewPlayer != nullptr)
+                acc += previewPlayer->getNextSampleForChannel(ch);
 
             buffer.addSample (ch, sample, acc);
         }
     }
     for (auto& player : players)
         player->endBlock();
+    if (previewPlayer != nullptr)
+        previewPlayer->endBlock();
 
     // std::ostringstream vuBuilder;
     // vuBuilder.setf (std::ios::fixed);
@@ -978,6 +998,13 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
             else
                 loadBrowsedFile(file);
         };
+        if (!isDirectory && isPreviewableAudioFile(file))
+        {
+            cell.onPreview = [this, file]()
+            {
+                previewBrowsedFile(file);
+            };
+        }
         pushRow(std::move(cell));
     };
 
@@ -1001,6 +1028,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
 void SuperSamplerProcessor::openFileBrowserForPlayer(int playerId)
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
+    stopPreviewPlayback();
     browsingPlayerId = playerId;
     if (lastSampleDirectory.exists() && lastSampleDirectory.isDirectory())
         browsingDirectory = lastSampleDirectory;
@@ -1011,6 +1039,7 @@ void SuperSamplerProcessor::openFileBrowserForPlayer(int playerId)
 void SuperSamplerProcessor::closeFileBrowser()
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
+    stopPreviewPlayback();
     browsingPlayerId = -1;
     browsingDirectory = juce::File();
 }
@@ -1018,6 +1047,7 @@ void SuperSamplerProcessor::closeFileBrowser()
 void SuperSamplerProcessor::browseUp()
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
+    stopPreviewPlayback();
     if (browsingDirectory.exists() && browsingDirectory.getParentDirectory() != browsingDirectory)
         browsingDirectory = browsingDirectory.getParentDirectory();
 }
@@ -1025,6 +1055,7 @@ void SuperSamplerProcessor::browseUp()
 void SuperSamplerProcessor::browseInto(const juce::File& target)
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
+    stopPreviewPlayback();
     if (target.exists() && target.isDirectory())
         browsingDirectory = target;
 }
@@ -1037,6 +1068,7 @@ void SuperSamplerProcessor::loadBrowsedFile(const juce::File& file)
         if (browsingPlayerId < 0 || !file.existsAsFile())
             return;
 
+        stopPreviewPlayback();
         playerId = browsingPlayerId;
         lastSampleDirectory = file.getParentDirectory();
         browsingPlayerId = -1;
@@ -1050,4 +1082,39 @@ void SuperSamplerProcessor::loadBrowsedFile(const juce::File& file)
 
         sendSamplerStateToUI();
     });
+}
+
+void SuperSamplerProcessor::previewBrowsedFile(const juce::File& file)
+{
+    if (!isPreviewableAudioFile(file))
+        return;
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (reader == nullptr)
+        return;
+
+    const int numChannels = static_cast<int>(juce::jmin<int64>(reader->numChannels, 2));
+    if (numChannels <= 0 || reader->lengthInSamples <= 0)
+        return;
+
+    const int64 maxPreviewSamples = static_cast<int64>(reader->sampleRate * 10.0);
+    const int previewSamples = static_cast<int>(juce::jmin(reader->lengthInSamples, maxPreviewSamples));
+    if (previewSamples <= 0)
+        return;
+
+    juce::AudioBuffer<float> tempBuffer(numChannels, previewSamples);
+    reader->read(&tempBuffer, 0, previewSamples, 0, true, true);
+
+    const std::lock_guard<std::mutex> lock(playerMutex);
+    if (previewPlayer == nullptr)
+        previewPlayer = std::make_unique<SuperSamplePlayer>(-1);
+    previewPlayer->setFilePathAndStatus(file.getFullPathName(), "preview", file.getFileName());
+    previewPlayer->setLoadedBuffer(std::move(tempBuffer), file.getFileName());
+    previewPlayer->trigger();
+}
+
+void SuperSamplerProcessor::stopPreviewPlayback()
+{
+    if (previewPlayer != nullptr)
+        previewPlayer->stop();
 }

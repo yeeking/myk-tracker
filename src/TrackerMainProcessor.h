@@ -25,6 +25,7 @@
 #include "TrackerController.h"
 #include "SuperSamplerProcessor.h"
 #include "ArpeggiatorMachine.h"
+#include "PolyArpeggiatorMachine.h"
 #include "WavetableSynthMachine.h"
 
 
@@ -161,6 +162,7 @@ private:
     {
         std::unique_ptr<SuperSamplerProcessor> sampler;
         std::unique_ptr<ArpeggiatorMachine> arpeggiator;
+        std::unique_ptr<PolyArpeggiatorMachine> polyArpeggiator;
         std::unique_ptr<WavetableSynthMachine> wavetableSynth;
         std::vector<CommandType> order;
         bool arpeggiatorClockActive = false;

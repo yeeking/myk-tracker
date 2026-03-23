@@ -78,6 +78,7 @@ public:
     void addEntry() override;
     void removeEntry(int entryIndex) override;
     bool dismissTransientUi() override;
+    void onCursorMoved(int row, int col) override;
 
 private:
     struct UiPlayerState
@@ -119,8 +120,11 @@ private:
     void browseUp();
     void browseInto(const juce::File& target);
     void loadBrowsedFile(const juce::File& file);
+    void previewBrowsedFile(const juce::File& file);
+    void stopPreviewPlayback();
 
     std::vector<std::unique_ptr<SuperSamplePlayer>> players;
+    std::unique_ptr<SuperSamplePlayer> previewPlayer;
     mutable std::mutex playerMutex;
     int nextId { 1 };
     juce::AudioFormatManager formatManager;

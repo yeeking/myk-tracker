@@ -125,6 +125,12 @@ void SuperSamplePlayer::triggerNote (int midiNote)
     trigger();
 }
 
+void SuperSamplePlayer::stop() noexcept
+{
+    state.isPlaying = false;
+    playHead = 0;
+}
+
 float SuperSamplePlayer::getNextSampleForChannel (int channel)
 {
     // DBG("SamplerPlayer getNextSampleForChannel  " << playHead);

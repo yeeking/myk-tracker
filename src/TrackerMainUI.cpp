@@ -448,6 +448,27 @@ void TrackerMainUI::prepareMachineConfigView()
         overlayState.glowStrength = 0.25f;
         return;
     }
+    if (detailType.has_value() && detailType.value() == CommandType::PolyArpeggiator)
+    {
+        TrackerUIComponent::Style style;
+        style.background = palette.background;
+        style.lightColor = palette.lightColor;
+        style.defaultGlowColor = palette.gridPlayhead;
+        style.ambientStrength = palette.ambientStrength;
+        style.lightDirection = palette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(cellWidth, cellHeight);
+
+        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
+        overlayState.text = "STACK " + std::to_string(machineId) + " POLY ARP"
+                            + (audioProcessor.isInternalClockEnabled() ? " INT" : " HOST");
+        overlayState.color = palette.textPrimary;
+        overlayState.glowColor = palette.gridPlayhead;
+        overlayState.glowStrength = 0.25f;
+        return;
+    }
     if (detailType.has_value() && detailType.value() == CommandType::WavetableSynth)
     {
         customMachineColumnWidthsActive = true;
@@ -735,6 +756,8 @@ juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
 {
     if (cell.isSelected)
         return PaletteDefaults::cursor.fill;
+    if (cell.useCustomFillColour)
+        return juce::Colour(cell.customFillArgb);
     if (cell.isArmed)
         return palette.statusOk;
 
@@ -745,6 +768,8 @@ juce::Colour TrackerMainUI::getTextColour(const UIBox& cell) const
 {
     if (cell.isSelected)
         return PaletteDefaults::cursor.text;
+    if (cell.useCustomTextColour)
+        return juce::Colour(cell.customTextArgb);
     if (cell.isArmed)
         return palette.statusOk;
     if (cell.hasNote)
@@ -941,6 +966,10 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         else if (keyCode >= '1' && keyCode <= '6')
         {
             handled = seqEditor->selectPageShortcut(keyCode - '0');
+        }
+        else if (ch == 'p' && seqEditor->getCurrentPage() == SequencerEditorPage::machine)
+        {
+            handled = seqEditor->machinePreviewCurrentCell();
         }
         else if (seqEditor->handleChordKey(ch))
         {

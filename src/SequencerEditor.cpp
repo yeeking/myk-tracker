@@ -55,6 +55,7 @@ std::string getStackMachineLabel(CommandType type)
     case CommandType::MidiNote: return "MIDI";
     case CommandType::Sampler: return "SAMPLER";
     case CommandType::Arpeggiator: return "ARP";
+    case CommandType::PolyArpeggiator: return "POLYARP";
     case CommandType::WavetableSynth: return "WAVE";
     default: return "MACH";
   }
@@ -1874,6 +1875,23 @@ bool SequencerEditor::machineInsertCurrentCell(double value)
   return true;
 }
 
+bool SequencerEditor::machinePreviewCurrentCell()
+{
+  if (!isMachineUiForCurrentSequence())
+    return false;
+  if (machineCells.empty() || machineCells[0].empty())
+    return false;
+  if (machineCursorCol >= machineCells.size() || machineCursorRow >= machineCells[machineCursorCol].size())
+    return false;
+
+  const auto& cell = machineCells[machineCursorCol][machineCursorRow];
+  if (!cell.onPreview)
+    return false;
+
+  cell.onPreview();
+  return true;
+}
+
 bool SequencerEditor::dismissCurrentTransientUi()
 {
   if (!isMachineUiForCurrentSequence())
@@ -2003,6 +2021,14 @@ void SequencerEditor::moveMachineCursor(int deltaRow, int deltaCol)
   machineCursorRow = static_cast<std::size_t>(nextRow);
   machineCursorCol = static_cast<std::size_t>(nextCol);
   rebuildMachineCells();
+
+  if (machineStackDetailMode)
+  {
+    const auto selectedType = getSelectedStackMachineType();
+    if (selectedType.has_value())
+      if (auto* machine = getActiveMachine(selectedType.value()))
+        machine->onCursorMoved(static_cast<int>(machineCursorRow), static_cast<int>(machineCursorCol));
+  }
 }
 
 void SequencerEditor::dismissMachineTransientUiIfNeeded()

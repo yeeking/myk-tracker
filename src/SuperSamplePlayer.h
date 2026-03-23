@@ -33,6 +33,7 @@ public:
     bool acceptsNote (int midiNote) const noexcept;
     void trigger();
     void triggerNote (int midiNote);
+    void stop() noexcept;
     float getNextSampleForChannel (int channel);
 
     bool setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name);

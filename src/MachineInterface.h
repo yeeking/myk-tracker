@@ -46,6 +46,14 @@ public:
         (void)outEvent;
         return false;
     }
+    virtual bool handleClockTickBatch(std::vector<MachineNoteEvent>& outEvents)
+    {
+        MachineNoteEvent outEvent;
+        if (!handleClockTick(outEvent))
+            return false;
+        outEvents.push_back(outEvent);
+        return true;
+    }
 
     virtual void setSecondsPerTick(double secondsPerTick) { (void)secondsPerTick; }
     virtual void allNotesOff() {}
@@ -53,6 +61,7 @@ public:
     virtual void addEntry() {}
     virtual void removeEntry(int entryIndex) { (void)entryIndex; }
     virtual bool dismissTransientUi() { return false; }
+    virtual void onCursorMoved(int row, int col) { (void)row; (void)col; }
 
     virtual void getStateInformation(juce::MemoryBlock& destData) = 0;
     virtual void setStateInformation(const void* data, int sizeInBytes) = 0;

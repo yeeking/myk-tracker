@@ -207,6 +207,7 @@ public:
   void machineActivateCurrentCell();
   void machineAdjustCurrentCell(int direction);
   bool machineInsertCurrentCell(double value);
+  bool machinePreviewCurrentCell();
   bool dismissCurrentTransientUi();
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);

@@ -66,6 +66,7 @@ enum class CommandType : std::size_t {
     Sampler = 2,
     Arpeggiator = 3,
     WavetableSynth = 4,
+    PolyArpeggiator = 5,
 };
 
 
