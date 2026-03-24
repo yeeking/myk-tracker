@@ -823,7 +823,7 @@ void TrackerUIComponent::renderOverlayText(const juce::Matrix3D<float>& projecti
     const float hudHalfWidth = frustumWidth * (hudDistance / nearPlane);
     const float hudHalfHeight = frustumHeight * (hudDistance / nearPlane);
     const float padding = hudHalfHeight * 0.12f;
-    const float targetHeight = hudHalfHeight * 0.18f;
+    const float targetHeight = hudHalfHeight * 0.10f;
     const float heightScale = targetHeight / textGeomParams.cellH;
     const float scale = heightScale;
     const float textHeightScaled = textGeomParams.cellH * scale;

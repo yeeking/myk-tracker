@@ -34,6 +34,12 @@ public:
   virtual void addMachineToStack(std::size_t stackIndex) = 0;
   virtual void removeMachineFromStack(std::size_t stackIndex, std::size_t slotIndex) = 0;
   virtual void cycleMachineTypeInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
+  virtual void moveMachineInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
+  virtual bool isMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
+  virtual void toggleMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) = 0;
+  virtual float getStackMeterLevel(std::size_t stackIndex) const = 0;
+  virtual float getStackGainDb(std::size_t stackIndex) const = 0;
+  virtual void setStackGainDb(std::size_t stackIndex, float gainDb) = 0;
 };
 
 // Abstract interface for editor-facing sequencer access.

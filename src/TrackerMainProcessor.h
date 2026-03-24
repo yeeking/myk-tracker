@@ -27,6 +27,8 @@
 #include "ArpeggiatorMachine.h"
 #include "PolyArpeggiatorMachine.h"
 #include "WavetableSynthMachine.h"
+#include "WaveshaperDistortionMachine.h"
+#include "DelayFxMachine.h"
 
 
 //==============================================================================
@@ -109,6 +111,12 @@ public:
     void addMachineToStack(std::size_t stackIndex) override;
     void removeMachineFromStack(std::size_t stackIndex, std::size_t slotIndex) override;
     void cycleMachineTypeInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
+    void moveMachineInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
+    bool isMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
+    void toggleMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) override;
+    float getStackMeterLevel(std::size_t stackIndex) const override;
+    float getStackGainDb(std::size_t stackIndex) const override;
+    void setStackGainDb(std::size_t stackIndex, float gainDb) override;
     void sendCurrentCellValueOverOscIfChanged();
     void recreateSequencersAndMachines();
     struct PendingZoomCommand
@@ -164,8 +172,18 @@ private:
         std::unique_ptr<ArpeggiatorMachine> arpeggiator;
         std::unique_ptr<PolyArpeggiatorMachine> polyArpeggiator;
         std::unique_ptr<WavetableSynthMachine> wavetableSynth;
+        std::unique_ptr<WaveshaperDistortionMachine> distortionFx;
+        std::unique_ptr<DelayFxMachine> delayFx;
         std::vector<CommandType> order;
         bool arpeggiatorClockActive = false;
+        bool samplerEnabled = true;
+        bool arpeggiatorEnabled = true;
+        bool polyArpeggiatorEnabled = true;
+        bool wavetableSynthEnabled = true;
+        bool distortionFxEnabled = true;
+        bool delayFxEnabled = true;
+        float gainDb = 0.0f;
+        float meterLevel = 0.0f;
     };
     std::vector<ScheduledSamplerEvent> samplerEventsToSend;
     std::vector<MachineStack> machineStacks;
@@ -206,6 +224,8 @@ private:
     const MachineStack* getMachineStack(std::size_t stackIndex) const;
     MachineInterface* getMachineForStackType(MachineStack& stack, CommandType type);
     const MachineInterface* getMachineForStackType(const MachineStack& stack, CommandType type) const;
+    bool* getMachineEnabledFlag(MachineStack& stack, CommandType type);
+    const bool* getMachineEnabledFlag(const MachineStack& stack, CommandType type) const;
     void oscMessageReceived(const juce::OSCMessage& message) override;
     void oscBundleReceived(const juce::OSCBundle& bundle) override;
     juce::String getCurrentCellOscPayload();

@@ -67,6 +67,8 @@ enum class CommandType : std::size_t {
     Arpeggiator = 3,
     WavetableSynth = 4,
     PolyArpeggiator = 5,
+    DistortionFx = 6,
+    DelayFx = 7,
 };
 
 

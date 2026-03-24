@@ -12,6 +12,10 @@
 namespace
 {
 constexpr int kMachineStackCount = 32;
+constexpr std::size_t kSeqConfigBaseRows = 3;
+constexpr std::size_t kSeqConfigMixerRows = 8;
+constexpr float kSeqConfigMinGainDb = -48.0f;
+constexpr float kSeqConfigMaxGainDb = 6.0f;
 
 bool isSequencerPlaying(SequencerAbs *sequencer)
 {
@@ -45,7 +49,10 @@ bool isStackMachineType(CommandType type)
 {
   return type == CommandType::Sampler
       || type == CommandType::Arpeggiator
-      || type == CommandType::WavetableSynth;
+      || type == CommandType::WavetableSynth
+      || type == CommandType::PolyArpeggiator
+      || type == CommandType::DistortionFx
+      || type == CommandType::DelayFx;
 }
 
 std::string getStackMachineLabel(CommandType type)
@@ -57,8 +64,25 @@ std::string getStackMachineLabel(CommandType type)
     case CommandType::Arpeggiator: return "ARP";
     case CommandType::PolyArpeggiator: return "POLYARP";
     case CommandType::WavetableSynth: return "WAVE";
+    case CommandType::DistortionFx: return "DIST";
+    case CommandType::DelayFx: return "DELAY";
     default: return "MACH";
   }
+}
+
+bool isSeqConfigMixerRow(std::size_t row)
+{
+  return row >= kSeqConfigBaseRows && row < (kSeqConfigBaseRows + kSeqConfigMixerRows);
+}
+
+std::size_t getSequenceConfigRowCount()
+{
+  return kSeqConfigBaseRows + kSeqConfigMixerRows;
+}
+
+float getSeqConfigGainStepDb()
+{
+  return (kSeqConfigMaxGainDb - kSeqConfigMinGainDb) / static_cast<float>(kSeqConfigMixerRows - 1);
 }
 } // namespace
 
@@ -530,6 +554,11 @@ void SequencerEditor::enterDataAtCursor(double inValue)
       if (prob > 1) prob = 1;
       sequence->setTriggerProbability(prob);
     }
+    else if (isSeqConfigMixerRow(currentSeqParam) && machineHost != nullptr)
+    {
+      const std::size_t stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
+      machineHost->setStackGainDb(stackIndex, juce::jlimit(kSeqConfigMinGainDb, kSeqConfigMaxGainDb, static_cast<float>(inValue)));
+    }
   }
 }
 
@@ -884,7 +913,7 @@ void SequencerEditor::incrementStepData(std::vector<std::vector<double>> &data, 
  */
 void SequencerEditor::incrementSeqConfigParam()
 {
-  sequencer->incrementSeqParam(currentSequence, currentSeqParam);
+  incrementOnSequenceConfigPage();
 }
 
 /** decrease the value of the seq param relating to the
@@ -892,7 +921,7 @@ void SequencerEditor::incrementSeqConfigParam()
  */
 void SequencerEditor::decrementSeqConfigParam()
 {
-  sequencer->decrementSeqParam(currentSequence, currentSeqParam);
+  decrementOnSequenceConfigPage();
 }
 
 void SequencerEditor::incrementChannel()
@@ -1160,7 +1189,7 @@ void SequencerEditor::moveCursorDownOnStepPage()
 void SequencerEditor::moveCursorDownOnSequenceConfigPage()
 {
   ++currentSeqParam;
-  const std::size_t max = sequencer->getSeqConfigSpecs().size();
+  const std::size_t max = getSequenceConfigRowCount();
   if (max == 0)
     currentSeqParam = 0;
   else if (currentSeqParam >= max)
@@ -1279,7 +1308,20 @@ void SequencerEditor::incrementOnStepPage()
 
 void SequencerEditor::incrementOnSequenceConfigPage()
 {
-  sequencer->incrementSeqParam(currentSequence, currentSeqParam);
+  if (currentSeqParam < sequencer->getSeqConfigSpecs().size())
+  {
+    sequencer->incrementSeqParam(currentSequence, currentSeqParam);
+    return;
+  }
+
+  if (isSeqConfigMixerRow(currentSeqParam) && machineHost != nullptr)
+  {
+    if (auto* sequence = sequencer->getSequence(currentSequence))
+    {
+      const std::size_t stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
+      machineHost->setStackGainDb(stackIndex, machineHost->getStackGainDb(stackIndex) + getSeqConfigGainStepDb());
+    }
+  }
 }
 
 void SequencerEditor::incrementOnMachinePage()
@@ -1297,7 +1339,20 @@ void SequencerEditor::decrementOnStepPage()
 
 void SequencerEditor::decrementOnSequenceConfigPage()
 {
-  sequencer->decrementSeqParam(currentSequence, currentSeqParam);
+  if (currentSeqParam < sequencer->getSeqConfigSpecs().size())
+  {
+    sequencer->decrementSeqParam(currentSequence, currentSeqParam);
+    return;
+  }
+
+  if (isSeqConfigMixerRow(currentSeqParam) && machineHost != nullptr)
+  {
+    if (auto* sequence = sequencer->getSequence(currentSequence))
+    {
+      const std::size_t stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
+      machineHost->setStackGainDb(stackIndex, machineHost->getStackGainDb(stackIndex) - getSeqConfigGainStepDb());
+    }
+  }
 }
 
 void SequencerEditor::decrementOnMachinePage()
@@ -1683,7 +1738,7 @@ MachineInterface* SequencerEditor::getActiveMachine(CommandType type) const
 
 std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::size_t stackIndex)
 {
-  std::vector<std::vector<UIBox>> boxes(2);
+  std::vector<std::vector<UIBox>> boxes(5);
 
   UIBox addCell;
   addCell.kind = UIBox::Kind::TrackerCell;
@@ -1694,9 +1749,12 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
       machineHost->addMachineToStack(stackIndex);
   };
   boxes[0].push_back(std::move(addCell));
-  boxes[1].push_back(UIBox{});
-  boxes[1][0].kind = UIBox::Kind::None;
-  boxes[1][0].isDisabled = true;
+  for (std::size_t col = 1; col < boxes.size(); ++col)
+  {
+    boxes[col].push_back(UIBox{});
+    boxes[col][0].kind = UIBox::Kind::None;
+    boxes[col][0].isDisabled = true;
+  }
 
   if (machineHost == nullptr)
     return boxes;
@@ -1716,6 +1774,44 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
     };
     boxes[0].push_back(std::move(machineCell));
 
+    UIBox enabledCell;
+    enabledCell.kind = UIBox::Kind::TrackerCell;
+    enabledCell.text = machineHost->isMachineEnabledInStack(stackIndex, slotIndex) ? "ON" : "OFF";
+    enabledCell.onActivate = [this, stackIndex, slotIndex]()
+    {
+      if (machineHost != nullptr)
+        machineHost->toggleMachineEnabledInStack(stackIndex, slotIndex);
+    };
+    boxes[1].push_back(std::move(enabledCell));
+
+    UIBox upCell;
+    upCell.kind = UIBox::Kind::TrackerCell;
+    upCell.text = slotIndex == 0 ? "" : "UP";
+    upCell.isDisabled = slotIndex == 0;
+    if (slotIndex > 0)
+    {
+      upCell.onActivate = [this, stackIndex, slotIndex]()
+      {
+        if (machineHost != nullptr)
+          machineHost->moveMachineInStack(stackIndex, slotIndex, -1);
+      };
+    }
+    boxes[2].push_back(std::move(upCell));
+
+    UIBox downCell;
+    downCell.kind = UIBox::Kind::TrackerCell;
+    downCell.text = slotIndex + 1 >= stackTypes.size() ? "" : "DOWN";
+    downCell.isDisabled = slotIndex + 1 >= stackTypes.size();
+    if (slotIndex + 1 < stackTypes.size())
+    {
+      downCell.onActivate = [this, stackIndex, slotIndex]()
+      {
+        if (machineHost != nullptr)
+          machineHost->moveMachineInStack(stackIndex, slotIndex, 1);
+      };
+    }
+    boxes[3].push_back(std::move(downCell));
+
     UIBox deleteCell;
     deleteCell.kind = UIBox::Kind::TrackerCell;
     deleteCell.text = "DEL";
@@ -1724,7 +1820,7 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
       if (machineHost != nullptr)
         machineHost->removeMachineFromStack(stackIndex, slotIndex);
     };
-    boxes[1].push_back(std::move(deleteCell));
+    boxes[4].push_back(std::move(deleteCell));
   }
 
   return boxes;

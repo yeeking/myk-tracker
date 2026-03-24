@@ -5,11 +5,13 @@
 // Helper for generating simple waveform SVGs for UI display.
 struct WaveformSVGRenderer
 {
+    /** Returns an empty placeholder SVG of the standard waveform size. */
     static juce::String generateBlankWaveformSVG()
     {
         return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"64\"></svg>";
     }
 
+    /** Generates a waveform SVG preview from an audio buffer. */
     static juce::String generateWaveformSVG(const juce::AudioBuffer<float>& buffer, int width)
     {
         juce::ignoreUnused(buffer, width);

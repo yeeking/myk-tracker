@@ -73,6 +73,8 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
     src/ArpeggiatorMachine.cpp
     src/PolyArpeggiatorMachine.cpp
     src/WavetableSynthMachine.cpp
+    src/WaveshaperDistortionMachine.cpp
+    src/DelayFxMachine.cpp
 )
 
     
