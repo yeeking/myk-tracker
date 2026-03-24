@@ -977,12 +977,6 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         {
             handled = seqEditor->selectPageShortcut(keyCode - '0');
         }
-        else if (!key.getModifiers().isCtrlDown()
-                 && seqEditor->getCurrentPage() == SequencerEditorPage::machine
-                 && ch >= 32 && ch <= 126)
-        {
-            handled = seqEditor->machineHandleTextInput(ch);
-        }
         else if (seqEditor->handleChordKey(ch))
         {
             handled = true;
@@ -993,12 +987,8 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         }
         else if (key.isKeyCode(juce::KeyPress::backspaceKey))
         {
-            handled = seqEditor->machineHandleTextBackspace();
-            if (!handled)
-            {
-                seqEditor->resetAtCursor();
-                handled = true;
-            }
+            seqEditor->resetAtCursor();
+            handled = true;
         }
         else if (key.isKeyCode(juce::KeyPress::escapeKey))
         {

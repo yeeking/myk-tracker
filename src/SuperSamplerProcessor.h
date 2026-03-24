@@ -84,6 +84,7 @@ public:
     bool handleTextInput(char character) override;
     bool handleTextBackspace() override;
     bool wantsExclusiveKeyboardInput() const override;
+    int consumePreferredCursorRow(const std::vector<std::vector<UIBox>>& cells) override;
 
 private:
     struct UiPlayerState
@@ -144,6 +145,7 @@ private:
     std::vector<std::vector<UIBox>> cachedBrowserUi;
     bool browserUiDirty { true };
     juce::File previewLoadedFile;
+    std::string pendingBrowserFocusLabel;
     std::atomic<std::uint64_t> previewRequestGeneration { 0 };
 
     //==============================================================================

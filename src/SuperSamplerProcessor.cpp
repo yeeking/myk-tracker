@@ -502,6 +502,26 @@ bool SuperSamplerProcessor::wantsExclusiveKeyboardInput() const
     return isBrowsingFiles();
 }
 
+int SuperSamplerProcessor::consumePreferredCursorRow(const std::vector<std::vector<UIBox>>& cells)
+{
+    const std::lock_guard<std::mutex> lock(playerMutex);
+    if (pendingBrowserFocusLabel.empty() || cells.empty())
+        return -1;
+
+    const auto& column = cells[0];
+    for (std::size_t row = 0; row < column.size(); ++row)
+    {
+        if (column[row].text == pendingBrowserFocusLabel)
+        {
+            pendingBrowserFocusLabel.clear();
+            return static_cast<int>(row);
+        }
+    }
+
+    pendingBrowserFocusLabel.clear();
+    return -1;
+}
+
 //==============================================================================
 bool SuperSamplerProcessor::hasEditor() const
 {
@@ -661,7 +681,12 @@ void SuperSamplerProcessor::broadcastMessage (const juce::String& msg)
 void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi)
 {
     const int numSamples = buffer.getNumSamples();
-    std::vector<std::vector<int>> noteOns ((size_t) numSamples);
+    struct NoteOnEvent
+    {
+        int note = 0;
+        int velocity = 127;
+    };
+    std::vector<std::vector<NoteOnEvent>> noteOns ((size_t) numSamples);
 
     for (const auto meta : midi)
     {
@@ -669,7 +694,7 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
         if (msg.isNoteOn())
         {
             auto pos = juce::jlimit (0, numSamples - 1, meta.samplePosition);
-            noteOns[(size_t) pos].push_back (msg.getNoteNumber());
+            noteOns[(size_t) pos].push_back ({ msg.getNoteNumber(), msg.getVelocity() });
         }
     }
     const std::lock_guard<std::mutex> lock (playerMutex);
@@ -685,17 +710,13 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
     {
         if (! noteOns[(size_t) sample].empty())
         {
-            for (int note : noteOns[(size_t) sample])
+            for (const auto& event : noteOns[(size_t) sample])
             {
                 for (auto& player : players)
                 {
-                    if (player->acceptsNote (note)){
-                        // DBG("Player playing a note " << note);
-                        player->triggerNote (note);
+                    if (player->acceptsNote (event.note)){
+                        player->triggerNote (event.note, event.velocity);
                     }
-                    // else{
-                    //     DBG("Player rejects note " << note);
-                    // }
                 }
             }
         }
@@ -1133,6 +1154,7 @@ void SuperSamplerProcessor::openFileBrowserForPlayer(int playerId)
     stopPreviewPlayback();
     browsingPlayerId = playerId;
     browserSearchQuery.clear();
+    pendingBrowserFocusLabel.clear();
     cachedBrowserUi.clear();
     browserUiDirty = true;
     if (lastSampleDirectory.exists() && lastSampleDirectory.isDirectory())
@@ -1148,6 +1170,7 @@ void SuperSamplerProcessor::closeFileBrowser()
     browsingPlayerId = -1;
     browsingDirectory = juce::File();
     browserSearchQuery.clear();
+    pendingBrowserFocusLabel.clear();
     cachedBrowserUi.clear();
     browserUiDirty = true;
 }
@@ -1159,6 +1182,7 @@ void SuperSamplerProcessor::browseUp()
     browserSearchQuery.clear();
     if (browsingDirectory.exists() && browsingDirectory.getParentDirectory() != browsingDirectory)
     {
+        pendingBrowserFocusLabel = sanitizeLabel("[D] " + browsingDirectory.getFileName(), 36);
         browsingDirectory = browsingDirectory.getParentDirectory();
         cachedBrowserUi.clear();
         browserUiDirty = true;

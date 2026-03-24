@@ -109,20 +109,23 @@ bool SuperSamplePlayer::acceptsNote (int midiNote) const noexcept
 
 void SuperSamplePlayer::trigger()
 {
-        // DBG("SamplePlayer trigger ");
-
     if (sampleBuffer.getNumSamples() > 0)
     {
-        // DBG("SamplePlayer triggered ");
         playHead = 0;
+        velocityGain = 1.0f;
         state.isPlaying = true;
     }
 }
 
-void SuperSamplePlayer::triggerNote (int midiNote)
+void SuperSamplePlayer::triggerNote (int midiNote, int velocity)
 {
     juce::ignoreUnused (midiNote);
-    trigger();
+    if (sampleBuffer.getNumSamples() > 0)
+    {
+        playHead = 0;
+        velocityGain = juce::jlimit(0.0f, 1.0f, static_cast<float>(velocity) / 127.0f);
+        state.isPlaying = true;
+    }
 }
 
 void SuperSamplePlayer::stop() noexcept
@@ -142,7 +145,7 @@ float SuperSamplePlayer::getNextSampleForChannel (int channel) const
 
     const int numSampleChans = sampleBuffer.getNumChannels();
     const float* src = sampleBuffer.getReadPointer (juce::jmin (channel, numSampleChans - 1), playHead);
-    return src[0] * state.gain;
+    return src[0] * state.gain * velocityGain;
 }
 
 void SuperSamplePlayer::advancePlaybackFrame() noexcept
@@ -172,6 +175,7 @@ bool SuperSamplePlayer::setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, c
         state.filePath = name;
     playHead = 0;
     state.isPlaying = false;
+    velocityGain = 1.0f;
     state.waveformSVG = WaveformSVGRenderer::generateWaveformSVG (sampleBuffer, 320);
     waveformPoints = buildWaveformPoints(sampleBuffer, kWaveformPlotPoints);
     vuBuffer.assign ((size_t) vuBufferSize, 0.0f);
@@ -193,6 +197,7 @@ void SuperSamplePlayer::markError (const juce::String& path, const juce::String&
     vuWritePos = 0;
     vuSum = 0.0f;
     lastVuDb = -60.0f;
+    velocityGain = 1.0f;
 }
 
 void SuperSamplePlayer::beginBlock() noexcept

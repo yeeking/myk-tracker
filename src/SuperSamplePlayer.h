@@ -32,7 +32,7 @@ public:
 
     bool acceptsNote (int midiNote) const noexcept;
     void trigger();
-    void triggerNote (int midiNote);
+    void triggerNote (int midiNote, int velocity);
     void stop() noexcept;
     float getNextSampleForChannel (int channel) const;
     void advancePlaybackFrame() noexcept;
@@ -56,5 +56,6 @@ private:
     float vuSum { 0.0f };
     int vuBufferSize { 1024 };
     float lastVuDb { -60.0f };
+    float velocityGain { 1.0f };
     std::vector<float> waveformPoints;
 };

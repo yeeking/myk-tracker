@@ -66,6 +66,11 @@ public:
     virtual bool handleTextInput(char character) { (void)character; return false; }
     virtual bool handleTextBackspace() { return false; }
     virtual bool wantsExclusiveKeyboardInput() const { return false; }
+    virtual int consumePreferredCursorRow(const std::vector<std::vector<UIBox>>& cells)
+    {
+        (void)cells;
+        return -1;
+    }
 
     virtual void getStateInformation(juce::MemoryBlock& destData) = 0;
     virtual void setStateInformation(const void* data, int sizeInBytes) = 0;

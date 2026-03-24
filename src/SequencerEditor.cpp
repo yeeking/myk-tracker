@@ -1044,6 +1044,12 @@ void SequencerEditor::moveCursorLeftOnMachinePage()
   if (!isMachineUiForCurrentSequence())
     return;
 
+  if (machineCursorCol > 0)
+  {
+    moveMachineCursor(0, -1);
+    return;
+  }
+
   if (machineStackDetailMode)
   {
     const auto selectedType = getSelectedStackMachineType();
@@ -1221,9 +1227,6 @@ void SequencerEditor::removeRowOnStepPage()
 
 void SequencerEditor::clickOnSequencePage()
 {
-  const auto length = sequencer->getSequence(currentSequence)->getLength();
-  for (std::size_t i = 0; i < length; ++i)
-    sequencer->toggleStepActive(currentSequence, i);
 }
 
 void SequencerEditor::clickOnStepPage()
@@ -1374,7 +1377,8 @@ void SequencerEditor::previewEnteredNote(double midiNote)
     auto data = sequence->getStepData(stepIndex);
     const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
 
-    machineInsertCurrentCell(midiNote);
+    if (getCurrentPage() == SequencerEditorPage::machine)
+      machineInsertCurrentCell(midiNote);
     auto context = sequence->getReadOnlyContext();
     bool useDefaults = data.empty();
     if (data.empty())
@@ -1750,8 +1754,6 @@ void SequencerEditor::leaveMachineDetail()
 void SequencerEditor::refreshMachineStateForCurrentSequence()
 {
   const std::size_t previousRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
-  const std::size_t previousCols = machineCells.size();
-  const std::string previousHeader = (previousCols > 0 && previousRows > 0) ? machineCells[0][0].text : std::string{};
   const bool cursorWasOnControlRow = previousRows > 0 && machineCursorRow == previousRows - 1;
   const bool editWasOnControlRow = previousRows > 0 && machineEditRow == previousRows - 1;
 
@@ -1791,6 +1793,16 @@ void SequencerEditor::refreshMachineStateForCurrentSequence()
       MachineUiContext context;
       context.disableLearning = isSequencerPlaying(sequencer);
       machineCells = machine->getUIBoxes(context);
+      const int preferredRow = machine->consumePreferredCursorRow(machineCells);
+      if (preferredRow >= 0 && !machineCells.empty())
+      {
+        machineCursorRow = static_cast<std::size_t>(juce::jlimit(0,
+            static_cast<int>(machineCells[0].size()) - 1,
+            preferredRow));
+        machineCursorCol = 0;
+        machineEditRow = machineCursorRow;
+        machineEditCol = machineCursorCol;
+      }
     }
     else
     {
@@ -1799,16 +1811,6 @@ void SequencerEditor::refreshMachineStateForCurrentSequence()
     }
   }
   const std::size_t newRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
-  const std::size_t newCols = machineCells.size();
-  const std::string newHeader = (newCols > 0 && newRows > 0) ? machineCells[0][0].text : std::string{};
-  const bool browserFolderChanged = previousRows > 0 && newRows > 0 && previousHeader != newHeader;
-  if (browserFolderChanged)
-  {
-    machineCursorRow = 0;
-    machineCursorCol = 0;
-    machineEditRow = 0;
-    machineEditCol = 0;
-  }
   if (cursorWasOnControlRow && newRows > previousRows)
     machineCursorRow += (newRows - previousRows);
   if (editWasOnControlRow && newRows > previousRows)
