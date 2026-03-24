@@ -82,5 +82,4 @@ private:
     float sampleWaveform(Waveform waveform, double phase) const;
     static const char* getWaveformName(Waveform waveform);
     static std::string formatFloat(float value, int decimals);
-    std::string buildEnvelopePlot() const;
 };

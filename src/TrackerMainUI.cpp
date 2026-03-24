@@ -265,12 +265,14 @@ void TrackerMainUI::prepareSequenceView()
   size_t currentSequence = 0;
   size_t currentStep = 0;
   size_t armedSequence = SequencerAbs::notArmed;
+  bool isPlaying = false;
   audioProcessor.withAudioThreadExclusive([&]()
   {
       currentSequence = seqEditor->getCurrentSequence();
       currentStep = seqEditor->getCurrentStep();
       armedSequence = seqEditor->getArmedSequence();
       auto* seq = audioProcessor.getSequencer();
+      isPlaying = seq->isPlaying();
       const size_t sequenceCount = seq->howManySequences();
       playHeads.clear();
       playHeads.reserve(sequenceCount);
@@ -281,6 +283,7 @@ void TrackerMainUI::prepareSequenceView()
       }
       grid = seq->getSequenceAsGridOfStrings();
   });
+  style.glowPulseEnabled = !isPlaying;
   const auto boxes = buildBoxesFromGrid(grid,
                                         currentSequence,
                                         currentStep,
@@ -310,6 +313,7 @@ void TrackerMainUI::prepareStepView()
     size_t currentStep = 0;
     size_t currentStepCol = 0;
     size_t currentStepRow = 0;
+    bool isPlaying = false;
     audioProcessor.withAudioThreadExclusive([&]()
     {
         currentSequence = seqEditor->getCurrentSequence();
@@ -317,6 +321,7 @@ void TrackerMainUI::prepareStepView()
         currentStepCol = seqEditor->getCurrentStepCol();
         currentStepRow = seqEditor->getCurrentStepRow();
         auto* seq = audioProcessor.getSequencer();
+        isPlaying = seq->isPlaying();
         if (seq->getCurrentStep(currentSequence) == currentStep)
         {
             const int cols = static_cast<int>(seq->howManyStepDataCols(currentSequence, currentStep));
@@ -327,6 +332,7 @@ void TrackerMainUI::prepareStepView()
         }
         grid = seq->getStepAsGridOfStrings(currentSequence, currentStep);
     });
+    style.glowPulseEnabled = !isPlaying;
     const auto boxes = buildBoxesFromGrid(grid,
                                           currentStepCol,
                                           currentStepRow,
@@ -969,7 +975,7 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             seqEditor->togglePlayback();
             handled = true;
         }
-        else if (keyCode == '5')
+        else if (keyCode == '4')
         {
             handled = seqEditor->enterMachineDetailFromAnywhere();
         }

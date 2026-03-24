@@ -121,9 +121,9 @@ class Sequence{
   public:
     /** param index for */
     const static std::size_t machineIdConfig{0}; 
-    const static std::size_t machineTypeConfig{1};
-    const static std::size_t tpsConfig{2};
-    const static std::size_t probConfig{3};
+    const static std::size_t tpsConfig{1};
+    const static std::size_t probConfig{2};
+    const static std::size_t machineTypeConfig{3};
      
     
 

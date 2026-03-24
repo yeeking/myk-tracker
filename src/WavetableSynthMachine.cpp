@@ -78,7 +78,8 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     juce::ignoreUnused(context);
     const std::lock_guard<std::mutex> lock(stateMutex);
 
-    std::vector<std::vector<UIBox>> boxes(14, std::vector<UIBox>(2));
+    const std::size_t rows = static_cast<std::size_t>(juce::jmax(5, waveStepCount + 2));
+    std::vector<std::vector<UIBox>> boxes(5, std::vector<UIBox>(rows));
 
     auto makeValueCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
@@ -95,30 +96,9 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     };
 
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
-    boxes[0][0].text = "A";
-    boxes[1][0] = makeValueCell(&attackSeconds, 0.01f, 0.0f, kMaxAttackSeconds, 2);
-    boxes[2][0].kind = UIBox::Kind::TrackerCell;
-    boxes[2][0].text = "D";
-    boxes[3][0] = makeValueCell(&decaySeconds, 0.01f, 0.0f, kMaxDecaySeconds, 2);
-    boxes[4][0].kind = UIBox::Kind::TrackerCell;
-    boxes[4][0].text = "S";
-    boxes[5][0] = makeValueCell(&sustainLevel, 0.05f, 0.0f, 1.0f, 2);
-    boxes[6][0].kind = UIBox::Kind::TrackerCell;
-    boxes[6][0].text = "R";
-    boxes[7][0] = makeValueCell(&releaseSeconds, 0.01f, 0.0f, kMaxReleaseSeconds, 2);
-    boxes[8][0].kind = UIBox::Kind::TrackerCell;
-    boxes[8][0].text = "ENV";
-    boxes[9][0].kind = UIBox::Kind::TrackerCell;
-    boxes[9][0].text = buildEnvelopePlot();
-    boxes[9][0].width = 5.0f;
-    for (int col = 10; col < 14; ++col)
-    {
-        boxes[static_cast<std::size_t>(col)][0].kind = UIBox::Kind::None;
-        boxes[static_cast<std::size_t>(col)][0].isDisabled = true;
-    }
-
+    boxes[0][0].text = "SOURCE";
     boxes[0][1].kind = UIBox::Kind::TrackerCell;
-    boxes[0][1].text = "STP";
+    boxes[0][1].text = "STEPS";
     boxes[1][1].kind = UIBox::Kind::TrackerCell;
     boxes[1][1].text = std::to_string(waveStepCount);
     boxes[1][1].onAdjust = [this](int direction)
@@ -126,31 +106,58 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
         const std::lock_guard<std::mutex> guard(stateMutex);
         waveStepCount = juce::jlimit(1, kMaxWaveSteps, waveStepCount + direction);
     };
+    boxes[3][0].kind = UIBox::Kind::TrackerCell;
+    boxes[3][0].text = "ENV";
+    boxes[4][0].kind = UIBox::Kind::None;
+    boxes[4][0].isDisabled = true;
 
-    for (int stepIndex = 0; stepIndex < kMaxWaveSteps; ++stepIndex)
+    for (std::size_t row = 2; row < rows; ++row)
     {
-        const std::size_t labelCol = static_cast<std::size_t>(2 + (stepIndex * 2));
-        const std::size_t valueCol = labelCol + 1;
-        boxes[labelCol][1].kind = UIBox::Kind::TrackerCell;
-        boxes[labelCol][1].text = "W" + std::to_string(stepIndex + 1);
-        boxes[valueCol][1].kind = UIBox::Kind::TrackerCell;
-        boxes[valueCol][1].text = getWaveformName(waveSteps[static_cast<std::size_t>(stepIndex)]);
-        boxes[labelCol][1].isDisabled = stepIndex >= waveStepCount;
-        boxes[valueCol][1].isDisabled = stepIndex >= waveStepCount;
+        boxes[0][row].kind = UIBox::Kind::None;
+        boxes[0][row].isDisabled = true;
+        boxes[1][row].kind = UIBox::Kind::None;
+        boxes[1][row].isDisabled = true;
+        boxes[2][row].kind = UIBox::Kind::None;
+        boxes[2][row].isDisabled = true;
+        boxes[3][row].kind = UIBox::Kind::None;
+        boxes[3][row].isDisabled = true;
+        boxes[4][row].kind = UIBox::Kind::None;
+        boxes[4][row].isDisabled = true;
+    }
 
-        if (stepIndex < waveStepCount)
+    for (int stepIndex = 0; stepIndex < waveStepCount; ++stepIndex)
+    {
+        const std::size_t row = static_cast<std::size_t>(stepIndex + 2);
+        boxes[0][row].kind = UIBox::Kind::TrackerCell;
+        boxes[0][row].text = "W" + std::to_string(stepIndex + 1);
+        boxes[1][row].kind = UIBox::Kind::TrackerCell;
+        boxes[1][row].text = getWaveformName(waveSteps[static_cast<std::size_t>(stepIndex)]);
+        boxes[1][row].onAdjust = [this, stepIndex](int direction)
         {
-            boxes[valueCol][1].onAdjust = [this, stepIndex](int direction)
-            {
-                const std::lock_guard<std::mutex> guard(stateMutex);
-                int next = static_cast<int>(waveSteps[static_cast<std::size_t>(stepIndex)]) + direction;
-                if (next < 0)
-                    next = static_cast<int>(Waveform::square);
-                if (next > static_cast<int>(Waveform::square))
-                    next = 0;
-                waveSteps[static_cast<std::size_t>(stepIndex)] = static_cast<Waveform>(next);
-            };
-        }
+            const std::lock_guard<std::mutex> guard(stateMutex);
+            int next = static_cast<int>(waveSteps[static_cast<std::size_t>(stepIndex)]) + direction;
+            if (next < 0)
+                next = static_cast<int>(Waveform::square);
+            if (next > static_cast<int>(Waveform::square))
+                next = 0;
+            waveSteps[static_cast<std::size_t>(stepIndex)] = static_cast<Waveform>(next);
+        };
+    }
+
+    constexpr std::array<const char*, 4> envLabels { "A", "D", "S", "R" };
+    const std::array<UIBox, 4> envValueCells {
+        makeValueCell(&attackSeconds, 0.01f, 0.0f, kMaxAttackSeconds, 2),
+        makeValueCell(&decaySeconds, 0.01f, 0.0f, kMaxDecaySeconds, 2),
+        makeValueCell(&sustainLevel, 0.05f, 0.0f, 1.0f, 2),
+        makeValueCell(&releaseSeconds, 0.01f, 0.0f, kMaxReleaseSeconds, 2)
+    };
+
+    for (std::size_t envIndex = 0; envIndex < envLabels.size(); ++envIndex)
+    {
+        const std::size_t row = envIndex + 1;
+        boxes[3][row].kind = UIBox::Kind::TrackerCell;
+        boxes[3][row].text = envLabels[envIndex];
+        boxes[4][row] = envValueCells[envIndex];
     }
 
     return boxes;
@@ -361,28 +368,4 @@ const char* WavetableSynthMachine::getWaveformName(WavetableSynthMachine::Wavefo
 std::string WavetableSynthMachine::formatFloat(float value, int decimals)
 {
     return juce::String(value, decimals).toStdString();
-}
-
-std::string WavetableSynthMachine::buildEnvelopePlot() const
-{
-    constexpr int width = 16;
-    std::string plot;
-    plot.reserve(width);
-
-    int attackColumns = juce::jlimit(1, 5, static_cast<int>(std::round((attackSeconds / kMaxAttackSeconds) * 5.0f)) + 1);
-    int decayColumns = juce::jlimit(1, 4, static_cast<int>(std::round((decaySeconds / kMaxDecaySeconds) * 4.0f)) + 1);
-    int releaseColumns = juce::jlimit(1, 4, static_cast<int>(std::round((releaseSeconds / kMaxReleaseSeconds) * 4.0f)) + 1);
-    int sustainColumns = juce::jmax(1, width - attackColumns - decayColumns - releaseColumns);
-    const char sustainChar = sustainLevel > 0.5f ? '-' : '_';
-
-    plot.append(static_cast<std::size_t>(attackColumns), '/');
-    plot.append(static_cast<std::size_t>(decayColumns), '\\');
-    plot.append(static_cast<std::size_t>(sustainColumns), sustainChar);
-    plot.append(static_cast<std::size_t>(releaseColumns), '\\');
-    if (static_cast<int>(plot.size()) > width)
-        plot.resize(width);
-    else if (static_cast<int>(plot.size()) < width)
-        plot.append(static_cast<std::size_t>(width - static_cast<int>(plot.size())), '_');
-
-    return plot;
 }

@@ -187,10 +187,10 @@ bool SequencerEditor::selectPageShortcut(int shortcut)
     selectPage(SequencerEditorPage::step);
     return true;
   case 3:
-    selectPage(SequencerEditorPage::sequenceConfig);
-    return true;
-  case 4:
     selectPage(SequencerEditorPage::machine);
+    return true;
+  case 5:
+    selectPage(SequencerEditorPage::sequenceConfig);
     return true;
   default:
     return false;
@@ -517,23 +517,18 @@ void SequencerEditor::enterDataAtCursor(double inValue)
       if (machineId < 0) machineId = 0;
       sequence->setMachineId(machineId);
     }
-    else if (currentSeqParam == Sequence::machineTypeConfig){
-      double machineType = fmod(inValue, CommandProcessor::countCommands());
-      if (machineType < 0) machineType = 0;
-      sequence->setMachineType(machineType);
-    }
-    else if (currentSeqParam == Sequence::probConfig){
-      double prob = inValue;
-      if (prob < 0) prob = 0;
-      if (prob > 1) prob = 1;
-      sequence->setTriggerProbability(prob);
-    }
     else if (currentSeqParam == Sequence::tpsConfig){
       int tps = static_cast<int>(inValue);
       if (tps < 1) tps = 1;
       if (tps > 16) tps = 16;
       sequence->setTicksPerStep(static_cast<std::size_t>(tps));
       sequence->onZeroSetTicksPerStep(static_cast<std::size_t>(tps));
+    }
+    else if (currentSeqParam == Sequence::probConfig){
+      double prob = inValue;
+      if (prob < 0) prob = 0;
+      if (prob > 1) prob = 1;
+      sequence->setTriggerProbability(prob);
     }
   }
 }

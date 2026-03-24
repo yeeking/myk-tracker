@@ -954,10 +954,6 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
       if (paramIndex == Sequence::machineIdConfig){
         confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getMachineId(), decPlaces));
       }
-      else if (paramIndex == Sequence::machineTypeConfig){
-        Command cmd = CommandProcessor::getCommand(sequence->getMachineType());
-        confGrid[seq].push_back(p.shortName + ":" + cmd.shortName);
-      }
       else if (paramIndex == Sequence::tpsConfig){
         confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequencerNextTicksPerStep(seq)));    
       }
@@ -982,9 +978,8 @@ std::vector<Parameter>& Sequencer::getSeqConfigSpecs()
 }
 void Sequencer::setupSeqConfigSpecs()
 {
-  seqConfigSpecs.resize(4);
+  seqConfigSpecs.resize(3);
   seqConfigSpecs[Sequence::machineIdConfig] = Parameter("Machine ID", "ID", 0, 31, 1, 1, -1);
-  seqConfigSpecs[Sequence::machineTypeConfig] = Parameter("Machine", "Type", 0, 0, 1, 0, -1);
   seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1);
   seqConfigSpecs[Sequence::probConfig] = Parameter("Trig Prob", "P", 0.0, 1.0, 0.1, 0.0, -1, 2);
   // TODO

@@ -52,6 +52,7 @@ public:
         juce::Colour defaultGlowColor { TrackerPalette{}.gridPlayhead };
         float ambientStrength = TrackerPalette{}.ambientStrength;
         juce::Vector3D<float> lightDirection { TrackerPalette{}.lightDirection };
+        bool glowPulseEnabled = true;
     };
 
     explicit TrackerUIComponent(juce::OpenGLContext& context);

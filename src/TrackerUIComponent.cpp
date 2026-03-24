@@ -824,12 +824,8 @@ void TrackerUIComponent::renderOverlayText(const juce::Matrix3D<float>& projecti
     const float hudHalfHeight = frustumHeight * (hudDistance / nearPlane);
     const float padding = hudHalfHeight * 0.12f;
     const float targetHeight = hudHalfHeight * 0.18f;
-    const float targetWidth = hudHalfWidth * 0.9f;
-
-    const float textWidth = textGeomParams.advance * static_cast<float>(overlayCopy.text.size());
-    const float widthScale = (textWidth > 0.0f) ? (targetWidth / textWidth) : 1.0f;
     const float heightScale = targetHeight / textGeomParams.cellH;
-    const float scale = std::min(widthScale, heightScale);
+    const float scale = heightScale;
     const float textHeightScaled = textGeomParams.cellH * scale;
 
     const float baseDistance = 20.0f;
@@ -912,6 +908,9 @@ juce::Matrix3D<float> TrackerUIComponent::getModelMatrix(juce::Vector3D<float> p
 
 float TrackerUIComponent::getGlowPulse() const
 {
+    if (!style.glowPulseEnabled)
+        return 1.0f;
+
     const double timeSeconds = juce::Time::getMillisecondCounterHiRes() / 1000.0;
     return 0.75f + 0.25f * std::sin(static_cast<float>(timeSeconds) * 6.0f);
 }
