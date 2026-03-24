@@ -34,7 +34,8 @@ public:
     void trigger();
     void triggerNote (int midiNote);
     void stop() noexcept;
-    float getNextSampleForChannel (int channel);
+    float getNextSampleForChannel (int channel) const;
+    void advancePlaybackFrame() noexcept;
 
     bool setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name);
     void markError (const juce::String& path, const juce::String& message);

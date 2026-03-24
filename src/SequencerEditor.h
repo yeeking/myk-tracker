@@ -194,9 +194,11 @@ public:
   bool handleChordKey(char key);
   bool handleNoteKey(char key);
   bool enterSelectedMachineDetail();
+  bool enterMachineDetailFromAnywhere();
   bool cycleMachineDetailNext();
   bool isEditingMachineDetail() const;
   std::optional<CommandType> getFocusedMachineDetailType() const;
+  bool machineWantsExclusiveKeyboardInput() const;
   void requestTrackerReset();
   void requestApplicationQuit();
 
@@ -208,6 +210,8 @@ public:
   void machineAdjustCurrentCell(int direction);
   bool machineInsertCurrentCell(double value);
   bool machinePreviewCurrentCell();
+  bool machineHandleTextInput(char character);
+  bool machineHandleTextBackspace();
   bool dismissCurrentTransientUi();
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);

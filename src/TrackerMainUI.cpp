@@ -953,23 +953,35 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         bool handled = false;
         const int keyCode = key.getKeyCode();
         const char ch = static_cast<char>(std::tolower(static_cast<unsigned char>(key.getTextCharacter())));
+        const bool machineCapturesKeyboard = seqEditor->machineWantsExclusiveKeyboardInput();
+
+        if (machineCapturesKeyboard && !key.getModifiers().isCtrlDown())
+        {
+            if (key.isKeyCode(juce::KeyPress::backspaceKey))
+                return seqEditor->machineHandleTextBackspace();
+
+            if (ch >= 32 && ch <= 126)
+                return seqEditor->machineHandleTextInput(ch);
+        }
 
         if (key.isKeyCode(juce::KeyPress::spaceKey))
         {
             seqEditor->togglePlayback();
             handled = true;
         }
-        else if (keyCode == '5' && seqEditor->getCurrentPage() == SequencerEditorPage::machine)
+        else if (keyCode == '5')
         {
-            handled = seqEditor->enterSelectedMachineDetail();
+            handled = seqEditor->enterMachineDetailFromAnywhere();
         }
         else if (keyCode >= '1' && keyCode <= '6')
         {
             handled = seqEditor->selectPageShortcut(keyCode - '0');
         }
-        else if (ch == 'p' && seqEditor->getCurrentPage() == SequencerEditorPage::machine)
+        else if (!key.getModifiers().isCtrlDown()
+                 && seqEditor->getCurrentPage() == SequencerEditorPage::machine
+                 && ch >= 32 && ch <= 126)
         {
-            handled = seqEditor->machinePreviewCurrentCell();
+            handled = seqEditor->machineHandleTextInput(ch);
         }
         else if (seqEditor->handleChordKey(ch))
         {
@@ -981,8 +993,12 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         }
         else if (key.isKeyCode(juce::KeyPress::backspaceKey))
         {
-            seqEditor->resetAtCursor();
-            handled = true;
+            handled = seqEditor->machineHandleTextBackspace();
+            if (!handled)
+            {
+                seqEditor->resetAtCursor();
+                handled = true;
+            }
         }
         else if (key.isKeyCode(juce::KeyPress::escapeKey))
         {
@@ -998,10 +1014,28 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             seqEditor->moveCursorUp();
             handled = true;
         }
+        else if (key.isKeyCode(juce::KeyPress::pageUpKey))
+        {
+            if (seqEditor->getCurrentPage() == SequencerEditorPage::machine)
+            {
+                for (int i = 0; i < 6; ++i)
+                    seqEditor->moveCursorUp();
+                handled = true;
+            }
+        }
         else if (key.isKeyCode(juce::KeyPress::downKey))
         {
             seqEditor->moveCursorDown();
             handled = true;
+        }
+        else if (key.isKeyCode(juce::KeyPress::pageDownKey))
+        {
+            if (seqEditor->getCurrentPage() == SequencerEditorPage::machine)
+            {
+                for (int i = 0; i < 6; ++i)
+                    seqEditor->moveCursorDown();
+                handled = true;
+            }
         }
         else if (key.isKeyCode(juce::KeyPress::leftKey))
         {

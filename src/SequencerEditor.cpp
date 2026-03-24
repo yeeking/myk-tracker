@@ -1044,6 +1044,19 @@ void SequencerEditor::moveCursorLeftOnMachinePage()
   if (!isMachineUiForCurrentSequence())
     return;
 
+  if (machineStackDetailMode)
+  {
+    const auto selectedType = getSelectedStackMachineType();
+    if (selectedType.has_value())
+      if (auto* machine = getActiveMachine(selectedType.value()))
+        if (machine->navigateLeft())
+        {
+          refreshMachineStateForCurrentSequence();
+          rebuildMachineCells();
+          return;
+        }
+  }
+
   moveMachineCursor(0, -1);
 }
 
@@ -1788,7 +1801,7 @@ void SequencerEditor::refreshMachineStateForCurrentSequence()
   const std::size_t newRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
   const std::size_t newCols = machineCells.size();
   const std::string newHeader = (newCols > 0 && newRows > 0) ? machineCells[0][0].text : std::string{};
-  const bool browserFolderChanged = previousCols == 1 && newCols == 1 && previousHeader != newHeader;
+  const bool browserFolderChanged = previousRows > 0 && newRows > 0 && previousHeader != newHeader;
   if (browserFolderChanged)
   {
     machineCursorRow = 0;
@@ -1892,6 +1905,64 @@ bool SequencerEditor::machinePreviewCurrentCell()
   return true;
 }
 
+bool SequencerEditor::machineHandleTextInput(char character)
+{
+  if (!isMachineUiForCurrentSequence() || !machineStackDetailMode)
+    return false;
+
+  const auto selectedType = getSelectedStackMachineType();
+  if (!selectedType.has_value())
+    return false;
+
+  if (auto* machine = getActiveMachine(selectedType.value()))
+  {
+    if (machine->handleTextInput(character))
+    {
+      refreshMachineStateForCurrentSequence();
+      if (!machineCells.empty() && !machineCells[0].empty())
+      {
+        machineCursorRow = std::min<std::size_t>(1, machineCells[0].size() - 1);
+        machineCursorCol = 0;
+        machineEditRow = machineCursorRow;
+        machineEditCol = machineCursorCol;
+        rebuildMachineCells();
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool SequencerEditor::machineHandleTextBackspace()
+{
+  if (!isMachineUiForCurrentSequence() || !machineStackDetailMode)
+    return false;
+
+  const auto selectedType = getSelectedStackMachineType();
+  if (!selectedType.has_value())
+    return false;
+
+  if (auto* machine = getActiveMachine(selectedType.value()))
+  {
+    if (machine->handleTextBackspace())
+    {
+      refreshMachineStateForCurrentSequence();
+      if (!machineCells.empty() && !machineCells[0].empty())
+      {
+        machineCursorRow = std::min<std::size_t>(1, machineCells[0].size() - 1);
+        machineCursorCol = 0;
+        machineEditRow = machineCursorRow;
+        machineEditCol = machineCursorCol;
+        rebuildMachineCells();
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool SequencerEditor::dismissCurrentTransientUi()
 {
   if (!isMachineUiForCurrentSequence())
@@ -1955,6 +2026,39 @@ bool SequencerEditor::enterSelectedMachineDetail()
   return true;
 }
 
+bool SequencerEditor::enterMachineDetailFromAnywhere()
+{
+  if (machineHost == nullptr)
+    return false;
+
+  if (getCurrentPage() != SequencerEditorPage::machine)
+  {
+    gotoMachineConfigPage();
+    machineCursorRow = 0;
+    machineCursorCol = 0;
+    machineEditRow = 0;
+    machineEditCol = 0;
+    refreshMachineStateForCurrentSequence();
+  }
+
+  if (machineStackDetailMode)
+    return true;
+
+  const auto stackTypes = machineHost->getMachineStackTypes(getActiveMachineIndex(CommandType::Sampler));
+  if (stackTypes.empty())
+    return false;
+
+  const std::size_t slotIndex = machineCursorRow == 0 ? 0 : machineCursorRow - 1;
+  machineSelectedStackSlot = std::min(slotIndex, stackTypes.size() - 1);
+  machineStackDetailMode = true;
+  machineCursorRow = 0;
+  machineCursorCol = 0;
+  machineEditRow = 0;
+  machineEditCol = 0;
+  refreshMachineStateForCurrentSequence();
+  return true;
+}
+
 bool SequencerEditor::isEditingMachineDetail() const
 {
   return machineStackDetailMode;
@@ -1965,6 +2069,21 @@ std::optional<CommandType> SequencerEditor::getFocusedMachineDetailType() const
   if (!machineStackDetailMode)
     return std::nullopt;
   return getSelectedStackMachineType();
+}
+
+bool SequencerEditor::machineWantsExclusiveKeyboardInput() const
+{
+  if (!machineStackDetailMode)
+    return false;
+
+  const auto selectedType = getSelectedStackMachineType();
+  if (!selectedType.has_value())
+    return false;
+
+  if (auto* machine = getActiveMachine(selectedType.value()))
+    return machine->wantsExclusiveKeyboardInput();
+
+  return false;
 }
 
 bool SequencerEditor::cycleMachineDetailNext()

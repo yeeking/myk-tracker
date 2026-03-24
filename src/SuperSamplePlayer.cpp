@@ -131,32 +131,35 @@ void SuperSamplePlayer::stop() noexcept
     playHead = 0;
 }
 
-float SuperSamplePlayer::getNextSampleForChannel (int channel)
+float SuperSamplePlayer::getNextSampleForChannel (int channel) const
 {
-    // DBG("SamplerPlayer getNextSampleForChannel  " << playHead);
-
     if (! state.isPlaying || sampleBuffer.getNumSamples() == 0)
         return 0.0f;
 
     const int totalSamples = sampleBuffer.getNumSamples();
     if (playHead >= totalSamples)
-    {
-        state.isPlaying = false;
         return 0.0f;
-    }
 
     const int numSampleChans = sampleBuffer.getNumChannels();
     const float* src = sampleBuffer.getReadPointer (juce::jmin (channel, numSampleChans - 1), playHead);
-    float sample = src[0] * state.gain;
+    return src[0] * state.gain;
+}
 
-    if (channel == 0)
-        pushVuSample (sample);
+void SuperSamplePlayer::advancePlaybackFrame() noexcept
+{
+    if (! state.isPlaying || sampleBuffer.getNumSamples() == 0)
+        return;
 
-    ++playHead;
-    if (playHead >= totalSamples)
+    if (playHead >= sampleBuffer.getNumSamples())
+    {
         state.isPlaying = false;
+        return;
+    }
 
-    return sample;
+    pushVuSample (getNextSampleForChannel (0));
+    ++playHead;
+    if (playHead >= sampleBuffer.getNumSamples())
+        state.isPlaying = false;
 }
 
 bool SuperSamplePlayer::setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name)

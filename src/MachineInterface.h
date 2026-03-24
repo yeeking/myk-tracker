@@ -62,6 +62,10 @@ public:
     virtual void removeEntry(int entryIndex) { (void)entryIndex; }
     virtual bool dismissTransientUi() { return false; }
     virtual void onCursorMoved(int row, int col) { (void)row; (void)col; }
+    virtual bool navigateLeft() { return false; }
+    virtual bool handleTextInput(char character) { (void)character; return false; }
+    virtual bool handleTextBackspace() { return false; }
+    virtual bool wantsExclusiveKeyboardInput() const { return false; }
 
     virtual void getStateInformation(juce::MemoryBlock& destData) = 0;
     virtual void setStateInformation(const void* data, int sizeInBytes) = 0;

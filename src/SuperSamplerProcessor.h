@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -79,6 +80,10 @@ public:
     void removeEntry(int entryIndex) override;
     bool dismissTransientUi() override;
     void onCursorMoved(int row, int col) override;
+    bool navigateLeft() override;
+    bool handleTextInput(char character) override;
+    bool handleTextBackspace() override;
+    bool wantsExclusiveKeyboardInput() const override;
 
 private:
     struct UiPlayerState
@@ -135,6 +140,11 @@ private:
     std::vector<float> uiGlowLevels;
     int browsingPlayerId { -1 };
     juce::File browsingDirectory;
+    std::string browserSearchQuery;
+    std::vector<std::vector<UIBox>> cachedBrowserUi;
+    bool browserUiDirty { true };
+    juce::File previewLoadedFile;
+    std::atomic<std::uint64_t> previewRequestGeneration { 0 };
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuperSamplerProcessor)
