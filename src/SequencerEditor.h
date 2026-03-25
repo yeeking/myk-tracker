@@ -19,6 +19,11 @@ class Sequence;
 class Sequencer;
 enum class SequenceType;
 enum class CommandType : std::size_t;
+enum class SongPlayMode
+{
+  song,
+  sequence
+};
 struct Parameter;
 
 // Interface for machine access from the editor.
@@ -40,6 +45,30 @@ public:
   virtual float getStackMeterLevel(std::size_t stackIndex) const = 0;
   virtual float getStackGainDb(std::size_t stackIndex) const = 0;
   virtual void setStackGainDb(std::size_t stackIndex, float gainDb) = 0;
+};
+
+// Interface for song-mode sequence-set ownership and transport control.
+class SongHost
+{
+public:
+  virtual ~SongHost() = default;
+  virtual std::size_t getSequenceSetCount() const = 0;
+  virtual std::size_t getViewedSequenceSetIndex() const = 0;
+  virtual void setViewedSequenceSetIndex(std::size_t index) = 0;
+  virtual std::size_t getSongRowCount() const = 0;
+  virtual std::size_t getSelectedSongRow() const = 0;
+  virtual std::size_t getCurrentPlaybackSongRow() const = 0;
+  virtual void setSelectedSongRow(std::size_t row) = 0;
+  virtual std::size_t getSongRowSequenceSetId(std::size_t row) const = 0;
+  virtual int getSongRowRepeatCount(std::size_t row) const = 0;
+  virtual SongPlayMode getSongPlayMode() const = 0;
+  virtual void setSongPlayMode(SongPlayMode mode) = 0;
+  virtual std::size_t addSongRowByCloningViewedSet() = 0;
+  virtual void removeSongRow(std::size_t row) = 0;
+  virtual void adjustSongRowSequenceSetId(std::size_t row, int direction) = 0;
+  virtual void adjustSongRowRepeatCount(std::size_t row, int direction) = 0;
+  virtual void toggleSongPlayback() = 0;
+  virtual void rewindSongTransport() = 0;
 };
 
 // Abstract interface for editor-facing sequencer access.
@@ -78,6 +107,7 @@ class SequencerAbs{
  */
 enum class SequencerEditorMode
 {
+  arrangingSong,
   selectingSeqAndStep,
   // settingSeqLength,// deprecate as set length happens in selectedSeqAndStep mode now
   configuringSequence,
@@ -98,6 +128,7 @@ enum class SequencerEditorSubMode
 
 enum class SequencerEditorPage
 {
+  song,
   sequence,
   step,
   sequenceConfig,
@@ -122,6 +153,7 @@ public:
   SequencerEditor(SequencerAbs *_sequencer);
   void setSequencer(SequencerAbs *sequencer);
   void setMachineHost(MachineHost *host);
+  void setSongHost(SongHost *host);
   void setResetConfirmationHandler(std::function<void()> handler);
   void setQuitConfirmationHandler(std::function<void()> handler);
   SequencerAbs *getSequencer();
@@ -182,6 +214,7 @@ public:
   void incrementAtCursor();
   /** decrease the value at the current cursor position, e.g. increasing note number */
   void decrementAtCursor();
+  void gotoSongPage();
   /** enter sequence configuration page */
   void gotoSequenceConfigPage();
   /** enter machine configuration page */
@@ -258,6 +291,9 @@ public:
   size_t getCurrentStepCol() const;
   /** which seq param index are we editing? */
   size_t getCurrentSeqParam() const; 
+  std::size_t getCurrentSongRow() const;
+  std::size_t getCurrentSongCol() const;
+  void setSelectedSongCursor(std::size_t row, std::size_t col);
   /** returns the current edit octave */
   double getCurrentOctave() const;
   /** move the cursor to a specific sequence*/
@@ -291,31 +327,37 @@ private:
   std::optional<CommandType> getSelectedStackMachineType() const;
   void leaveMachineDetail();
 
+  void moveCursorLeftOnSongPage();
   void moveCursorLeftOnSequencePage();
   void moveCursorLeftOnStepPage();
   void moveCursorLeftOnSequenceConfigPage();
   void moveCursorLeftOnMachinePage();
   void moveCursorLeftOnResetConfirmationPage();
+  void moveCursorRightOnSongPage();
   void moveCursorRightOnSequencePage();
   void moveCursorRightOnStepPage();
   void moveCursorRightOnSequenceConfigPage();
   void moveCursorRightOnMachinePage();
   void moveCursorRightOnResetConfirmationPage();
+  void moveCursorUpOnSongPage();
   void moveCursorUpOnSequencePage();
   void moveCursorUpOnStepPage();
   void moveCursorUpOnSequenceConfigPage();
   void moveCursorUpOnMachinePage();
   void moveCursorUpOnResetConfirmationPage();
+  void moveCursorDownOnSongPage();
   void moveCursorDownOnSequencePage();
   void moveCursorDownOnStepPage();
   void moveCursorDownOnSequenceConfigPage();
   void moveCursorDownOnMachinePage();
   void moveCursorDownOnResetConfirmationPage();
+  void addRowOnSongPage();
   void addRowOnSequencePage();
   void addRowOnStepPage();
   void addRowOnMachinePage();
   void removeRowOnSequencePage();
   void removeRowOnStepPage();
+  void clickOnSongPage();
   void clickOnSequencePage();
   void clickOnStepPage();
   void clickOnMachinePage();
@@ -323,9 +365,11 @@ private:
   void resetOnSequencePage();
   void resetOnStepPage();
   void resetOnResetConfirmationPage();
+  void incrementOnSongPage();
   void incrementOnStepPage();
   void incrementOnSequenceConfigPage();
   void incrementOnMachinePage();
+  void decrementOnSongPage();
   void decrementOnStepPage();
   void decrementOnSequenceConfigPage();
   void decrementOnMachinePage();
@@ -338,6 +382,7 @@ private:
 
   SequencerAbs *sequencer;
   MachineHost *machineHost = nullptr;
+  SongHost *songHost = nullptr;
   std::function<void()> resetConfirmationHandler;
   std::function<void()> quitConfirmationHandler;
   /** which sequence*/
@@ -350,6 +395,10 @@ private:
   size_t currentStepCol;
   /** which sequence param are you editing?*/
   size_t currentSeqParam; 
+  /** which song row is selected on the song page */
+  std::size_t currentSongRow;
+  /** which song page column is selected */
+  std::size_t currentSongCol;
   /** one sequence can be armed for live MIDI recording */
   size_t armedSequence;
 

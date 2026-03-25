@@ -269,7 +269,7 @@ void Sequence::tick(bool trigger)
   // jump to the top 
   if (rewindAtNextZeroTick && tickOfFour == 0){
     tickOfFour = 0;
-    ticksElapsed = 0;
+    ticksElapsed = ticksPerStep;
     currentStep = 0; 
     rewindAtNextZeroTick = false; 
   }
@@ -613,6 +613,16 @@ void Sequence::toggleMuteState()
 void Sequence::rewindAtNextZero()
 {
   rewindAtNextZeroTick = true;  
+}
+
+void Sequence::primeForImmediateTrigger()
+{
+  deactivateProcessors();
+  currentStep = 0;
+  rewindAtNextZeroTick = false;
+  nextTicksPerStep = 0;
+  tickOfFour = 3;
+  ticksElapsed = ticksPerStep > 0 ? ticksPerStep - 1 : 0;
 }
 
 
@@ -1142,6 +1152,11 @@ bool Sequencer::isPlaying()
 void Sequencer::rewindAtNextZero()
 {
   for (Sequence& seq : sequences){seq.rewindAtNextZero();}
+}
+
+void Sequencer::primeForImmediateTrigger()
+{
+  for (Sequence& seq : sequences){seq.primeForImmediateTrigger();}
 }
 
 

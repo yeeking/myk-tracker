@@ -27,6 +27,9 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
 
     std::string viewMode;
     switch(seqEditor->getEditMode()){
+        case SequencerEditorMode::arrangingSong:
+            viewMode = "Song";
+            break;
         case SequencerEditorMode::configuringSequence:
             viewMode = "Conf";
             break;

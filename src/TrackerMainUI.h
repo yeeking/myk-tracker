@@ -70,6 +70,7 @@ private:
     juce::Rectangle<int> seqViewBounds;
     
     void prepareControlPanelView();
+    void prepareSongView();
     void prepareSequenceView();
     void prepareStepView();
     void prepareSeqConfigView();

@@ -87,11 +87,14 @@ float getSeqConfigGainStepDb()
 } // namespace
 
 SequencerEditor::SequencerEditor(SequencerAbs *_sequencer) : sequencer{_sequencer},
+                                                         songHost{nullptr},
                                                          currentSequence{0},
                                                          currentStep{0},
                                                          currentStepRow{0},
                                                          currentStepCol{0},
                                                          currentSeqParam{0},
+                                                         currentSongRow{0},
+                                                         currentSongCol{0},
                                                          armedSequence{SequencerAbs::notArmed}, // default to a value higher than we'll ever have number of sequences (640k is enough, right Bill?)
                                                          editMode{SequencerEditorMode::selectingSeqAndStep},
                                                          editSubMode{SequencerEditorSubMode::editCol1},
@@ -107,6 +110,10 @@ void SequencerEditor::setSequencer(SequencerAbs *_sequencer)
 void SequencerEditor::setMachineHost(MachineHost *host)
 {
   machineHost = host;
+}
+void SequencerEditor::setSongHost(SongHost *host)
+{
+  songHost = host;
 }
 void SequencerEditor::setResetConfirmationHandler(std::function<void()> handler)
 {
@@ -128,6 +135,8 @@ void SequencerEditor::resetCursor()
   currentStep = 0;
   currentStepRow = 0;
   currentStepCol = 0;
+  currentSongRow = 0;
+  currentSongCol = 0;
   editMode = SequencerEditorMode::selectingSeqAndStep;
   editSubMode = SequencerEditorSubMode::editCol1;
   stepIncrement = 0.5f;
@@ -149,6 +158,8 @@ SequencerEditorPage SequencerEditor::getCurrentPage() const
 {
   switch (editMode)
   {
+  case SequencerEditorMode::arrangingSong:
+    return SequencerEditorPage::song;
   case SequencerEditorMode::selectingSeqAndStep:
     return SequencerEditorPage::sequence;
   case SequencerEditorMode::editingStep:
@@ -182,6 +193,9 @@ void SequencerEditor::selectPage(SequencerEditorPage page)
 {
   switch (page)
   {
+  case SequencerEditorPage::song:
+    gotoSongPage();
+    break;
   case SequencerEditorPage::sequence:
     gotoSequencePage();
     break;
@@ -205,15 +219,20 @@ bool SequencerEditor::selectPageShortcut(int shortcut)
   switch (shortcut)
   {
   case 1:
-    selectPage(SequencerEditorPage::sequence);
+    selectPage(SequencerEditorPage::song);
     return true;
   case 2:
-    selectPage(SequencerEditorPage::step);
+    selectPage(SequencerEditorPage::sequence);
     return true;
   case 3:
+    selectPage(SequencerEditorPage::step);
+    return true;
+  case 4:
     selectPage(SequencerEditorPage::machine);
     return true;
   case 5:
+    return enterMachineDetailFromAnywhere();
+  case 6:
     selectPage(SequencerEditorPage::sequenceConfig);
     return true;
   default:
@@ -229,6 +248,8 @@ void SequencerEditor::cycleEditMode()
 {
   switch (editMode)
   {
+  case SequencerEditorMode::arrangingSong:
+    return;
   case SequencerEditorMode::selectingSeqAndStep:
     return;
   case SequencerEditorMode::editingStep: // go to next data item
@@ -252,6 +273,8 @@ void SequencerEditor::cycleAtCursor()
 {
   switch (editMode)
   {
+  case SequencerEditorMode::arrangingSong:
+    return;
   case SequencerEditorMode::configuringSequence:
     break;
   case SequencerEditorMode::machineConfig:
@@ -282,6 +305,9 @@ void SequencerEditor::click()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song:
+    clickOnSongPage();
+    break;
   case SequencerEditorPage::sequence:
     clickOnSequencePage();
     break;
@@ -303,6 +329,8 @@ void SequencerEditor::resetAtCursor()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song:
+    break;
   case SequencerEditorPage::sequence:
     resetOnSequencePage();
     break;
@@ -326,6 +354,9 @@ void SequencerEditor::enterAtCursor()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song:
+    clickOnSongPage();
+    break;
   case SequencerEditorPage::sequence:
     gotoStepPage();
     break;
@@ -404,6 +435,10 @@ void SequencerEditor::incrementOctave()
   switch (editMode)
   {
 
+  case SequencerEditorMode::arrangingSong:
+  {
+    break;
+  }
   case SequencerEditorMode::selectingSeqAndStep:
   {
     // default to row 0
@@ -446,6 +481,10 @@ void SequencerEditor::decrementOctave()
 
   switch (editMode)
   {
+  case SequencerEditorMode::arrangingSong:
+  {
+    break;
+  }
   case SequencerEditorMode::selectingSeqAndStep:
   {
     // this will automatically apply the octave shift  to the note
@@ -606,6 +645,7 @@ void SequencerEditor::moveCursorLeft()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song: moveCursorLeftOnSongPage(); break;
   case SequencerEditorPage::sequence: moveCursorLeftOnSequencePage(); break;
   case SequencerEditorPage::step: moveCursorLeftOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorLeftOnSequenceConfigPage(); break;
@@ -618,6 +658,7 @@ void SequencerEditor::moveCursorRight()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song: moveCursorRightOnSongPage(); break;
   case SequencerEditorPage::sequence: moveCursorRightOnSequencePage(); break;
   case SequencerEditorPage::step: moveCursorRightOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
@@ -630,6 +671,7 @@ void SequencerEditor::moveCursorUp()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song: moveCursorUpOnSongPage(); break;
   case SequencerEditorPage::sequence: moveCursorUpOnSequencePage(); break;
   case SequencerEditorPage::step: moveCursorUpOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorUpOnSequenceConfigPage(); break;
@@ -642,6 +684,7 @@ void SequencerEditor::moveCursorDown()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song: moveCursorDownOnSongPage(); break;
   case SequencerEditorPage::sequence: moveCursorDownOnSequencePage(); break;
   case SequencerEditorPage::step: moveCursorDownOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorDownOnSequenceConfigPage(); break;
@@ -655,6 +698,9 @@ void SequencerEditor::addRow()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song:
+    addRowOnSongPage();
+    break;
   case SequencerEditorPage::sequence:
     addRowOnSequencePage();
     break;
@@ -675,6 +721,8 @@ void SequencerEditor::removeRow()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song:
+    break;
   case SequencerEditorPage::sequence:
     removeRowOnSequencePage();
     break;
@@ -696,6 +744,9 @@ void SequencerEditor::incrementAtCursor()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song:
+    incrementOnSongPage();
+    break;
   case SequencerEditorPage::sequence:
     shiftCurrentSequenceStepNote(12);
     break;
@@ -717,6 +768,9 @@ void SequencerEditor::decrementAtCursor()
 {
   switch (getCurrentPage())
   {
+  case SequencerEditorPage::song:
+    decrementOnSongPage();
+    break;
   case SequencerEditorPage::sequence:
     shiftCurrentSequenceStepNote(-12);
     break;
@@ -1030,9 +1084,63 @@ size_t SequencerEditor::getCurrentSeqParam() const
   return currentSeqParam;
 }
 
+std::size_t SequencerEditor::getCurrentSongRow() const
+{
+  return currentSongRow;
+}
+
+std::size_t SequencerEditor::getCurrentSongCol() const
+{
+  return currentSongCol;
+}
+
+void SequencerEditor::setSelectedSongCursor(std::size_t row, std::size_t col)
+{
+  currentSongRow = row;
+  currentSongCol = col;
+}
+
 double SequencerEditor::getCurrentOctave() const
 {
   return octave; 
+}
+
+void SequencerEditor::moveCursorLeftOnSongPage()
+{
+  if (currentSongRow == 0)
+    currentSongCol = 0;
+  else if (currentSongCol > 0)
+    --currentSongCol;
+}
+
+void SequencerEditor::moveCursorRightOnSongPage()
+{
+  const std::size_t maxCol = currentSongRow == 0 ? 1u : 3u;
+  if (currentSongCol < maxCol)
+    ++currentSongCol;
+}
+
+void SequencerEditor::moveCursorUpOnSongPage()
+{
+  if (currentSongRow == 0)
+    return;
+
+  --currentSongRow;
+  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 3u);
+  if (songHost != nullptr)
+    songHost->setSelectedSongRow(currentSongRow == 0 ? 0u : currentSongRow - 1);
+}
+
+void SequencerEditor::moveCursorDownOnSongPage()
+{
+  const std::size_t rowCount = songHost != nullptr ? songHost->getSongRowCount() : 0u;
+  if (currentSongRow >= rowCount)
+    return;
+
+  ++currentSongRow;
+  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 3u);
+  if (songHost != nullptr && currentSongRow > 0)
+    songHost->setSelectedSongRow(currentSongRow - 1);
 }
 
 void SequencerEditor::moveCursorLeftOnSequencePage()
@@ -1209,6 +1317,16 @@ void SequencerEditor::moveCursorDownOnResetConfirmationPage()
   resetConfirmationYesSelected = false;
 }
 
+void SequencerEditor::addRowOnSongPage()
+{
+  if (songHost == nullptr)
+    return;
+  const std::size_t newRow = songHost->addSongRowByCloningViewedSet();
+  currentSongRow = newRow + 1;
+  currentSongCol = 0;
+  songHost->setSelectedSongRow(newRow);
+}
+
 void SequencerEditor::addRowOnSequencePage()
 {
   sequencer->extendSequence(getCurrentSequence());
@@ -1251,6 +1369,37 @@ void SequencerEditor::removeRowOnStepPage()
 
 void SequencerEditor::clickOnSequencePage()
 {
+}
+
+void SequencerEditor::clickOnSongPage()
+{
+  if (songHost == nullptr)
+    return;
+
+  if (currentSongRow == 0)
+  {
+    songHost->setSongPlayMode(currentSongCol == 0 ? SongPlayMode::song : SongPlayMode::sequence);
+    return;
+  }
+
+  const std::size_t songRowIndex = currentSongRow - 1;
+  if (songRowIndex >= songHost->getSongRowCount())
+    return;
+
+  if (currentSongCol == 2)
+  {
+    songHost->setSelectedSongRow(songRowIndex);
+    songHost->setViewedSequenceSetIndex(songHost->getSongRowSequenceSetId(songRowIndex));
+    currentSequence = 0;
+    currentStep = 0;
+    gotoSequencePage();
+    return;
+  }
+  if (currentSongCol == 3)
+  {
+    songHost->removeSongRow(songRowIndex);
+    currentSongRow = std::min<std::size_t>(currentSongRow, songHost->getSongRowCount());
+  }
 }
 
 void SequencerEditor::clickOnStepPage()
@@ -1306,6 +1455,18 @@ void SequencerEditor::incrementOnStepPage()
     syncOctaveFromMidiNote(sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol));
 }
 
+void SequencerEditor::incrementOnSongPage()
+{
+  if (songHost == nullptr || currentSongRow == 0)
+    return;
+
+  const std::size_t songRowIndex = currentSongRow - 1;
+  if (currentSongCol == 0)
+    songHost->adjustSongRowSequenceSetId(songRowIndex, 1);
+  else if (currentSongCol == 1)
+    songHost->adjustSongRowRepeatCount(songRowIndex, 1);
+}
+
 void SequencerEditor::incrementOnSequenceConfigPage()
 {
   if (currentSeqParam < sequencer->getSeqConfigSpecs().size())
@@ -1335,6 +1496,18 @@ void SequencerEditor::decrementOnStepPage()
   sequencer->decrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
   if (currentStepCol == Step::noteInd)
     syncOctaveFromMidiNote(sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol));
+}
+
+void SequencerEditor::decrementOnSongPage()
+{
+  if (songHost == nullptr || currentSongRow == 0)
+    return;
+
+  const std::size_t songRowIndex = currentSongRow - 1;
+  if (currentSongCol == 0)
+    songHost->adjustSongRowSequenceSetId(songRowIndex, -1);
+  else if (currentSongCol == 1)
+    songHost->adjustSongRowRepeatCount(songRowIndex, -1);
 }
 
 void SequencerEditor::decrementOnSequenceConfigPage()
@@ -1483,6 +1656,18 @@ void SequencerEditor::gotoSequenceConfigPage()
   setEditMode(SequencerEditorMode::configuringSequence);
 }
 
+void SequencerEditor::gotoSongPage()
+{
+  dismissMachineTransientUiIfNeeded();
+  if (songHost != nullptr)
+  {
+    const auto rowCount = songHost->getSongRowCount();
+    if (rowCount > 0)
+      currentSongRow = std::min<std::size_t>(songHost->getSelectedSongRow() + 1, rowCount);
+  }
+  setEditMode(SequencerEditorMode::arrangingSong);
+}
+
 void SequencerEditor::gotoMachineConfigPage()
 {
   setEditMode(SequencerEditorMode::machineConfig);
@@ -1530,6 +1715,11 @@ std::string SequencerEditor::getConfirmationPrompt() const
 
 void SequencerEditor::togglePlayback()
 {
+  if (songHost != nullptr)
+  {
+    songHost->toggleSongPlayback();
+    return;
+  }
   if (auto* impl = getSequencerImpl())
   {
     CommandProcessor::sendAllNotesOff();
@@ -1545,6 +1735,11 @@ void SequencerEditor::togglePlayback()
 
 void SequencerEditor::rewindTransport()
 {
+  if (songHost != nullptr)
+  {
+    songHost->rewindSongTransport();
+    return;
+  }
   if (auto* impl = getSequencerImpl())
   {
     CommandProcessor::sendAllNotesOff();
@@ -1579,7 +1774,8 @@ bool SequencerEditor::handleChordKey(char key)
 
 bool SequencerEditor::handleNoteKey(char key)
 {
-  if (getCurrentPage() == SequencerEditorPage::resetConfirmation)
+  if (getCurrentPage() == SequencerEditorPage::resetConfirmation
+      || getCurrentPage() == SequencerEditorPage::song)
     return false;
 
   const auto midiNote = lookupKeyboardMidiNote(key);

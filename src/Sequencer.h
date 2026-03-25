@@ -239,6 +239,8 @@ class Sequence{
     void toggleMuteState();
     /** tell the sequence to reset its position counter at next tick. Useful for rewinding*/
     void rewindAtNextZero();
+    /** prime this sequence so the next tick triggers step zero immediately */
+    void primeForImmediateTrigger();
     /**  when creating new notes, set the channel to this one*/
     // void setDefaulyChannel();
   private:
@@ -377,6 +379,8 @@ class Sequencer : public SequencerAbs {
       bool isPlaying();
       /** on next 0 / 4 ticks, rewind all sequences to step 0. Use in combination with enableAllTriggers to play from the top. */
       void rewindAtNextZero();
+      /** prime all sequences so the next tick triggers step zero immediately */
+      void primeForImmediateTrigger();
       
       /** allows a 'keep stepping but do not trigger' when tick is called*/
       void disableAllTriggers();

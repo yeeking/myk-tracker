@@ -175,6 +175,12 @@ void TrackerMainUI::timerCallback ()
   });
   switch(editMode){
 
+      case SequencerEditorMode::arrangingSong:
+      {
+          prepareSongView();
+          break;
+      }
+
       case SequencerEditorMode::selectingSeqAndStep:
       {
           prepareSequenceView();
@@ -206,6 +212,7 @@ void TrackerMainUI::timerCallback ()
       audioProcessor.sendCurrentCellValueOverOscIfChanged();
   });
     if (editMode != SequencerEditorMode::machineConfig
+        && editMode != SequencerEditorMode::arrangingSong
         && editMode != SequencerEditorMode::resetConfirmation)
     {
       const int bpmInt = static_cast<int>(std::lround(audioProcessor.getBPM()));
@@ -671,6 +678,83 @@ void TrackerMainUI::prepareControlPanelView()
     //     std::vector<std::pair<int, int>>(), false); 
 }
 
+void TrackerMainUI::prepareSongView()
+{
+    samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
+    samplerColumnWidths.clear();
+
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
+
+    std::size_t rowCount = 1;
+    std::size_t currentSongRow = 0;
+    std::size_t currentSongCol = 0;
+    std::size_t playbackSongRow = 0;
+    SongPlayMode playMode = SongPlayMode::sequence;
+    audioProcessor.withAudioThreadExclusive([&]()
+    {
+        rowCount += audioProcessor.getSongRowCount();
+        currentSongRow = seqEditor->getCurrentSongRow();
+        currentSongCol = seqEditor->getCurrentSongCol();
+        playbackSongRow = audioProcessor.getCurrentPlaybackSongRow();
+        playMode = audioProcessor.getSongPlayMode();
+    });
+
+    std::vector<std::vector<UIBox>> boxes(4, std::vector<UIBox>(rowCount));
+
+    boxes[0][0].kind = UIBox::Kind::TrackerCell;
+    boxes[0][0].text = "PLAY SONG";
+    boxes[0][0].isHighlighted = playMode == SongPlayMode::song;
+    boxes[1][0].kind = UIBox::Kind::TrackerCell;
+    boxes[1][0].text = "PLAY SEQ";
+    boxes[1][0].isHighlighted = playMode == SongPlayMode::sequence;
+    boxes[2][0].kind = UIBox::Kind::None;
+    boxes[2][0].isDisabled = true;
+    boxes[3][0].kind = UIBox::Kind::None;
+    boxes[3][0].isDisabled = true;
+
+    audioProcessor.withAudioThreadExclusive([&]()
+    {
+        for (std::size_t row = 0; row < audioProcessor.getSongRowCount(); ++row)
+        {
+            const std::size_t displayRow = row + 1;
+            boxes[0][displayRow].kind = UIBox::Kind::TrackerCell;
+            boxes[0][displayRow].text = "SET " + std::to_string(audioProcessor.getSongRowSequenceSetId(row) + 1);
+            boxes[1][displayRow].kind = UIBox::Kind::TrackerCell;
+            boxes[1][displayRow].text = "REP " + std::to_string(audioProcessor.getSongRowRepeatCount(row));
+            boxes[2][displayRow].kind = UIBox::Kind::TrackerCell;
+            boxes[2][displayRow].text = "EDIT";
+            boxes[3][displayRow].kind = UIBox::Kind::TrackerCell;
+            boxes[3][displayRow].text = "DEL";
+
+            if (playMode == SongPlayMode::song && row == playbackSongRow)
+            {
+                boxes[0][displayRow].isHighlighted = true;
+                boxes[1][displayRow].isHighlighted = true;
+                boxes[2][displayRow].isHighlighted = true;
+                boxes[3][displayRow].isHighlighted = true;
+            }
+        }
+    });
+
+    currentSongRow = std::min(currentSongRow, rowCount - 1);
+    currentSongCol = std::min(currentSongCol, static_cast<std::size_t>(currentSongRow == 0 ? 1 : 3));
+    boxes[currentSongCol][currentSongRow].isSelected = true;
+
+    updateCellStates(boxes, rowCount, 4);
+    overlayState.text = "Song";
+    overlayState.color = palette.textPrimary;
+    overlayState.glowColor = palette.gridPlayhead;
+    overlayState.glowStrength = 0.25f;
+}
+
 void TrackerMainUI::prepareResetConfirmationView()
 {
   samplerViewActive = false;
@@ -1093,7 +1177,7 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             seqEditor->togglePlayback();
             handled = true;
         }
-        else if (keyCode == '4')
+        else if (keyCode == '5')
         {
             handled = seqEditor->enterMachineDetailFromAnywhere();
         }

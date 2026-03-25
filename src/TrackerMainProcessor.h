@@ -40,6 +40,7 @@ class TrackerMainProcessor  :    public MachineUtilsAbs,
                             public juce::AudioProcessor, 
                             public juce::ChangeBroadcaster,
                             public MachineHost,
+                            public SongHost,
                             private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 
                             #if JucePlugin_Enable_ARA
@@ -117,6 +118,23 @@ public:
     float getStackMeterLevel(std::size_t stackIndex) const override;
     float getStackGainDb(std::size_t stackIndex) const override;
     void setStackGainDb(std::size_t stackIndex, float gainDb) override;
+    std::size_t getSequenceSetCount() const override;
+    std::size_t getViewedSequenceSetIndex() const override;
+    void setViewedSequenceSetIndex(std::size_t index) override;
+    std::size_t getSongRowCount() const override;
+    std::size_t getSelectedSongRow() const override;
+    std::size_t getCurrentPlaybackSongRow() const override;
+    void setSelectedSongRow(std::size_t row) override;
+    std::size_t getSongRowSequenceSetId(std::size_t row) const override;
+    int getSongRowRepeatCount(std::size_t row) const override;
+    SongPlayMode getSongPlayMode() const override;
+    void setSongPlayMode(SongPlayMode mode) override;
+    std::size_t addSongRowByCloningViewedSet() override;
+    void removeSongRow(std::size_t row) override;
+    void adjustSongRowSequenceSetId(std::size_t row, int direction) override;
+    void adjustSongRowRepeatCount(std::size_t row, int direction) override;
+    void toggleSongPlayback() override;
+    void rewindSongTransport() override;
     void sendCurrentCellValueOverOscIfChanged();
     void recreateSequencersAndMachines();
     struct PendingZoomCommand
@@ -152,8 +170,23 @@ public:
     }
     
 private:
-    Sequencer sequencer;
-  /** keep the seq editor in the processor as the plugineditor
+    struct SongRow
+    {
+        std::size_t sequenceSetId = 0;
+        int repeatCount = 1;
+    };
+    std::vector<std::unique_ptr<Sequencer>> sequenceSets;
+    std::vector<SongRow> songRows;
+    SongPlayMode songPlayMode = SongPlayMode::sequence;
+    std::size_t viewedSequenceSetIndex = 0;
+    std::size_t activePlaybackSequenceSetIndex = 0;
+    std::optional<std::size_t> pendingPlaybackSequenceSetIndex;
+    std::size_t selectedSongRow = 0;
+    std::size_t currentSongRow = 0;
+    int currentSongRowRepeatIndex = 0;
+    bool playbackAdvancedSinceRowStart = false;
+    int lastTransportBeatInBar = -1;
+    /** keep the seq editor in the processor as the plugineditor
      * can be deleted but the processor persists and we want to retain state on the seqeditor
     */
     SequencerEditor seqEditor; 
@@ -219,6 +252,20 @@ private:
     juce::var serializeSequencerState();
     /** retrieve state from var  */
     void restoreSequencerState(const juce::var& stateVar);
+    static std::unique_ptr<Sequencer> createDefaultSequenceSet();
+    void resetSongState();
+    Sequencer* getViewedSequencerInternal();
+    const Sequencer* getViewedSequencerInternal() const;
+    Sequencer* getPlaybackSequencerInternal();
+    const Sequencer* getPlaybackSequencerInternal() const;
+    void bindViewedSequenceSetToEditor();
+    void schedulePlaybackSequenceSetSwitch(std::size_t index);
+    void switchPlaybackSequenceSetImmediately(std::size_t index, bool rewindNow);
+    void applyPendingSequenceSetSwitchForCurrentTransportBeat();
+    bool isPlaybackSequencerAtBoundary() const;
+    void handleSongAdvanceAfterTick();
+    juce::var serializeSingleSequencer(const Sequencer& sequencerToSave) const;
+    void restoreSingleSequencer(Sequencer& target, const juce::var& seqVar);
     static constexpr std::size_t kMachineStackCount = 32;
     MachineStack* getMachineStack(std::size_t stackIndex);
     const MachineStack* getMachineStack(std::size_t stackIndex) const;

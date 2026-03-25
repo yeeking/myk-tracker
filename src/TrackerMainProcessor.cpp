@@ -22,7 +22,6 @@ constexpr const char* zoomInAddress = "/zoom_in";
 constexpr const char* zoomOutAddress = "/zoom_out";
 constexpr const char* incrementAddress = "/increment";
 constexpr const char* decrementAddress = "/decrement";
-
 std::string formatMidiNoteLabel(unsigned short note)
 {
     const std::size_t noteIndex = static_cast<std::size_t>(note % 12);
@@ -110,9 +109,13 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
 
 bool TrackerMainProcessor::isStackAssigned(std::size_t stackIndex)
 {
-    for (std::size_t seq = 0; seq < sequencer.howManySequences(); ++seq)
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    if (playbackSequencer == nullptr)
+        return false;
+
+    for (std::size_t seq = 0; seq < playbackSequencer->howManySequences(); ++seq)
     {
-        const auto* sequence = sequencer.getSequence(seq);
+        const auto* sequence = playbackSequencer->getSequence(seq);
         if (sequence == nullptr)
             continue;
 
@@ -124,6 +127,184 @@ bool TrackerMainProcessor::isStackAssigned(std::size_t stackIndex)
     }
 
     return false;
+}
+
+std::unique_ptr<Sequencer> TrackerMainProcessor::createDefaultSequenceSet()
+{
+    auto sequencer = std::make_unique<Sequencer>(16, 8);
+    sequencer->stop();
+    for (std::size_t seqIndex = 0; seqIndex < sequencer->howManySequences(); ++seqIndex)
+        if (auto* sequence = sequencer->getSequence(seqIndex))
+            sequence->setMachineId(static_cast<double>(seqIndex + 1));
+    sequencer->requestStrUpdate();
+    return sequencer;
+}
+
+void TrackerMainProcessor::resetSongState()
+{
+    sequenceSets.clear();
+    sequenceSets.push_back(createDefaultSequenceSet());
+    songRows.clear();
+    songRows.push_back({ 0, 1 });
+    songPlayMode = SongPlayMode::sequence;
+    viewedSequenceSetIndex = 0;
+    activePlaybackSequenceSetIndex = 0;
+    pendingPlaybackSequenceSetIndex.reset();
+    selectedSongRow = 0;
+    currentSongRow = 0;
+    currentSongRowRepeatIndex = 0;
+    playbackAdvancedSinceRowStart = false;
+    lastTransportBeatInBar = -1;
+}
+
+Sequencer* TrackerMainProcessor::getViewedSequencerInternal()
+{
+    if (sequenceSets.empty())
+        return nullptr;
+    viewedSequenceSetIndex = std::min(viewedSequenceSetIndex, sequenceSets.size() - 1);
+    return sequenceSets[viewedSequenceSetIndex].get();
+}
+
+const Sequencer* TrackerMainProcessor::getViewedSequencerInternal() const
+{
+    if (sequenceSets.empty())
+        return nullptr;
+    const auto safeIndex = std::min(viewedSequenceSetIndex, sequenceSets.size() - 1);
+    return sequenceSets[safeIndex].get();
+}
+
+Sequencer* TrackerMainProcessor::getPlaybackSequencerInternal()
+{
+    if (sequenceSets.empty())
+        return nullptr;
+    activePlaybackSequenceSetIndex = std::min(activePlaybackSequenceSetIndex, sequenceSets.size() - 1);
+    return sequenceSets[activePlaybackSequenceSetIndex].get();
+}
+
+const Sequencer* TrackerMainProcessor::getPlaybackSequencerInternal() const
+{
+    if (sequenceSets.empty())
+        return nullptr;
+    const auto safeIndex = std::min(activePlaybackSequenceSetIndex, sequenceSets.size() - 1);
+    return sequenceSets[safeIndex].get();
+}
+
+void TrackerMainProcessor::bindViewedSequenceSetToEditor()
+{
+    if (auto* viewedSequencer = getViewedSequencerInternal())
+    {
+        seqEditor.setSequencer(viewedSequencer);
+        trackerController = TrackerController{viewedSequencer, this, &seqEditor};
+
+        const auto maxSeq = juce::jmax<int>(0, static_cast<int>(viewedSequencer->howManySequences()) - 1);
+        seqEditor.setCurrentSequence(juce::jlimit(0, maxSeq, static_cast<int>(seqEditor.getCurrentSequence())));
+        const auto maxStep = juce::jmax<int>(0, static_cast<int>(viewedSequencer->howManySteps(seqEditor.getCurrentSequence())) - 1);
+        seqEditor.setCurrentStep(juce::jlimit(0, maxStep, static_cast<int>(seqEditor.getCurrentStep())));
+        viewedSequencer->requestStrUpdate();
+    }
+}
+
+void TrackerMainProcessor::schedulePlaybackSequenceSetSwitch(std::size_t index)
+{
+    if (sequenceSets.empty())
+        return;
+    const auto safeIndex = std::min(index, sequenceSets.size() - 1);
+    pendingPlaybackSequenceSetIndex = safeIndex;
+    if (auto* pendingSequencer = sequenceSets[safeIndex].get())
+    {
+        pendingSequencer->stop();
+        pendingSequencer->primeForImmediateTrigger();
+    }
+}
+
+void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t index, bool rewindNow)
+{
+    if (sequenceSets.empty())
+        return;
+
+    auto* previousPlaybackSequencer = getPlaybackSequencerInternal();
+    activePlaybackSequenceSetIndex = std::min(index, sequenceSets.size() - 1);
+    pendingPlaybackSequenceSetIndex.reset();
+    playbackAdvancedSinceRowStart = false;
+    if (previousPlaybackSequencer != nullptr)
+        previousPlaybackSequencer->stop();
+    if (songPlayMode == SongPlayMode::sequence)
+        setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
+
+    if (auto* playbackSequencer = getPlaybackSequencerInternal())
+    {
+        CommandProcessor::sendAllNotesOff();
+        if (rewindNow)
+        {
+            playbackSequencer->stop();
+            playbackSequencer->rewindAtNextZero();
+        }
+    }
+}
+
+void TrackerMainProcessor::applyPendingSequenceSetSwitchForCurrentTransportBeat()
+{
+    const int currentTick = static_cast<int>(getCurrentTick());
+    const int currentBeatInBar = ((juce::jmax(1, currentTick) - 1) / 4) % 4;
+    const bool wrappedToBarStart = lastTransportBeatInBar == 3 && currentBeatInBar == 0;
+    lastTransportBeatInBar = currentBeatInBar;
+
+    if (!pendingPlaybackSequenceSetIndex.has_value() || !wrappedToBarStart)
+        return;
+
+    switchPlaybackSequenceSetImmediately(*pendingPlaybackSequenceSetIndex, false);
+    if (auto* switchedSequencer = getPlaybackSequencerInternal())
+        switchedSequencer->play();
+}
+
+bool TrackerMainProcessor::isPlaybackSequencerAtBoundary() const
+{
+    const auto* playbackSequencer = getPlaybackSequencerInternal();
+    if (playbackSequencer == nullptr)
+        return false;
+
+    if (playbackSequencer->howManySequences() == 0)
+        return false;
+
+    for (std::size_t seqIndex = 0; seqIndex < playbackSequencer->howManySequences(); ++seqIndex)
+    {
+        if (playbackSequencer->getCurrentStep(seqIndex) != 0)
+            return false;
+    }
+    return true;
+}
+
+void TrackerMainProcessor::handleSongAdvanceAfterTick()
+{
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    if (playbackSequencer == nullptr || !playbackSequencer->isPlaying() || songRows.empty())
+        return;
+
+    if (!playbackAdvancedSinceRowStart)
+    {
+        playbackAdvancedSinceRowStart = !isPlaybackSequencerAtBoundary();
+        return;
+    }
+
+    if (!isPlaybackSequencerAtBoundary())
+        return;
+
+    playbackAdvancedSinceRowStart = false;
+    if (songPlayMode == SongPlayMode::sequence)
+        return;
+
+    if (currentSongRow >= songRows.size())
+        currentSongRow = 0;
+
+    ++currentSongRowRepeatIndex;
+    const int repeatCount = juce::jmax(1, songRows[currentSongRow].repeatCount);
+    if (currentSongRowRepeatIndex < repeatCount)
+        return;
+
+    currentSongRowRepeatIndex = 0;
+    currentSongRow = (currentSongRow + 1) % songRows.size();
+    selectedSongRow = currentSongRow;
+    schedulePlaybackSequenceSetSwitch(songRows[currentSongRow].sequenceSetId);
 }
 
 bool TrackerMainProcessor::stackContainsType(std::size_t stackIndex, CommandType machineType) const
@@ -267,7 +448,8 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
 
 void TrackerMainProcessor::tickMachineClocks()
 {
-    const bool sequencerPlaying = sequencer.isPlaying();
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    const bool sequencerPlaying = playbackSequencer != nullptr && playbackSequencer->isPlaying();
     for (std::size_t i = 0; i < machineStacks.size(); ++i)
     {
         const bool hasClockedArp = stackContainsType(i, CommandType::Arpeggiator)
@@ -320,10 +502,9 @@ TrackerMainProcessor::TrackerMainProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       ), 
-                       sequencer{16, 8}, seqEditor{&sequencer},
-                       // seq, clock, editor
-                       trackerController{&sequencer, this, &seqEditor},
+                       ),
+                       seqEditor{nullptr},
+                       trackerController{nullptr, this, &seqEditor},
                        elapsedSamples{0}, maxHorizon{44100 * 3600},
                        samplesPerTick{44100/(120/60)/8}, bpm{120.0},
                        outstandingNoteOffs{0},
@@ -333,12 +514,11 @@ TrackerMainProcessor::TrackerMainProcessor()
     
     CommandProcessor::assignMasterClock(this);
     CommandProcessor::assignMachineUtils(this);
-    sequencer.stop();
+    resetSongState();
+    bindViewedSequenceSetToEditor();
     initialiseMachines();
-    for (std::size_t seqIndex = 0; seqIndex < sequencer.howManySequences(); ++seqIndex)
-        if (auto* sequence = sequencer.getSequence(seqIndex))
-            sequence->setMachineId(static_cast<double>(seqIndex + 1));
     seqEditor.setMachineHost(this);
+    seqEditor.setSongHost(this);
     seqEditor.setResetConfirmationHandler([this]()
     {
         recreateSequencersAndMachines();
@@ -473,25 +653,23 @@ void TrackerMainProcessor::recreateSequencersAndMachines()
 {
     suspendProcessing(true);
     CommandProcessor::sendAllNotesOff();
-    sequencer.stop();
+    if (auto* playbackSequencer = getPlaybackSequencerInternal())
+        playbackSequencer->stop();
     clearPendingEvents();
     resetTicks();
-    Sequencer newSequencer{16, 8};
-    sequencer = std::move(newSequencer);
-    seqEditor.setSequencer(&sequencer);
+    resetSongState();
+    bindViewedSequenceSetToEditor();
     seqEditor.resetCursor();
-    seqEditor.gotoSequencePage();
+    seqEditor.gotoSongPage();
     seqEditor.setMachineHost(this);
+    seqEditor.setSongHost(this);
     seqEditor.setResetConfirmationHandler([this]()
     {
         recreateSequencersAndMachines();
     });
-    trackerController = TrackerController{&sequencer, this, &seqEditor};
     initialiseMachines();
-    for (std::size_t seqIndex = 0; seqIndex < sequencer.howManySequences(); ++seqIndex)
-        if (auto* sequence = sequencer.getSequence(seqIndex))
-            sequence->setMachineId(static_cast<double>(seqIndex + 1));
-    sequencer.requestStrUpdate();
+    if (auto* viewedSequencer = getViewedSequencerInternal())
+        viewedSequencer->requestStrUpdate();
     suspendProcessing(false);
 }
 
@@ -543,12 +721,32 @@ void TrackerMainProcessor::oscBundleReceived(const juce::OSCBundle& bundle)
 juce::String TrackerMainProcessor::getCurrentCellOscPayload()
 {
     const auto mode = seqEditor.getEditMode();
+    auto* viewedSequencer = getViewedSequencerInternal();
+    if (viewedSequencer == nullptr)
+        return {};
 
     switch (mode)
     {
+        case SequencerEditorMode::arrangingSong:
+        {
+            const auto songRow = seqEditor.getCurrentSongRow();
+            const auto songCol = seqEditor.getCurrentSongCol();
+            if (songRow == 0)
+                return juce::String(songCol == 0 ? "PLAY SONG" : "PLAY SEQ");
+            const auto rowIndex = songRow - 1;
+            if (rowIndex >= songRows.size())
+                return "SONG";
+            if (songCol == 0)
+                return "SET " + juce::String(static_cast<int>(songRows[rowIndex].sequenceSetId + 1));
+            if (songCol == 1)
+                return "REP " + juce::String(songRows[rowIndex].repeatCount);
+            if (songCol == 3)
+                return "DEL";
+            return "EDIT";
+        }
         case SequencerEditorMode::selectingSeqAndStep:
         {
-            auto& grid = sequencer.getSequenceAsGridOfStrings();
+            auto& grid = viewedSequencer->getSequenceAsGridOfStrings();
             const auto seq = seqEditor.getCurrentSequence();
             const auto step = seqEditor.getCurrentStep();
             if (seq < grid.size() && step < grid[seq].size())
@@ -557,7 +755,7 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
         }
         case SequencerEditorMode::editingStep:
         {
-            const auto grid = sequencer.getStepAsGridOfStrings(seqEditor.getCurrentSequence(),
+            const auto grid = viewedSequencer->getStepAsGridOfStrings(seqEditor.getCurrentSequence(),
                                                                seqEditor.getCurrentStep());
             const auto col = seqEditor.getCurrentStepCol();
             const auto row = seqEditor.getCurrentStepRow();
@@ -567,7 +765,7 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
         }
         case SequencerEditorMode::configuringSequence:
         {
-            const auto grid = sequencer.getSequenceConfigsAsGridOfStrings();
+            const auto grid = viewedSequencer->getSequenceConfigsAsGridOfStrings();
             const auto seq = seqEditor.getCurrentSequence();
             const auto param = seqEditor.getCurrentSeqParam();
             if (seq < grid.size() && param < grid[seq].size())
@@ -644,7 +842,8 @@ void TrackerMainProcessor::handleIncomingOscControlMessage(const juce::OSCMessag
                 else
                     seqEditor.decrementAtCursor();
             }
-            sequencer.requestStrUpdate();
+            if (auto* viewedSequencer = getViewedSequencerInternal())
+                viewedSequencer->requestStrUpdate();
         });
         return;
     }
@@ -751,6 +950,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     processing.store(true, std::memory_order_release);
     std::lock_guard<std::mutex> audioLock(audioMutex);
     juce::ScopedNoDenormals noDenormals;
+    auto* playbackSequencer = getPlaybackSequencerInternal();
     bool receivedMidi = false; 
     for (const MidiMessageMetadata metadata : midiMessages){
         if (metadata.getMessage().isNoteOn()) {
@@ -792,7 +992,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             if (!hostPlaying)
             {
                 // Host transport stopped: stop the sequencer and skip internal clocking.
-                sequencer.stop();
+                if (playbackSequencer != nullptr)
+                    playbackSequencer->stop();
                 hostPpqValid = false;
                 usingHostClock = true;
             }
@@ -800,7 +1001,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             {
                 // Host sync: derive tick timing from PPQ so transport changes are handled in real time.
                 usingHostClock = true;
-                sequencer.play();
+                if (playbackSequencer != nullptr)
+                    playbackSequencer->play();
                 setBPM(posInfo.bpm);
 
                 const double ticksPerQuarter = 8.0;
@@ -835,14 +1037,22 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                     {
                         // Reset tracker timing on the first host beat after transport starts.
                         resetTicks();
-                        sequencer.rewindAtNextZero();
+                        if (playbackSequencer != nullptr)
+                            playbackSequencer->rewindAtNextZero();
                         pendingHostBeatReset = false;
                     }
                     // tick is from the clockabs class and it keeps track of the absolute tick 
                     this->tick(); 
+                    applyPendingSequenceSetSwitchForCurrentTransportBeat();
+                    playbackSequencer = getPlaybackSequencerInternal();
                     // this will cause any pending messages to be added to 'midiToSend'
                     // and trigger any sample players
-                    sequencer.tick();
+                    if (playbackSequencer != nullptr)
+                    {
+                        playbackSequencer->tick();
+                        handleSongAdvanceAfterTick();
+                        playbackSequencer = getPlaybackSequencerInternal();
+                    }
                     tickMachineClocks();
                 }
                 elapsedSamples = blockEndSample;
@@ -871,15 +1081,22 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             if (samplesPerTickInt > 0 && (elapsedSamples % samplesPerTickInt) == 0){
                 // tick is from the clockabs class and it keeps track of the absolute tick 
                 this->tick(); 
+                applyPendingSequenceSetSwitchForCurrentTransportBeat();
+                playbackSequencer = getPlaybackSequencerInternal();
                 // this will cause any pending messages to be added to 'midiToSend'
                 // and trigger any sample players
-                sequencer.tick();
+                if (playbackSequencer != nullptr)
+                {
+                    playbackSequencer->tick();
+                    handleSongAdvanceAfterTick();
+                    playbackSequencer = getPlaybackSequencerInternal();
+                }
                 tickMachineClocks();
             }
         }
     }
     hostClockActive.store(usingHostClock, std::memory_order_relaxed);
-    const bool sequencerPlaying = sequencer.isPlaying();
+    const bool sequencerPlaying = playbackSequencer != nullptr && playbackSequencer->isPlaying();
     if (sequencerWasPlaying && !sequencerPlaying)
         allNotesOff();
     sequencerWasPlaying = sequencerPlaying;
@@ -1091,16 +1308,23 @@ juce::var TrackerMainProcessor::numberGridToVar(const std::vector<std::vector<do
 
 juce::var TrackerMainProcessor::getUiState()
 {
-    // syncSequenceStrings();
-    sequencer.updateSeqStringGrid();
+    auto* viewedSequencer = getViewedSequencerInternal();
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    if (viewedSequencer == nullptr)
+        return {};
+
+    viewedSequencer->updateSeqStringGrid();
 
     juce::DynamicObject::Ptr state = new juce::DynamicObject();
     state->setProperty("bpm", getBPM());
-    state->setProperty("isPlaying", sequencer.isPlaying());
+    state->setProperty("isPlaying", playbackSequencer != nullptr && playbackSequencer->isPlaying());
 
     juce::String modeStr = "sequence";
     switch (seqEditor.getEditMode())
     {
+        case SequencerEditorMode::arrangingSong:
+            modeStr = "song";
+            break;
         case SequencerEditorMode::selectingSeqAndStep:
             modeStr = "sequence";
             break;
@@ -1126,93 +1350,209 @@ juce::var TrackerMainProcessor::getUiState()
     state->setProperty("armedSequence", static_cast<int>(seqEditor.getArmedSequence()));
     state->setProperty("currentSeqParam", static_cast<int>(seqEditor.getCurrentSeqParam()));
 
-    state->setProperty("sequenceGrid", stringGridToVar(sequencer.getSequenceAsGridOfStrings()));
-    state->setProperty("stepGrid", stringGridToVar(sequencer.getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
-    state->setProperty("sequenceConfigs", stringGridToVar(sequencer.getSequenceConfigsAsGridOfStrings()));
-    state->setProperty("stepData", numberGridToVar(sequencer.getStepData(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
+    state->setProperty("sequenceGrid", stringGridToVar(viewedSequencer->getSequenceAsGridOfStrings()));
+    state->setProperty("stepGrid", stringGridToVar(viewedSequencer->getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
+    state->setProperty("sequenceConfigs", stringGridToVar(viewedSequencer->getSequenceConfigsAsGridOfStrings()));
+    state->setProperty("stepData", numberGridToVar(viewedSequencer->getStepData(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
 
     juce::Array<juce::var> playHeads;
-    for (std::size_t col = 0; col < sequencer.howManySequences(); ++col)
+    for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
     {
         juce::DynamicObject::Ptr ph = new juce::DynamicObject();
         ph->setProperty("sequence", static_cast<int>(col));
-        ph->setProperty("step", static_cast<int>(sequencer.getCurrentStep(col)));
+        ph->setProperty("step", static_cast<int>(viewedSequencer->getCurrentStep(col)));
         playHeads.add(juce::var(ph));
     }
     state->setProperty("playHeads", playHeads);
 
     juce::Array<juce::var> seqLengths;
-    for (std::size_t col = 0; col < sequencer.howManySequences(); ++col)
-        seqLengths.add(static_cast<int>(sequencer.howManySteps(col)));
+    for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
+        seqLengths.add(static_cast<int>(viewedSequencer->howManySteps(col)));
     state->setProperty("sequenceLengths", seqLengths);
 
-    Sequence* currentSequence = sequencer.getSequence(seqEditor.getCurrentSequence());
+    Sequence* currentSequence = viewedSequencer->getSequence(seqEditor.getCurrentSequence());
     state->setProperty("machineId", currentSequence->getMachineId());
     state->setProperty("machineType", currentSequence->getMachineType());
     state->setProperty("triggerProbability", currentSequence->getTriggerProbability());
 
-    state->setProperty("ticksPerStep", static_cast<int>(sequencer.getSequence(seqEditor.getCurrentSequence())->getTicksPerStep()));
+    state->setProperty("ticksPerStep", static_cast<int>(viewedSequencer->getSequence(seqEditor.getCurrentSequence())->getTicksPerStep()));
 
     return state.get();
+}
+
+juce::var TrackerMainProcessor::serializeSingleSequencer(const Sequencer& sequencerToSave) const
+{
+    juce::DynamicObject::Ptr seqRoot = new juce::DynamicObject();
+    juce::Array<juce::var> sequencesVar;
+    const auto seqCount = sequencerToSave.howManySequences();
+    for (std::size_t seqIndex = 0; seqIndex < seqCount; ++seqIndex)
+    {
+        juce::DynamicObject::Ptr seqObj = new juce::DynamicObject();
+        Sequence* seq = const_cast<Sequencer&>(sequencerToSave).getSequence(seqIndex);
+        const auto length = seq->getLength();
+        seqObj->setProperty("length", static_cast<int>(length));
+        seqObj->setProperty("type", static_cast<int>(seq->getType()));
+        seqObj->setProperty("ticksPerStep", static_cast<int>(seq->getTicksPerStep()));
+        seqObj->setProperty("muted", seq->isMuted());
+        seqObj->setProperty("machineId", seq->getMachineId());
+        seqObj->setProperty("machineType", seq->getMachineType());
+        seqObj->setProperty("triggerProbability", seq->getTriggerProbability());
+
+        juce::Array<juce::var> stepsVar;
+        for (std::size_t step = 0; step < length; ++step)
+        {
+            juce::DynamicObject::Ptr stepObj = new juce::DynamicObject();
+            stepObj->setProperty("active", sequencerToSave.isStepActive(seqIndex, step));
+            juce::Array<juce::var> rows;
+            const auto data = const_cast<Sequencer&>(sequencerToSave).getStepData(seqIndex, step);
+            for (const auto& row : data)
+            {
+                juce::Array<juce::var> cols;
+                for (auto val : row)
+                    cols.add(val);
+                rows.add(cols);
+            }
+            stepObj->setProperty("data", rows);
+            stepsVar.add(stepObj.get());
+        }
+
+        seqObj->setProperty("steps", stepsVar);
+        sequencesVar.add(seqObj.get());
+    }
+
+    seqRoot->setProperty("sequences", sequencesVar);
+    return juce::var(seqRoot.get());
+}
+
+void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce::var& seqVar)
+{
+    if (!seqVar.isObject())
+        return;
+
+    const auto seqArrayVar = seqVar.getProperty("sequences", juce::var());
+    if (!seqArrayVar.isArray())
+        return;
+
+    const auto& seqArray = *seqArrayVar.getArray();
+    const auto seqCount = juce::jmin<std::size_t>(static_cast<std::size_t>(seqArray.size()), target.howManySequences());
+    for (std::size_t i = 0; i < seqCount; ++i)
+    {
+        const auto& seqObj = seqArray[static_cast<int>(i)];
+        if (!seqObj.isObject())
+            continue;
+
+        Sequence* seq = target.getSequence(i);
+        const int length = juce::jmax(1, static_cast<int>(seqObj.getProperty("length", static_cast<int>(seq->getLength()))));
+        seq->ensureEnoughStepsForLength(static_cast<std::size_t>(length));
+        seq->setLength(static_cast<std::size_t>(length));
+
+        const auto typeInt = static_cast<int>(seqObj.getProperty("type", static_cast<int>(seq->getType())));
+        seq->setType(static_cast<SequenceType>(typeInt));
+
+        const std::size_t tps = static_cast<std::size_t>(static_cast<int>(seqObj.getProperty("ticksPerStep", static_cast<int>(seq->getTicksPerStep()))));
+        seq->setTicksPerStep(tps);
+        seq->onZeroSetTicksPerStep(tps);
+
+        const double machineId = static_cast<double>(seqObj.getProperty("machineId", seq->getMachineId()));
+        const double machineType = static_cast<double>(seqObj.getProperty("machineType", seq->getMachineType()));
+        const double triggerProbability = static_cast<double>(seqObj.getProperty("triggerProbability", seq->getTriggerProbability()));
+
+        const auto stepsVar = seqObj.getProperty("steps", juce::var());
+        if (stepsVar.isArray())
+        {
+            const auto& stepsArray = *stepsVar.getArray();
+            const auto stepsToLoad = juce::jmin<std::size_t>(static_cast<std::size_t>(stepsArray.size()), static_cast<std::size_t>(length));
+            for (std::size_t step = 0; step < stepsToLoad; ++step)
+            {
+                const auto& stepVar = stepsArray[static_cast<int>(step)];
+                if (!stepVar.isObject())
+                    continue;
+
+                const auto dataVar = stepVar.getProperty("data", juce::var());
+                if (dataVar.isArray())
+                {
+                    std::vector<std::vector<double>> data;
+                    for (const auto& rowVar : *dataVar.getArray())
+                    {
+                        std::vector<double> row;
+                        if (rowVar.isArray())
+                        {
+                            for (const auto& val : *rowVar.getArray())
+                                row.push_back(static_cast<double>(val));
+                        }
+                        if (!row.empty())
+                        {
+                            if (row.size() == Step::maxInd + 2)
+                            {
+                                std::vector<double> remapped = { row[Step::cmdInd], row[2], row[3], row[4], row[5] };
+                                data.push_back(std::move(remapped));
+                            }
+                            else
+                            {
+                                if (row.size() < Step::maxInd + 1)
+                                    row.resize(Step::maxInd + 1, 0.0);
+                                if (row.size() > Step::maxInd + 1)
+                                    row.resize(Step::maxInd + 1);
+                                data.push_back(std::move(row));
+                            }
+                        }
+                    }
+                    if (!data.empty())
+                        target.setStepData(i, step, data);
+                }
+
+                const bool active = static_cast<bool>(stepVar.getProperty("active", true));
+                if (target.isStepActive(i, step) != active)
+                    target.toggleStepActive(i, step);
+            }
+        }
+
+        seq->setMachineId(machineId);
+        seq->setMachineType(machineType);
+        seq->setTriggerProbability(triggerProbability);
+
+        const bool mutedTarget = static_cast<bool>(seqObj.getProperty("muted", false));
+        if (seq->isMuted() != mutedTarget)
+            target.toggleSequenceMute(i);
+    }
 }
 
 juce::var TrackerMainProcessor::serializeSequencerState()
 {
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
-    auto sequencerToVar = [this]() {
-        juce::DynamicObject::Ptr seqRoot = new juce::DynamicObject();
-        juce::Array<juce::var> sequencesVar;
-        const auto seqCount = sequencer.howManySequences();
-        for (std::size_t seqIndex = 0; seqIndex < seqCount; ++seqIndex)
-        {
-            juce::DynamicObject::Ptr seqObj = new juce::DynamicObject();
-            Sequence* seq = sequencer.getSequence(seqIndex);
-            const auto length = seq->getLength();
-            seqObj->setProperty("length", static_cast<int>(length));
-            seqObj->setProperty("type", static_cast<int>(seq->getType()));
-            seqObj->setProperty("ticksPerStep", static_cast<int>(seq->getTicksPerStep()));
-            seqObj->setProperty("muted", seq->isMuted());
-            seqObj->setProperty("machineId", seq->getMachineId());
-            seqObj->setProperty("machineType", seq->getMachineType());
-            seqObj->setProperty("triggerProbability", seq->getTriggerProbability());
-
-            juce::Array<juce::var> stepsVar;
-            for (std::size_t step = 0; step < length; ++step)
-            {
-                juce::DynamicObject::Ptr stepObj = new juce::DynamicObject();
-                stepObj->setProperty("active", sequencer.isStepActive(seqIndex, step));
-                juce::Array<juce::var> rows;
-                const auto data = sequencer.getStepData(seqIndex, step);
-                for (const auto& row : data)
-                {
-                    juce::Array<juce::var> cols;
-                    for (auto val : row)
-                        cols.add(val);
-                    rows.add(cols);
-                }
-                stepObj->setProperty("data", rows);
-                stepsVar.add(stepObj.get());
-            }
-
-            seqObj->setProperty("steps", stepsVar);
-            sequencesVar.add(seqObj.get());
-        }
-
-        seqRoot->setProperty("sequences", sequencesVar);
-        return juce::var(seqRoot.get());
-    };
-
-    root->setProperty("sequencer", sequencerToVar());
+    juce::Array<juce::var> sequenceSetStates;
+    for (const auto& sequenceSet : sequenceSets)
+        if (sequenceSet != nullptr)
+            sequenceSetStates.add(serializeSingleSequencer(*sequenceSet));
+    root->setProperty("sequenceSets", sequenceSetStates);
+    root->setProperty("viewedSequenceSetIndex", static_cast<int>(viewedSequenceSetIndex));
+    root->setProperty("activePlaybackSequenceSetIndex", static_cast<int>(activePlaybackSequenceSetIndex));
+    root->setProperty("selectedSongRow", static_cast<int>(selectedSongRow));
+    root->setProperty("currentSongRow", static_cast<int>(currentSongRow));
+    root->setProperty("currentSongRowRepeatIndex", currentSongRowRepeatIndex);
+    root->setProperty("songPlayMode", songPlayMode == SongPlayMode::song ? "song" : "sequence");
     root->setProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence()));
     root->setProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep()));
     root->setProperty("currentStepRow", static_cast<int>(seqEditor.getCurrentStepRow()));
     root->setProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol()));
+    root->setProperty("currentSongRowCursor", static_cast<int>(seqEditor.getCurrentSongRow()));
+    root->setProperty("currentSongColCursor", static_cast<int>(seqEditor.getCurrentSongCol()));
 
     juce::String modeStr = "sequence";
     const auto uiState = getUiState();
     if (uiState.isObject())
         modeStr = uiState.getProperty("mode", "sequence").toString();
     root->setProperty("mode", modeStr);
+
+    juce::Array<juce::var> songRowsVar;
+    for (const auto& row : songRows)
+    {
+        juce::DynamicObject::Ptr rowObj = new juce::DynamicObject();
+        rowObj->setProperty("sequenceSetId", static_cast<int>(row.sequenceSetId));
+        rowObj->setProperty("repeatCount", row.repeatCount);
+        songRowsVar.add(rowObj.get());
+    }
+    root->setProperty("songRows", songRowsVar);
 
     juce::Array<juce::var> stackStates;
     for (auto& stack : machineStacks)
@@ -1257,111 +1597,79 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     if (!stateVar.isObject())
         return;
 
-    const auto seqVar = stateVar.getProperty("sequencer", juce::var());
-    if (seqVar.isObject())
+    resetSongState();
+
+    const auto sequenceSetsVar = stateVar.getProperty("sequenceSets", juce::var());
+    if (sequenceSetsVar.isArray() && !sequenceSetsVar.getArray()->isEmpty())
     {
-        const auto seqArrayVar = seqVar.getProperty("sequences", juce::var());
-        if (seqArrayVar.isArray())
+        sequenceSets.clear();
+        for (const auto& sequenceSetVar : *sequenceSetsVar.getArray())
         {
-            const auto& seqArray = *seqArrayVar.getArray();
-            const auto seqCount = juce::jmin<std::size_t>(static_cast<std::size_t>(seqArray.size()), sequencer.howManySequences());
-            for (std::size_t i = 0; i < seqCount; ++i)
-            {
-                const auto& seqObj = seqArray[static_cast<int>(i)];
-                if (!seqObj.isObject())
-                    continue;
-
-                Sequence* seq = sequencer.getSequence(i);
-                const int length = juce::jmax(1, static_cast<int>(seqObj.getProperty("length", static_cast<int>(seq->getLength()))));
-                seq->ensureEnoughStepsForLength(static_cast<std::size_t>(length));
-                seq->setLength(static_cast<std::size_t>(length));
-
-                const auto typeInt = static_cast<int>(seqObj.getProperty("type", static_cast<int>(seq->getType())));
-                seq->setType(static_cast<SequenceType>(typeInt));
-
-                const std::size_t tps = static_cast<std::size_t>(static_cast<int>(seqObj.getProperty("ticksPerStep", static_cast<int>(seq->getTicksPerStep()))));
-                seq->setTicksPerStep(tps);
-                seq->onZeroSetTicksPerStep(tps);
-
-                const double machineId = static_cast<double>(seqObj.getProperty("machineId", seq->getMachineId()));
-                const double machineType = static_cast<double>(seqObj.getProperty("machineType", seq->getMachineType()));
-                const double triggerProbability = static_cast<double>(seqObj.getProperty("triggerProbability", seq->getTriggerProbability()));
-
-                const auto stepsVar = seqObj.getProperty("steps", juce::var());
-                if (stepsVar.isArray())
-                {
-                    const auto& stepsArray = *stepsVar.getArray();
-                    const auto stepsToLoad = juce::jmin<std::size_t>(static_cast<std::size_t>(stepsArray.size()), static_cast<std::size_t>(length));
-                    for (std::size_t step = 0; step < stepsToLoad; ++step)
-                    {
-                        const auto& stepVar = stepsArray[static_cast<int>(step)];
-                        if (!stepVar.isObject())
-                            continue;
-
-                        const auto dataVar = stepVar.getProperty("data", juce::var());
-                        if (dataVar.isArray())
-                        {
-                            std::vector<std::vector<double>> data;
-                            for (const auto& rowVar : *dataVar.getArray())
-                            {
-                                std::vector<double> row;
-                                if (rowVar.isArray())
-                                {
-                                    for (const auto& val : *rowVar.getArray())
-                                        row.push_back(static_cast<double>(val));
-                                }
-                                if (!row.empty())
-                                {
-                                    if (row.size() == Step::maxInd + 2)
-                                    {
-                                        // Legacy row layout: cmd, chan, note, vel, length, prob.
-                                        std::vector<double> remapped = {
-                                            row[Step::cmdInd],
-                                            row[2],
-                                            row[3],
-                                            row[4],
-                                            row[5]
-                                        };
-                                        data.push_back(std::move(remapped));
-                                    }
-                                    else
-                                    {
-                                        if (row.size() < Step::maxInd + 1)
-                                            row.resize(Step::maxInd + 1, 0.0);
-                                        if (row.size() > Step::maxInd + 1)
-                                            row.resize(Step::maxInd + 1);
-                                        data.push_back(std::move(row));
-                                    }
-                                }
-                            }
-                            if (!data.empty())
-                                sequencer.setStepData(i, step, data);
-                        }
-
-                        const bool active = static_cast<bool>(stepVar.getProperty("active", true));
-                        if (sequencer.isStepActive(i, step) != active)
-                            sequencer.toggleStepActive(i, step);
-                    }
-                }
-
-                seq->setMachineId(machineId);
-                seq->setMachineType(machineType);
-                seq->setTriggerProbability(triggerProbability);
-
-                const bool mutedTarget = static_cast<bool>(seqObj.getProperty("muted", false));
-                if (seq->isMuted() != mutedTarget)
-                    sequencer.toggleSequenceMute(i);
-            }
+            auto sequenceSet = createDefaultSequenceSet();
+            restoreSingleSequencer(*sequenceSet, sequenceSetVar);
+            sequenceSets.push_back(std::move(sequenceSet));
         }
     }
+    else
+    {
+        const auto legacySeqVar = stateVar.getProperty("sequencer", juce::var());
+        if (legacySeqVar.isObject())
+            restoreSingleSequencer(*sequenceSets.front(), legacySeqVar);
+    }
+
+    const auto songRowsVar = stateVar.getProperty("songRows", juce::var());
+    songRows.clear();
+    if (songRowsVar.isArray())
+    {
+        for (const auto& rowVar : *songRowsVar.getArray())
+        {
+            if (!rowVar.isObject())
+                continue;
+            SongRow row;
+            row.sequenceSetId = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(rowVar.getProperty("sequenceSetId", 0))));
+            row.repeatCount = juce::jmax(1, static_cast<int>(rowVar.getProperty("repeatCount", 1)));
+            if (!sequenceSets.empty())
+                row.sequenceSetId = std::min(row.sequenceSetId, sequenceSets.size() - 1);
+            songRows.push_back(row);
+        }
+    }
+    if (songRows.empty())
+        songRows.push_back({ 0, 1 });
+
+    viewedSequenceSetIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("viewedSequenceSetIndex", 0))));
+    activePlaybackSequenceSetIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("activePlaybackSequenceSetIndex", static_cast<int>(viewedSequenceSetIndex)))));
+    if (!sequenceSets.empty())
+    {
+        viewedSequenceSetIndex = std::min(viewedSequenceSetIndex, sequenceSets.size() - 1);
+        activePlaybackSequenceSetIndex = std::min(activePlaybackSequenceSetIndex, sequenceSets.size() - 1);
+    }
+
+    selectedSongRow = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("selectedSongRow", 0))));
+    currentSongRow = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("currentSongRow", static_cast<int>(selectedSongRow)))));
+    if (!songRows.empty())
+    {
+        selectedSongRow = std::min(selectedSongRow, songRows.size() - 1);
+        currentSongRow = std::min(currentSongRow, songRows.size() - 1);
+    }
+    currentSongRowRepeatIndex = juce::jmax(0, static_cast<int>(stateVar.getProperty("currentSongRowRepeatIndex", 0)));
+    songPlayMode = stateVar.getProperty("songPlayMode", "sequence").toString().equalsIgnoreCase("song")
+        ? SongPlayMode::song
+        : SongPlayMode::sequence;
+    pendingPlaybackSequenceSetIndex.reset();
+    playbackAdvancedSinceRowStart = false;
+
+    bindViewedSequenceSetToEditor();
+    auto* viewedSequencer = getViewedSequencerInternal();
+    if (viewedSequencer == nullptr)
+        return;
 
     int seq = static_cast<int>(stateVar.getProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence())));
-    const int maxSeq = static_cast<int>(juce::jmax<std::size_t>(1, sequencer.howManySequences())) - 1;
+    const int maxSeq = static_cast<int>(juce::jmax<std::size_t>(1, viewedSequencer->howManySequences())) - 1;
     seq = juce::jlimit(0, juce::jmax(0, maxSeq), seq);
     seqEditor.setCurrentSequence(seq);
 
     int step = static_cast<int>(stateVar.getProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep())));
-    const int maxStep = static_cast<int>(juce::jmax<std::size_t>(1, sequencer.howManySteps(static_cast<std::size_t>(seq)))) - 1;
+    const int maxStep = static_cast<int>(juce::jmax<std::size_t>(1, viewedSequencer->howManySteps(static_cast<std::size_t>(seq)))) - 1;
     step = juce::jlimit(0, juce::jmax(0, maxStep), step);
     seqEditor.setCurrentStep(step);
 
@@ -1373,8 +1681,14 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     stepCol = juce::jmax(0, stepCol);
     // seqEditor.setCurrentStepCol(stepCol);
 
+    seqEditor.setSelectedSongCursor(
+        static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("currentSongRowCursor", static_cast<int>(selectedSongRow))))),
+        static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("currentSongColCursor", 0)))));
+
     juce::String mode = stateVar.getProperty("mode", "sequence").toString().toLowerCase();
-    if (mode == "step")
+    if (mode == "song")
+        seqEditor.setEditMode(SequencerEditorMode::arrangingSong);
+    else if (mode == "step")
         seqEditor.setEditMode(SequencerEditorMode::editingStep);
     else if (mode == "config")
         seqEditor.setEditMode(SequencerEditorMode::configuringSequence);
@@ -1449,7 +1763,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
 
     // syncSequenceStrings();
     
-    sequencer.updateSeqStringGrid();
+    viewedSequencer->updateSeqStringGrid();
 
     // msSinceLastStateUpdate = stateUpdateIntervalMs;
     // {
@@ -1470,7 +1784,7 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 
 Sequencer* TrackerMainProcessor::getSequencer()
 {
-    return &sequencer;
+    return getViewedSequencerInternal();
 }
 
 SequencerEditor* TrackerMainProcessor::getSequenceEditor()
@@ -1481,6 +1795,222 @@ SequencerEditor* TrackerMainProcessor::getSequenceEditor()
 TrackerController* TrackerMainProcessor::getTrackerController()
 {
     return &trackerController;
+}
+
+std::size_t TrackerMainProcessor::getSequenceSetCount() const
+{
+    return sequenceSets.size();
+}
+
+std::size_t TrackerMainProcessor::getViewedSequenceSetIndex() const
+{
+    return viewedSequenceSetIndex;
+}
+
+void TrackerMainProcessor::setViewedSequenceSetIndex(std::size_t index)
+{
+    if (sequenceSets.empty())
+        return;
+    viewedSequenceSetIndex = std::min(index, sequenceSets.size() - 1);
+    bindViewedSequenceSetToEditor();
+}
+
+std::size_t TrackerMainProcessor::getSongRowCount() const
+{
+    return songRows.size();
+}
+
+std::size_t TrackerMainProcessor::getSelectedSongRow() const
+{
+    return selectedSongRow;
+}
+
+std::size_t TrackerMainProcessor::getCurrentPlaybackSongRow() const
+{
+    return currentSongRow;
+}
+
+void TrackerMainProcessor::setSelectedSongRow(std::size_t row)
+{
+    if (songRows.empty())
+        return;
+    selectedSongRow = std::min(row, songRows.size() - 1);
+    if (songPlayMode == SongPlayMode::sequence)
+    {
+        if (auto* playbackSequencer = getPlaybackSequencerInternal())
+        {
+            if (playbackSequencer->isPlaying())
+            {
+                currentSongRow = selectedSongRow;
+                currentSongRowRepeatIndex = 0;
+                schedulePlaybackSequenceSetSwitch(songRows[selectedSongRow].sequenceSetId);
+            }
+            else
+            {
+                setViewedSequenceSetIndex(songRows[selectedSongRow].sequenceSetId);
+            }
+        }
+        else
+        {
+            setViewedSequenceSetIndex(songRows[selectedSongRow].sequenceSetId);
+        }
+    }
+}
+
+std::size_t TrackerMainProcessor::getSongRowSequenceSetId(std::size_t row) const
+{
+    if (row >= songRows.size())
+        return 0;
+    return songRows[row].sequenceSetId;
+}
+
+int TrackerMainProcessor::getSongRowRepeatCount(std::size_t row) const
+{
+    if (row >= songRows.size())
+        return 1;
+    return songRows[row].repeatCount;
+}
+
+SongPlayMode TrackerMainProcessor::getSongPlayMode() const
+{
+    return songPlayMode;
+}
+
+void TrackerMainProcessor::setSongPlayMode(SongPlayMode mode)
+{
+    songPlayMode = mode;
+    if (mode == SongPlayMode::sequence)
+    {
+        setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
+        setSelectedSongRow(selectedSongRow);
+    }
+}
+
+std::size_t TrackerMainProcessor::addSongRowByCloningViewedSet()
+{
+    auto* viewedSequencer = getViewedSequencerInternal();
+    if (viewedSequencer == nullptr)
+        return 0;
+
+    auto newSequenceSet = createDefaultSequenceSet();
+    restoreSingleSequencer(*newSequenceSet, serializeSingleSequencer(*viewedSequencer));
+    sequenceSets.push_back(std::move(newSequenceSet));
+    const std::size_t newSetIndex = sequenceSets.size() - 1;
+    songRows.push_back({ newSetIndex, 1 });
+    return songRows.size() - 1;
+}
+
+void TrackerMainProcessor::removeSongRow(std::size_t row)
+{
+    if (row >= songRows.size() || songRows.size() <= 1 || sequenceSets.empty())
+        return;
+
+    const std::size_t removedSetId = songRows[row].sequenceSetId;
+    songRows.erase(songRows.begin() + static_cast<std::ptrdiff_t>(row));
+
+    bool setStillReferenced = false;
+    for (const auto& songRow : songRows)
+    {
+        if (songRow.sequenceSetId == removedSetId)
+        {
+            setStillReferenced = true;
+            break;
+        }
+    }
+
+    if (!setStillReferenced && removedSetId < sequenceSets.size() && sequenceSets.size() > 1)
+    {
+        sequenceSets.erase(sequenceSets.begin() + static_cast<std::ptrdiff_t>(removedSetId));
+        for (auto& songRow : songRows)
+            if (songRow.sequenceSetId > removedSetId)
+                --songRow.sequenceSetId;
+
+        if (viewedSequenceSetIndex > removedSetId && viewedSequenceSetIndex > 0)
+            --viewedSequenceSetIndex;
+        else if (viewedSequenceSetIndex >= sequenceSets.size())
+            viewedSequenceSetIndex = sequenceSets.size() - 1;
+
+        if (activePlaybackSequenceSetIndex > removedSetId && activePlaybackSequenceSetIndex > 0)
+            --activePlaybackSequenceSetIndex;
+        else if (activePlaybackSequenceSetIndex >= sequenceSets.size())
+            activePlaybackSequenceSetIndex = sequenceSets.size() - 1;
+
+        if (pendingPlaybackSequenceSetIndex.has_value())
+        {
+            if (*pendingPlaybackSequenceSetIndex > removedSetId)
+                pendingPlaybackSequenceSetIndex = *pendingPlaybackSequenceSetIndex - 1;
+            else if (*pendingPlaybackSequenceSetIndex >= sequenceSets.size())
+                pendingPlaybackSequenceSetIndex = sequenceSets.size() - 1;
+        }
+    }
+
+    if (selectedSongRow >= songRows.size())
+        selectedSongRow = songRows.size() - 1;
+    if (currentSongRow >= songRows.size())
+        currentSongRow = songRows.size() - 1;
+
+    setSelectedSongRow(selectedSongRow);
+}
+
+void TrackerMainProcessor::adjustSongRowSequenceSetId(std::size_t row, int direction)
+{
+    if (row >= songRows.size() || sequenceSets.empty() || direction == 0)
+        return;
+    const int current = static_cast<int>(songRows[row].sequenceSetId);
+    const int maxId = static_cast<int>(sequenceSets.size() - 1);
+    songRows[row].sequenceSetId = static_cast<std::size_t>(juce::jlimit(0, maxId, current + direction));
+    if (songPlayMode == SongPlayMode::sequence && row == selectedSongRow)
+        setSelectedSongRow(row);
+}
+
+void TrackerMainProcessor::adjustSongRowRepeatCount(std::size_t row, int direction)
+{
+    if (row >= songRows.size() || direction == 0)
+        return;
+    songRows[row].repeatCount = juce::jmax(1, songRows[row].repeatCount + direction);
+}
+
+void TrackerMainProcessor::toggleSongPlayback()
+{
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    if (playbackSequencer == nullptr || songRows.empty())
+        return;
+
+    CommandProcessor::sendAllNotesOff();
+    if (playbackSequencer->isPlaying())
+    {
+        playbackSequencer->stop();
+        pendingPlaybackSequenceSetIndex.reset();
+        playbackAdvancedSinceRowStart = false;
+        lastTransportBeatInBar = -1;
+        return;
+    }
+
+    currentSongRow = std::min(selectedSongRow, songRows.size() - 1);
+    currentSongRowRepeatIndex = 0;
+    playbackAdvancedSinceRowStart = false;
+    lastTransportBeatInBar = -1;
+    if (auto* targetSequencer = sequenceSets[songRows[currentSongRow].sequenceSetId].get())
+    {
+        targetSequencer->stop();
+        targetSequencer->primeForImmediateTrigger();
+    }
+    switchPlaybackSequenceSetImmediately(songRows[currentSongRow].sequenceSetId, false);
+    if (auto* switchedSequencer = getPlaybackSequencerInternal())
+        switchedSequencer->play();
+}
+
+void TrackerMainProcessor::rewindSongTransport()
+{
+    CommandProcessor::sendAllNotesOff();
+    currentSongRow = std::min(selectedSongRow, songRows.empty() ? 0u : songRows.size() - 1);
+    currentSongRowRepeatIndex = 0;
+    playbackAdvancedSinceRowStart = false;
+    lastTransportBeatInBar = -1;
+    if (!songRows.empty())
+        schedulePlaybackSequenceSetSwitch(songRows[currentSongRow].sequenceSetId);
+    if (auto* playbackSequencer = getPlaybackSequencerInternal())
+        playbackSequencer->rewindAtNextZero();
 }
 
 std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
