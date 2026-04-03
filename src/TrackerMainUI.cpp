@@ -15,7 +15,7 @@
 #include <utility>
 
 #if JucePlugin_Build_Standalone
-#include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#include "standalone/TrackerStandaloneHost.h"
 #endif
 
 namespace
@@ -25,7 +25,7 @@ void showStandaloneAudioMidiSettings()
 {
     juce::MessageManager::callAsync([]()
     {
-        if (auto* holder = juce::StandalonePluginHolder::getInstance())
+        if (auto* holder = tracker::standalone::StandalonePluginHolder::getInstance())
             holder->showAudioSettingsDialog();
     });
 }
