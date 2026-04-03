@@ -77,6 +77,7 @@ float measureBufferRms(const juce::AudioBuffer<float>& buffer)
         sampleCount += static_cast<std::size_t>(buffer.getNumSamples());
     }
 
+
     if (sampleCount == 0)
         return 0.0f;
 
@@ -100,9 +101,15 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
                                               unsigned short outDurTicks)
 {
     const int samplesPerTickInt = static_cast<int>(samplesPerTick);
+    const int onSample = elapsedSamples;
     const int offsetSamples = (samplesPerTickInt * static_cast<int>(outDurTicks)) % maxHorizon;
-    const int offSample = elapsedSamples + offsetSamples;
-    targetBuffer.addEvent(MidiMessage::noteOn((int)channel, (int)outNote, (uint8)outVelocity), elapsedSamples);
+    const int offSample = onSample + offsetSamples;
+    const int samplesSinceLast = onSample - lastQdOnAt; 
+    lastQdOnAt = onSample;
+
+    DBG("q-ing midi: delta since last note on " << samplesSinceLast << " on at " << onSample << " off at " << offSample);
+    
+    targetBuffer.addEvent(MidiMessage::noteOn((int)channel, (int)outNote, (uint8)outVelocity), onSample);
     targetBuffer.addEvent(MidiMessage::noteOff((int)channel, (int)outNote, (uint8)outVelocity), offSample);
     outstandingNoteOffs++;
 }
@@ -1126,7 +1133,12 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             // normal case where block start is before block end as no wrap has occurred. 
             if ( metadata.samplePosition >= blockStartSample && 
                 metadata.samplePosition < blockEndSample) {
-                // DBG("Event this block " << metadata.samplePosition - blockStartSample);
+                if (metadata.getMessage().isNoteOn()){
+                    const int delta = metadata.samplePosition - lastSendOnAt; 
+
+                    DBG("On Event delta: " << delta << "  blockStart " << blockStartSample << " at " << metadata.samplePosition - blockStartSample);
+                    lastSendOnAt = metadata.samplePosition;
+                }
                 midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
             }
             else{// it is in the future            

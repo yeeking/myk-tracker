@@ -192,6 +192,7 @@ private:
     SequencerEditor seqEditor; 
     /** as for the seqeditor, this is here for easy statefulness*/
     TrackerController trackerController;
+    /** temporary place where we store midi as we generate it. it is later filtered to 'send in this block' and 'send in the future' events */
     juce::MidiBuffer midiToSend; 
     struct ScheduledSamplerEvent
     {
@@ -225,8 +226,10 @@ private:
 
 
     // unsigned long elapsedSamples;
-    /** position between 0 and maxHorizon */
+    /** stores current no. elapsed samples since program launch position between 0 and maxHorizon */
     int elapsedSamples;
+    int lastQdOnAt{0}; // temporary test to measure intervals between note ons 
+    int lastSendOnAt{0}; // temp to test when we actually sent it 
     int maxHorizon;   
     unsigned int samplesPerTick; 
     double lastHostPpqPosition {0.0};
