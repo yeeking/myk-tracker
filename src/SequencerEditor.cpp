@@ -84,6 +84,51 @@ float getSeqConfigGainStepDb()
 {
   return (kSeqConfigMaxGainDb - kSeqConfigMinGainDb) / static_cast<float>(kSeqConfigMixerRows - 1);
 }
+
+bool normalizeEditableStepData(SequencerAbs* sequencer,
+                               std::size_t sequenceIndex,
+                               std::size_t requiredRow,
+                               std::vector<std::vector<double>>& data)
+{
+  bool changed = false;
+  const auto rowWidth = Step::maxInd + 1;
+
+  double defaultCommandValue = static_cast<double>(CommandType::MidiNote);
+  if (sequencer != nullptr)
+  {
+    if (auto* sequence = sequencer->getSequence(sequenceIndex))
+      defaultCommandValue = sequence->getMachineType();
+  }
+
+  if (data.empty())
+  {
+    data.resize(1, std::vector<double>(rowWidth, 0.0));
+    changed = true;
+  }
+
+  if (requiredRow >= data.size())
+  {
+    data.resize(requiredRow + 1, std::vector<double>(rowWidth, 0.0));
+    changed = true;
+  }
+
+  for (auto& row : data)
+  {
+    if (row.size() < rowWidth)
+    {
+      row.resize(rowWidth, 0.0);
+      changed = true;
+    }
+
+    if (std::abs(row[Step::cmdInd]) < std::numeric_limits<double>::epsilon())
+    {
+      row[Step::cmdInd] = defaultCommandValue;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
 } // namespace
 
 SequencerEditor::SequencerEditor(SequencerAbs *_sequencer) : sequencer{_sequencer},
@@ -385,8 +430,6 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
            column == Step::velInd ||
            column == Step::lengthInd);
     // get a copy of the data for reference
-    std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
-    // get the relevant parameter index
     if (editMode == SequencerEditorMode::editingStep)
     {
       // force currentCol to be note col
@@ -397,7 +440,9 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
       currentStepRow = 0;
     }
 
-    std::vector<std::vector<double>> firstStep = sequencer->getStepData(currentSequence, 0);
+    std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
+    normalizeEditableStepData(sequencer, currentSequence, currentStepRow, data);
+
     // set the vel, len and probability values for the
     // new step data to defaults if they are currently at zero
     const std::size_t cols[] = {Step::velInd, Step::lengthInd, Step::probInd};
@@ -405,7 +450,9 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     {
       if (std::abs(data[currentStepRow][col]) < std::numeric_limits<double>::epsilon())
       {
-        sequencer->setStepDataToDefault(currentSequence, currentStep, currentStepRow, col);
+        data[currentStepRow][col] = CommandProcessor::getCommand(data[currentStepRow][Step::cmdInd])
+                                        .parameters[col - 1]
+                                        .defaultValue;
       }
     }
     // apply octave if needed
@@ -413,11 +460,9 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     {
       value = (12 * octave) + value;
     }
-    // assert we are not out of bounds for this value perhaps?
-    // Parameter param = CommandProcessor::getCommand(data[Step::cmdInd]).parameters[(int)column]; // -1 as the first col is the command which has no parameter
 
-    // always used the mutex protected function to update the data
-    sequencer->setStepDataAt(currentSequence, currentStep, currentStepRow, static_cast<std::size_t>(column), value);
+    data[currentStepRow][static_cast<std::size_t>(column)] = value;
+    writeStepData(std::move(data));
     if (column == Step::noteInd)
       syncOctaveFromMidiNote(value);
     // move to the next step down
@@ -540,6 +585,7 @@ void SequencerEditor::enterDataAtCursor(double inValue)
       dataCol = currentStepCol;
     }
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
+    normalizeEditableStepData(sequencer, currentSequence, dataRow, data);
     // set a default vel and len if needed.
     if (std::abs(data[dataRow][Step::velInd]) < std::numeric_limits<double>::epsilon())
       data[dataRow][Step::velInd] = 64;

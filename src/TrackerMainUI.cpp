@@ -14,8 +14,23 @@
 #include <cmath>
 #include <utility>
 
+#if JucePlugin_Build_Standalone
+#include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#endif
+
 namespace
 {
+#if JucePlugin_Build_Standalone
+void showStandaloneAudioMidiSettings()
+{
+    juce::MessageManager::callAsync([]()
+    {
+        if (auto* holder = juce::StandalonePluginHolder::getInstance())
+            holder->showAudioSettingsDialog();
+    });
+}
+#endif
+
 std::string describeStackCursorAction(const std::string& cellText)
 {
     if (cellText == "ADD") return "add";
@@ -1153,6 +1168,12 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             {
                 seqEditor->requestApplicationQuit();
                 audioProcessor.getSequencer()->requestStrUpdate();
+                return true;
+            }
+
+            if (keyCode == 'p' || keyCode == 'P')
+            {
+                showStandaloneAudioMidiSettings();
                 return true;
             }
 #endif
