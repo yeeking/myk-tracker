@@ -880,8 +880,11 @@ std::vector<TrackerMainProcessor::PendingZoomCommand> TrackerMainProcessor::cons
 //==============================================================================
 void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+    const double activeSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    const double activeBpm = getBPM();
+    samplesPerTick = static_cast<unsigned int> (juce::jmax (1, static_cast<int> (std::lround (activeSampleRate * (60.0 / activeBpm) / 8.0))));
+    const double secondsPerTick = getSecondsPerTickFromBpm(activeBpm);
+
     for (auto& stack : machineStacks)
     {
         if (stack.sampler != nullptr)
@@ -893,14 +896,14 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         if (stack.wavetableSynth != nullptr)
         {
             stack.wavetableSynth->prepareToPlay(sampleRate, samplesPerBlock);
-            stack.wavetableSynth->setSecondsPerTick(getSecondsPerTickFromBpm(getBPM()));
+            stack.wavetableSynth->setSecondsPerTick(secondsPerTick);
         }
         if (stack.distortionFx != nullptr)
             stack.distortionFx->prepareToPlay(sampleRate, samplesPerBlock);
         if (stack.delayFx != nullptr)
         {
             stack.delayFx->prepareToPlay(sampleRate, samplesPerBlock);
-            stack.delayFx->setSecondsPerTick(getSecondsPerTickFromBpm(getBPM()));
+            stack.delayFx->setSecondsPerTick(secondsPerTick);
         }
     }
 }
@@ -2269,9 +2272,9 @@ void TrackerMainProcessor::sendQueuedMessages(long tick)
 void TrackerMainProcessor::setBPM(double _bpm)
 {   
     assert(_bpm > 0);
+    const double activeSampleRate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
     // update tick interval in samples 
-    samplesPerTick = static_cast<unsigned int>(
-        std::lround(getSampleRate() * (60.0 / _bpm) / 8.0));
+    samplesPerTick = static_cast<unsigned int> (juce::jmax (1, static_cast<int> (std::lround (activeSampleRate * (60.0 / _bpm) / 8.0))));
     bpm.store(_bpm, std::memory_order_relaxed);
     const double secondsPerTick = getSecondsPerTickFromBpm(_bpm);
     for (auto& stack : machineStacks)

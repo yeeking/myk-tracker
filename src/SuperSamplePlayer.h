@@ -55,13 +55,13 @@ public:
     void triggerNote (int midiNote, int velocity);
     /** Stops playback immediately. */
     void stop() noexcept;
-    /** Reads the next output sample for the requested channel. */
-    float getNextSampleForChannel (int channel) const;
-    /** Advances playback by one sample frame. */
-    void advancePlaybackFrame() noexcept;
+    /** Updates the player for the current output sample rate. */
+    void prepareToPlay (double sampleRate, int samplesPerBlock);
+    /** Adds the next segment of playback into the destination buffer. */
+    void renderToBuffer (juce::AudioBuffer<float>& buffer, int startSample, int numSamples) noexcept;
 
     /** Replaces the loaded sample buffer and metadata. */
-    bool setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name);
+    bool setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name, double newSourceSampleRate);
     /** Marks the player as having failed to load a sample. */
     void markError (const juce::String& path, const juce::String& message);
     /** Returns the cached waveform SVG string. */
@@ -78,13 +78,25 @@ public:
 private:
     /** Adds a sample to the running VU calculation. */
     void pushVuSample (float sample) noexcept;
+    /** Resets playback and interpolation state after discontinuities. */
+    void resetPlaybackState (bool keepPlaying = false) noexcept;
+    /** Recomputes the source-to-output playback ratio. */
+    void updatePlaybackRatio() noexcept;
 
     /** UI-facing player state. */
     State state;
     /** Loaded sample audio buffer. */
     juce::AudioBuffer<float> sampleBuffer;
-    /** Current playback frame index into the sample buffer. */
-    int playHead { 0 };
+    /** Original sample rate of the loaded file. */
+    double sourceSampleRate { 44100.0 };
+    /** Current device/output sample rate. */
+    double outputSampleRate { 44100.0 };
+    /** Number of source samples consumed per output sample. */
+    double playbackRatio { 1.0 };
+    /** Fractional playback position in source-sample units. */
+    double fractionalPlaybackPosition { 0.0 };
+    /** Current integer source read position. */
+    int sourceReadIndex { 0 };
     /** Rolling VU analysis window. */
     std::vector<float> vuBuffer;
     /** Write position into the rolling VU window. */

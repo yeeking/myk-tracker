@@ -162,9 +162,18 @@ void SuperSamplerProcessor::changeProgramName (int index, const juce::String& ne
 //==============================================================================
 void SuperSamplerProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
-    juce::ignoreUnused (sampleRate, samplesPerBlock);
+    currentOutputSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    currentBlockSize = samplesPerBlock > 0 ? samplesPerBlock : currentBlockSize;
+
+    const std::lock_guard<std::mutex> lock (playerMutex);
+    for (auto& player : players)
+    {
+        if (player != nullptr)
+            player->prepareToPlay (currentOutputSampleRate, currentBlockSize);
+    }
+
+    if (previewPlayer != nullptr)
+        previewPlayer->prepareToPlay (currentOutputSampleRate, currentBlockSize);
 }
 
 void SuperSamplerProcessor::releaseResources()
@@ -681,6 +690,9 @@ void SuperSamplerProcessor::broadcastMessage (const juce::String& msg)
 void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi)
 {
     const int numSamples = buffer.getNumSamples();
+    if (numSamples <= 0)
+        return;
+
     struct NoteOnEvent
     {
         int note = 0;
@@ -704,39 +716,43 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
     if (previewPlayer != nullptr)
         previewPlayer->beginBlock();
 
-    const int numChannels = buffer.getNumChannels();
-
+    int renderedUpToSample = 0;
     for (int sample = 0; sample < numSamples; ++sample)
     {
-        if (! noteOns[(size_t) sample].empty())
+        const auto& eventsAtSample = noteOns[(size_t) sample];
+        if (eventsAtSample.empty())
+            continue;
+
+        const int segmentLength = sample - renderedUpToSample;
+        if (segmentLength > 0)
         {
-            for (const auto& event : noteOns[(size_t) sample])
+            for (auto& player : players)
+                player->renderToBuffer (buffer, renderedUpToSample, segmentLength);
+            if (previewPlayer != nullptr)
+                previewPlayer->renderToBuffer (buffer, renderedUpToSample, segmentLength);
+        }
+
+        for (const auto& event : eventsAtSample)
+        {
+            for (auto& player : players)
             {
-                for (auto& player : players)
-                {
-                    if (player->acceptsNote (event.note)){
-                        player->triggerNote (event.note, event.velocity);
-                    }
-                }
+                if (player->acceptsNote (event.note))
+                    player->triggerNote (event.note, event.velocity);
             }
         }
 
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            float acc = 0.0f;
-            for (auto& player : players)
-                acc += player->getNextSampleForChannel (ch);
-            if (previewPlayer != nullptr)
-                acc += previewPlayer->getNextSampleForChannel(ch);
-
-            buffer.addSample (ch, sample, acc);
-        }
-
-        for (auto& player : players)
-            player->advancePlaybackFrame();
-        if (previewPlayer != nullptr)
-            previewPlayer->advancePlaybackFrame();
+        renderedUpToSample = sample;
     }
+
+    if (renderedUpToSample < numSamples)
+    {
+        const int segmentLength = numSamples - renderedUpToSample;
+        for (auto& player : players)
+            player->renderToBuffer (buffer, renderedUpToSample, segmentLength);
+        if (previewPlayer != nullptr)
+            previewPlayer->renderToBuffer (buffer, renderedUpToSample, segmentLength);
+    }
+
     for (auto& player : players)
         player->endBlock();
     if (previewPlayer != nullptr)
@@ -763,7 +779,9 @@ int SuperSamplerProcessor::addSamplePlayer()
 {
     const std::lock_guard<std::mutex> lock (playerMutex);
     auto id = nextId++;
-    players.push_back (std::make_unique<SuperSamplePlayer> (id));
+    auto player = std::make_unique<SuperSamplePlayer> (id);
+    player->prepareToPlay (currentOutputSampleRate, currentBlockSize);
+    players.push_back (std::move (player));
     return id;
 }
 
@@ -1004,7 +1022,7 @@ bool SuperSamplerProcessor::loadSampleInternal (int playerId, const juce::File& 
     if (auto* player = getPlayer (playerId))
     {
         player->setFilePathAndStatus (file.getFullPathName(), "loading", file.getFileName());
-        player->setLoadedBuffer (std::move (tempBuffer), file.getFileName());
+        player->setLoadedBuffer (std::move (tempBuffer), file.getFileName(), reader->sampleRate);
         return true;
     }
 

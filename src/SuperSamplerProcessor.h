@@ -236,6 +236,10 @@ private:
     std::string pendingBrowserFocusLabel;
     /** Cancels stale async preview requests. */
     std::atomic<std::uint64_t> previewRequestGeneration { 0 };
+    /** Last output sample rate seen in prepareToPlay. */
+    double currentOutputSampleRate { 44100.0 };
+    /** Last block size seen in prepareToPlay. */
+    int currentBlockSize { 512 };
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuperSamplerProcessor)
