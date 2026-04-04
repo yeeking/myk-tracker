@@ -74,7 +74,6 @@ void WaveshaperDistortionMachine::processAudioBuffer(juce::AudioBuffer<float>& b
         {
             const float dry = samples[sampleIndex];
 
-            // Deterministic soft clip curve with controllable input drive.
             const float shaped = softClip(dry * drive);
 
             lowpassState = ((1.0f - coefficient) * shaped) + (coefficient * lowpassState);

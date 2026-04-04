@@ -476,6 +476,10 @@ void SequencerEditor::incrementOctave()
 {
   if (octave < 9)
     octave++;
+
+  if (machineShiftNoteCurrentCell(12))
+    return;
+
   // now check if they pressed the octave adjust whilst cursor is over a note
 
   switch (editMode)
@@ -524,6 +528,9 @@ void SequencerEditor::decrementOctave()
 {
   if (octave > 1)
     octave--;
+
+  if (machineShiftNoteCurrentCell(-12))
+    return;
 
   switch (editMode)
   {
@@ -2069,6 +2076,25 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
   return boxes;
 }
 
+std::vector<std::vector<UIBox>> buildMidiOutDetailCells(MachineHost* machineHost, std::size_t stackIndex)
+{
+  std::vector<std::vector<UIBox>> boxes(2, std::vector<UIBox>(1));
+
+  boxes[0][0].kind = UIBox::Kind::TrackerCell;
+  boxes[0][0].text = "CHAN";
+
+  boxes[1][0].kind = UIBox::Kind::TrackerCell;
+  const int midiChannel = machineHost != nullptr ? machineHost->getStackMidiOutputChannel(stackIndex) : 1;
+  boxes[1][0].text = juce::String(midiChannel).paddedLeft('0', 2).toStdString();
+  boxes[1][0].onAdjust = [machineHost, stackIndex](int direction)
+  {
+    if (machineHost != nullptr)
+      machineHost->adjustStackMidiOutputChannel(stackIndex, direction);
+  };
+
+  return boxes;
+}
+
 std::optional<CommandType> SequencerEditor::getSelectedStackMachineType() const
 {
   if (machineHost == nullptr)
@@ -2118,9 +2144,7 @@ void SequencerEditor::refreshMachineStateForCurrentSequence()
     }
     else if (selectedType.value() == CommandType::MidiNote)
     {
-      machineCells.assign(1, std::vector<UIBox>(1));
-      machineCells[0][0].kind = UIBox::Kind::TrackerCell;
-      machineCells[0][0].text = "MIDI OUT";
+      machineCells = buildMidiOutDetailCells(machineHost, stackIndex);
     }
     else if (auto* machine = getActiveMachine(selectedType.value()))
     {
@@ -2281,17 +2305,41 @@ bool SequencerEditor::machineHandleTextBackspace()
 
   if (auto* machine = getActiveMachine(selectedType.value()))
   {
-    if (machine->handleTextBackspace())
+    const int row = static_cast<int>(machineCursorRow);
+    const int col = static_cast<int>(machineCursorCol);
+
+    if (machine->clearCell(row, col) || machine->handleTextBackspace())
     {
       refreshMachineStateForCurrentSequence();
-      if (!machineCells.empty() && !machineCells[0].empty())
-      {
-        machineCursorRow = std::min<std::size_t>(1, machineCells[0].size() - 1);
-        machineCursorCol = 0;
-        machineEditRow = machineCursorRow;
-        machineEditCol = machineCursorCol;
-        rebuildMachineCells();
-      }
+      rebuildMachineCells();
+      machineEditRow = machineCursorRow;
+      machineEditCol = machineCursorCol;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool SequencerEditor::machineShiftNoteCurrentCell(int semitones)
+{
+  if (!isMachineUiForCurrentSequence() || !machineStackDetailMode)
+    return false;
+
+  const auto selectedType = getSelectedStackMachineType();
+  if (!selectedType.has_value())
+    return false;
+
+  if (auto* machine = getActiveMachine(selectedType.value()))
+  {
+    const int row = static_cast<int>(machineCursorRow);
+    const int col = static_cast<int>(machineCursorCol);
+    if (machine->shiftNoteAtCell(row, col, semitones))
+    {
+      refreshMachineStateForCurrentSequence();
+      rebuildMachineCells();
+      machineEditRow = machineCursorRow;
+      machineEditCol = machineCursorCol;
       return true;
     }
   }

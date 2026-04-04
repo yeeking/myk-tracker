@@ -118,6 +118,8 @@ public:
     float getStackMeterLevel(std::size_t stackIndex) const override;
     float getStackGainDb(std::size_t stackIndex) const override;
     void setStackGainDb(std::size_t stackIndex, float gainDb) override;
+    int getStackMidiOutputChannel(std::size_t stackIndex) const override;
+    void adjustStackMidiOutputChannel(std::size_t stackIndex, int direction) override;
     std::size_t getSequenceSetCount() const override;
     std::size_t getViewedSequenceSetIndex() const override;
     void setViewedSequenceSetIndex(std::size_t index) override;
@@ -217,6 +219,7 @@ private:
         bool wavetableSynthEnabled = true;
         bool distortionFxEnabled = true;
         bool delayFxEnabled = true;
+        int midiOutputChannel = 1;
         float gainDb = 0.0f;
         float meterLevel = 0.0f;
     };

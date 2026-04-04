@@ -51,6 +51,8 @@ public:
     void setClockEventCallback(std::function<void(const MachineNoteEvent&)> callback);
     /** Enables or disables note emission on clock ticks. */
     void setClockActive(bool shouldBeActive);
+    bool shiftNoteAtCell(int row, int col, int semitones) override;
+    bool clearCell(int row, int col) override;
 
     /** Serialises the poly arp state. */
     void getStateInformation(juce::MemoryBlock& destData) override;
@@ -82,6 +84,8 @@ private:
         int pingPongDirection = 1;
         /** Playback mode for this head. */
         PlayMode playMode = PlayMode::pingPong;
+        /** Number of received clock ticks since this head last emitted a step. */
+        int ticksSinceStep = 0;
     };
 
     /** Maximum number of note slots in shared memory. */

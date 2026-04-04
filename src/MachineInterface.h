@@ -89,6 +89,10 @@ public:
     virtual bool handleTextBackspace() { return false; }
     /** Indicates that the machine wants exclusive keyboard input. */
     virtual bool wantsExclusiveKeyboardInput() const { return false; }
+    /** Requests a note transposition at the current machine UI cell. */
+    virtual bool shiftNoteAtCell(int row, int col, int semitones) { (void)row; (void)col; (void)semitones; return false; }
+    /** Requests clearing the current machine UI cell. */
+    virtual bool clearCell(int row, int col) { (void)row; (void)col; return false; }
     /** Requests a preferred cursor row after the machine UI changes. */
     virtual int consumePreferredCursorRow(const std::vector<std::vector<UIBox>>& cells)
     {

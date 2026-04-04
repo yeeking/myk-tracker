@@ -10,6 +10,8 @@
 namespace
 {
 constexpr double kStateVersion = 2.0;
+constexpr std::uint32_t kActiveStepFillArgb = 0xff2fbf71u;
+constexpr std::uint32_t kActiveStepTextArgb = 0xfff4fff7u;
 
 int nextQuarterBeatDivisor(int currentDivisor, int direction)
 {
@@ -26,6 +28,21 @@ int nextQuarterBeatDivisor(int currentDivisor, int direction)
 
     currentIndex = (currentIndex + direction + 5) % 5;
     return divisors[currentIndex];
+}
+
+bool isValidQuarterBeatDivisor(int divisor)
+{
+    switch (divisor)
+    {
+        case 1:
+        case 2:
+        case 4:
+        case 8:
+        case 16:
+            return true;
+        default:
+            return false;
+    }
 }
 }
 
@@ -81,9 +98,36 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
                 }
 
                 if (index == playHead)
+                {
                     noteCell.isHighlighted = true;
+                    noteCell.useCustomFillColour = true;
+                    noteCell.customFillArgb = kActiveStepFillArgb;
+                    noteCell.useCustomTextColour = true;
+                    noteCell.customTextArgb = kActiveStepTextArgb;
+                    noteCell.glow = 0.35f;
+                }
                 if (recordEnabled && index == recordHead)
                     noteCell.isArmed = true;
+
+                if (!recordEnabled)
+                {
+                    noteCell.onInsert = [this, index](double value)
+                    {
+                        const std::lock_guard<std::mutex> guard(stateMutex);
+                        clampLength();
+                        if (index < 0 || index >= length)
+                            return;
+
+                        auto& slot = slots[static_cast<std::size_t>(index)];
+                        slot.note = juce::jlimit(0, 127, static_cast<int>(std::lround(value)));
+                        slot.velocity = slot.velocity > 0 ? slot.velocity : 100;
+                        slot.durationTicks = slot.durationTicks > 0 ? slot.durationTicks : 1;
+                        slot.hasNote = true;
+
+                        if (playMode == PlayMode::up || playMode == PlayMode::down)
+                            sortActiveSlots();
+                    };
+                }
             }
             else
             {
@@ -139,6 +183,7 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
             {
                 const std::lock_guard<std::mutex> guard(stateMutex);
                 quarterBeatDivisor = nextQuarterBeatDivisor(quarterBeatDivisor, direction < 0 ? -1 : 1);
+                ticksSinceStep = juce::jmax(0, quarterBeatDivisor - 1);
             };
         }
         else if (col == 5)
@@ -217,10 +262,13 @@ void ArpeggiatorMachine::tick(int quarterBeat)
         clampLength();
         if (!clockActive || length <= 0 || countActiveSlots() == 0)
             return;
-        if (quarterBeat < 1 || quarterBeat > 16)
+        if (quarterBeat == 1)
+            ticksSinceStep = juce::jmax(0, quarterBeatDivisor - 1);
+
+        ++ticksSinceStep;
+        if (ticksSinceStep < juce::jmax(1, quarterBeatDivisor))
             return;
-        if (((quarterBeat - 1) % quarterBeatDivisor) != 0)
-            return;
+        ticksSinceStep = 0;
 
         const int nextIndex = advancePlayHead();
         if (nextIndex < 0)
@@ -255,7 +303,48 @@ void ArpeggiatorMachine::setClockEventCallback(std::function<void(const MachineN
 void ArpeggiatorMachine::setClockActive(bool shouldBeActive)
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
+    if (clockActive != shouldBeActive && shouldBeActive)
+        resetPlaybackState();
     clockActive = shouldBeActive;
+}
+
+bool ArpeggiatorMachine::shiftNoteAtCell(int row, int col, int semitones)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clampLength();
+    if (recordEnabled)
+        return false;
+
+    const int index = row * kMaxWidth + col;
+    if (row < 0 || col < 0 || index < 0 || index >= length)
+        return false;
+
+    auto& slot = slots[static_cast<std::size_t>(index)];
+    if (!slot.hasNote)
+        return false;
+
+    slot.note = juce::jlimit(0, 127, slot.note + semitones);
+    if (playMode == PlayMode::up || playMode == PlayMode::down)
+        sortActiveSlots();
+    return true;
+}
+
+bool ArpeggiatorMachine::clearCell(int row, int col)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clampLength();
+    if (recordEnabled)
+        return false;
+
+    const int index = row * kMaxWidth + col;
+    if (row < 0 || col < 0 || index < 0 || index >= length)
+        return false;
+
+    auto& slot = slots[static_cast<std::size_t>(index)];
+    slot = NoteSlot{};
+    if (playMode == PlayMode::up || playMode == PlayMode::down)
+        sortActiveSlots();
+    return true;
 }
 
 void ArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
@@ -374,12 +463,11 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
 void ArpeggiatorMachine::clampLength()
 {
     length = juce::jlimit(1, kMaxLength, length);
-    quarterBeatDivisor = mapLegacyTicksPerBeatToQuarterBeatDivisor(quarterBeatDivisor);
+    if (!isValidQuarterBeatDivisor(quarterBeatDivisor))
+        quarterBeatDivisor = mapLegacyTicksPerBeatToQuarterBeatDivisor(quarterBeatDivisor);
     if (recordHead < 0 || recordHead >= length)
         recordHead = 0;
     if (playHead < -1 || playHead >= length)
-        playHead = -1;
-    if (playHead >= 0 && !slots[static_cast<std::size_t>(playHead)].hasNote)
         playHead = -1;
     if (pingPongDirection == 0)
         pingPongDirection = 1;
@@ -389,6 +477,7 @@ void ArpeggiatorMachine::resetPlaybackState()
 {
     playHead = -1;
     pingPongDirection = 1;
+    ticksSinceStep = juce::jmax(0, quarterBeatDivisor - 1);
 }
 
 int ArpeggiatorMachine::countActiveSlots() const
@@ -440,50 +529,44 @@ int ArpeggiatorMachine::advancePlayHead()
 
     if (playMode == PlayMode::random)
     {
-        playHead = getRandomPlayableIndex();
+        playHead = juce::Random::getSystemRandom().nextInt(juce::jmax(1, length));
         return playHead;
     }
 
-    for (int attempts = 0; attempts < length; ++attempts)
+    if (playMode == PlayMode::pingPong)
     {
-        if (playMode == PlayMode::pingPong)
+        if (playHead < 0)
         {
-            if (playHead < 0)
-            {
-                playHead = 0;
-                pingPongDirection = 1;
-            }
-            else if (pingPongDirection > 0)
-            {
-                if (playHead + 1 < length)
-                    ++playHead;
-                else
-                {
-                    pingPongDirection = -1;
-                    playHead = length > 1 ? playHead - 1 : 0;
-                }
-            }
+            playHead = 0;
+            pingPongDirection = 1;
+        }
+        else if (pingPongDirection > 0)
+        {
+            if (playHead + 1 < length)
+                ++playHead;
             else
             {
-                if (playHead > 0)
-                    --playHead;
-                else
-                {
-                    pingPongDirection = 1;
-                    playHead = length > 1 ? 1 : 0;
-                }
+                pingPongDirection = -1;
+                playHead = length > 1 ? playHead - 1 : 0;
             }
         }
         else
         {
-            playHead = (playHead + 1 + length) % length;
+            if (playHead > 0)
+                --playHead;
+            else
+            {
+                pingPongDirection = 1;
+                playHead = length > 1 ? 1 : 0;
+            }
         }
-
-        if (slots[static_cast<std::size_t>(playHead)].hasNote)
-            return playHead;
+    }
+    else
+    {
+        playHead = (playHead + 1 + length) % length;
     }
 
-    return -1;
+    return playHead;
 }
 
 int ArpeggiatorMachine::getRandomPlayableIndex() const

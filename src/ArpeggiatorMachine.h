@@ -48,6 +48,8 @@ public:
     void setClockEventCallback(std::function<void(const MachineNoteEvent&)> callback);
     /** Enables or disables note emission on clock ticks. */
     void setClockActive(bool shouldBeActive);
+    bool shiftNoteAtCell(int row, int col, int semitones) override;
+    bool clearCell(int row, int col) override;
 
     /** Serialises the arp state. */
     void getStateInformation(juce::MemoryBlock& destData) override;
@@ -79,6 +81,8 @@ private:
     int length = 8;
     /** Quarter-beat divisor used for arp stepping. */
     int quarterBeatDivisor = 1;
+    /** Number of received clock ticks since the last emitted arp step. */
+    int ticksSinceStep = 0;
     /** True when incoming notes should overwrite arp memory. */
     bool recordEnabled = false;
     /** Write head used while recording notes into memory. */

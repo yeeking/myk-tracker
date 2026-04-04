@@ -45,6 +45,8 @@ public:
   virtual float getStackMeterLevel(std::size_t stackIndex) const = 0;
   virtual float getStackGainDb(std::size_t stackIndex) const = 0;
   virtual void setStackGainDb(std::size_t stackIndex, float gainDb) = 0;
+  virtual int getStackMidiOutputChannel(std::size_t stackIndex) const = 0;
+  virtual void adjustStackMidiOutputChannel(std::size_t stackIndex, int direction) = 0;
 };
 
 // Interface for song-mode sequence-set ownership and transport control.
@@ -251,6 +253,7 @@ public:
   bool machinePreviewCurrentCell();
   bool machineHandleTextInput(char character);
   bool machineHandleTextBackspace();
+  bool machineShiftNoteCurrentCell(int semitones);
   bool dismissCurrentTransientUi();
   
   static SequencerEditorSubMode cycleSubModeLeft(SequencerEditorSubMode subMode);

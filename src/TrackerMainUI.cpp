@@ -1215,8 +1215,12 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         }
         else if (key.isKeyCode(juce::KeyPress::backspaceKey))
         {
-            seqEditor->resetAtCursor();
-            handled = true;
+            handled = seqEditor->machineHandleTextBackspace();
+            if (!handled)
+            {
+                seqEditor->resetAtCursor();
+                handled = true;
+            }
         }
         else if (key.isKeyCode(juce::KeyPress::escapeKey))
         {

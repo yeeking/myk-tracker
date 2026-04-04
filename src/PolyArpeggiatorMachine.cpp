@@ -26,6 +26,21 @@ int nextQuarterBeatDivisor(int currentDivisor, int direction)
     currentIndex = (currentIndex + direction + 5) % 5;
     return divisors[currentIndex];
 }
+
+bool isValidQuarterBeatDivisor(int divisor)
+{
+    switch (divisor)
+    {
+        case 1:
+        case 2:
+        case 4:
+        case 8:
+        case 16:
+            return true;
+        default:
+            return false;
+    }
+}
 }
 
 PolyArpeggiatorMachine::PolyArpeggiatorMachine()
@@ -103,6 +118,26 @@ std::vector<std::vector<UIBox>> PolyArpeggiatorMachine::getUIBoxes(const Machine
                     noteCell.customTextArgb = 0xfff4fff7u;
                     noteCell.glow = juce::jmin(1.0f, 0.25f * static_cast<float>(headCounts[static_cast<std::size_t>(index)]));
                 }
+
+                if (!recordEnabled)
+                {
+                    noteCell.onInsert = [this, index](double value)
+                    {
+                        const std::lock_guard<std::mutex> guard(stateMutex);
+                        clampState();
+                        if (index < 0 || index >= length)
+                            return;
+
+                        auto& slot = slots[static_cast<std::size_t>(index)];
+                        slot.note = juce::jlimit(0, 127, static_cast<int>(std::lround(value)));
+                        slot.velocity = slot.velocity > 0 ? slot.velocity : 100;
+                        slot.durationTicks = slot.durationTicks > 0 ? slot.durationTicks : 1;
+                        slot.hasNote = true;
+
+                        if (anyOrderedHeadActive())
+                            sortActiveSlots();
+                    };
+                }
             }
             else
             {
@@ -140,6 +175,7 @@ std::vector<std::vector<UIBox>> PolyArpeggiatorMachine::getUIBoxes(const Machine
             const std::lock_guard<std::mutex> guard(stateMutex);
             auto& head = readHeads[static_cast<std::size_t>(headIndex)];
             head.quarterBeatDivisor = nextQuarterBeatDivisor(head.quarterBeatDivisor, direction < 0 ? -1 : 1);
+            head.ticksSinceStep = juce::jmax(0, head.quarterBeatDivisor - 1);
         };
 
         boxes[3][row].kind = UIBox::Kind::TrackerCell;
@@ -266,8 +302,7 @@ void PolyArpeggiatorMachine::tick(int quarterBeat)
         clampState();
         if (!clockActive || length <= 0 || countActiveSlots() == 0)
             return;
-        if (quarterBeat < 1 || quarterBeat > 16)
-            return;
+        juce::ignoreUnused(quarterBeat);
 
         callbackCopy = clockEventCallback;
         if (callbackCopy == nullptr)
@@ -276,8 +311,13 @@ void PolyArpeggiatorMachine::tick(int quarterBeat)
         for (int headIndex = 0; headIndex < readHeadCount; ++headIndex)
         {
             auto& head = readHeads[static_cast<std::size_t>(headIndex)];
-            if (((quarterBeat - 1) % head.quarterBeatDivisor) != 0)
+            if (quarterBeat == 1)
+                head.ticksSinceStep = juce::jmax(0, head.quarterBeatDivisor - 1);
+
+            ++head.ticksSinceStep;
+            if (head.ticksSinceStep < juce::jmax(1, head.quarterBeatDivisor))
                 continue;
+            head.ticksSinceStep = 0;
 
             const int nextIndex = advancePlayHead(head);
             if (nextIndex < 0)
@@ -313,7 +353,48 @@ void PolyArpeggiatorMachine::setClockEventCallback(std::function<void(const Mach
 void PolyArpeggiatorMachine::setClockActive(bool shouldBeActive)
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
+    if (clockActive != shouldBeActive && shouldBeActive)
+        resetReadHeads();
     clockActive = shouldBeActive;
+}
+
+bool PolyArpeggiatorMachine::shiftNoteAtCell(int row, int col, int semitones)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clampState();
+    if (recordEnabled)
+        return false;
+
+    const int index = row * kMaxWidth + col;
+    if (row < 0 || col < 0 || index < 0 || index >= length)
+        return false;
+
+    auto& slot = slots[static_cast<std::size_t>(index)];
+    if (!slot.hasNote)
+        return false;
+
+    slot.note = juce::jlimit(0, 127, slot.note + semitones);
+    if (anyOrderedHeadActive())
+        sortActiveSlots();
+    return true;
+}
+
+bool PolyArpeggiatorMachine::clearCell(int row, int col)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clampState();
+    if (recordEnabled)
+        return false;
+
+    const int index = row * kMaxWidth + col;
+    if (row < 0 || col < 0 || index < 0 || index >= length)
+        return false;
+
+    auto& slot = slots[static_cast<std::size_t>(index)];
+    slot = NoteSlot{};
+    if (anyOrderedHeadActive())
+        sortActiveSlots();
+    return true;
 }
 
 void PolyArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
@@ -433,7 +514,8 @@ void PolyArpeggiatorMachine::clampState()
 
     for (auto& head : readHeads)
     {
-        head.quarterBeatDivisor = mapLegacyTicksPerStepToQuarterBeatDivisor(head.quarterBeatDivisor);
+        if (!isValidQuarterBeatDivisor(head.quarterBeatDivisor))
+            head.quarterBeatDivisor = mapLegacyTicksPerStepToQuarterBeatDivisor(head.quarterBeatDivisor);
         if (head.playHead < -1 || head.playHead >= length)
             head.playHead = -1;
         if (head.pingPongDirection == 0)
@@ -447,6 +529,7 @@ void PolyArpeggiatorMachine::resetReadHeads()
     {
         head.playHead = -1;
         head.pingPongDirection = 1;
+        head.ticksSinceStep = juce::jmax(0, head.quarterBeatDivisor - 1);
     }
 }
 
@@ -508,56 +591,50 @@ int PolyArpeggiatorMachine::advancePlayHead(ReadHead& head)
 
     if (head.playMode == PlayMode::random)
     {
-        head.playHead = getRandomPlayableIndex();
+        head.playHead = juce::Random::getSystemRandom().nextInt(juce::jmax(1, length));
         return head.playHead;
     }
 
-    for (int attempts = 0; attempts < length; ++attempts)
+    if (head.playMode == PlayMode::pingPong)
     {
-        if (head.playMode == PlayMode::pingPong)
+        if (head.playHead < 0)
         {
-            if (head.playHead < 0)
-            {
-                head.playHead = 0;
-                head.pingPongDirection = 1;
-            }
-            else if (head.pingPongDirection > 0)
-            {
-                if (head.playHead + 1 < length)
-                    ++head.playHead;
-                else
-                {
-                    head.pingPongDirection = -1;
-                    head.playHead = length > 1 ? head.playHead - 1 : 0;
-                }
-            }
+            head.playHead = 0;
+            head.pingPongDirection = 1;
+        }
+        else if (head.pingPongDirection > 0)
+        {
+            if (head.playHead + 1 < length)
+                ++head.playHead;
             else
             {
-                if (head.playHead > 0)
-                    --head.playHead;
-                else
-                {
-                    head.pingPongDirection = 1;
-                    head.playHead = length > 1 ? 1 : 0;
-                }
+                head.pingPongDirection = -1;
+                head.playHead = length > 1 ? head.playHead - 1 : 0;
             }
-        }
-        else if (head.playMode == PlayMode::down)
-        {
-            if (head.playHead < 0)
-                head.playHead = length % length;
-            head.playHead = (head.playHead - 1 + length) % length;
         }
         else
         {
-            head.playHead = (head.playHead + 1 + length) % length;
+            if (head.playHead > 0)
+                --head.playHead;
+            else
+            {
+                head.pingPongDirection = 1;
+                head.playHead = length > 1 ? 1 : 0;
+            }
         }
-
-        if (slots[static_cast<std::size_t>(head.playHead)].hasNote)
-            return head.playHead;
+    }
+    else if (head.playMode == PlayMode::down)
+    {
+        if (head.playHead < 0)
+            head.playHead = 0;
+        head.playHead = (head.playHead - 1 + length) % length;
+    }
+    else
+    {
+        head.playHead = (head.playHead + 1 + length) % length;
     }
 
-    return -1;
+    return head.playHead;
 }
 
 int PolyArpeggiatorMachine::getRandomPlayableIndex() const

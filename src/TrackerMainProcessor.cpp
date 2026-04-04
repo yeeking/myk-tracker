@@ -38,12 +38,6 @@ double getSecondsPerTickFromBpm(double bpm)
     return bpm > 0.0 ? (60.0 / bpm) / 8.0 : (60.0 / 120.0) / 8.0;
 }
 
-unsigned short getMidiChannelForStackId(std::size_t stackId)
-{
-    const std::size_t oneBasedId = stackId == 0 ? 1u : stackId;
-    return static_cast<unsigned short>(juce::jlimit<std::size_t>(1u, 16u, oneBasedId));
-}
-
 bool isAudioSourceType(CommandType type)
 {
     return type == CommandType::Sampler || type == CommandType::WavetableSynth;
@@ -359,7 +353,7 @@ void TrackerMainProcessor::allNotesOffForStack(std::size_t stackIndex)
         if (stack->delayFx != nullptr)
             stack->delayFx->allNotesOff();
         samplerEventsToSend.push_back({ stackIndex, MidiMessage::allNotesOff(1), elapsedSamples });
-        midiToSend.addEvent(MidiMessage::allNotesOff(static_cast<int>(getMidiChannelForStackId(stackIndex))), elapsedSamples);
+        midiToSend.addEvent(MidiMessage::allNotesOff(getStackMidiOutputChannel(stackIndex)), elapsedSamples);
         stack->arpeggiatorClockActive = false;
     }
 }
@@ -399,7 +393,7 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
         {
             case CommandType::MidiNote:
                 enqueueMachineMidi(midiToSend,
-                                   getMidiChannelForStackId(stackIndex),
+                                   static_cast<unsigned short>(getStackMidiOutputChannel(stackIndex)),
                                    note,
                                    velocity,
                                    durInTicks);
@@ -444,7 +438,7 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
     if (!anyTerminalTriggered)
     {
         enqueueMachineMidi(midiToSend,
-                           getMidiChannelForStackId(stackIndex),
+                           static_cast<unsigned short>(getStackMidiOutputChannel(stackIndex)),
                            note,
                            velocity,
                            durInTicks);
@@ -704,6 +698,7 @@ void TrackerMainProcessor::initialiseMachines()
         stack.distortionFx = std::make_unique<WaveshaperDistortionMachine>();
         stack.delayFx = std::make_unique<DelayFxMachine>();
         stack.order = { CommandType::MidiNote };
+        stack.midiOutputChannel = 1;
         stack.arpeggiatorClockActive = false;
         stack.gainDb = 0.0f;
         stack.meterLevel = 0.0f;
@@ -1628,6 +1623,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         for (const auto type : stack.order)
             order.add(static_cast<int>(type));
         stackObj->setProperty("order", order);
+        stackObj->setProperty("midiOutputChannel", stack.midiOutputChannel);
         stackObj->setProperty("gainDb", stack.gainDb);
         stackObj->setProperty("samplerEnabled", stack.samplerEnabled);
         stackObj->setProperty("arpeggiatorEnabled", stack.arpeggiatorEnabled);
@@ -1792,6 +1788,8 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
             }
             if (stack.order.empty())
                 stack.order.push_back(CommandType::MidiNote);
+            stack.midiOutputChannel = juce::jlimit(1, 16,
+                static_cast<int>(stackArray[static_cast<int>(i)].getProperty("midiOutputChannel", stack.midiOutputChannel)));
             stack.gainDb = juce::jlimit(-48.0f, 6.0f,
                                         static_cast<float>(stackArray[static_cast<int>(i)].getProperty("gainDb", stack.gainDb)));
             stack.meterLevel = 0.0f;
@@ -2153,6 +2151,22 @@ void TrackerMainProcessor::setStackGainDb(std::size_t stackIndex, float gainDb)
         stack->gainDb = juce::jlimit(-48.0f, 6.0f, gainDb);
 }
 
+int TrackerMainProcessor::getStackMidiOutputChannel(std::size_t stackIndex) const
+{
+    if (const auto* stack = getMachineStack(stackIndex))
+        return juce::jlimit(1, 16, stack->midiOutputChannel);
+    return 1;
+}
+
+void TrackerMainProcessor::adjustStackMidiOutputChannel(std::size_t stackIndex, int direction)
+{
+    if (direction == 0)
+        return;
+
+    if (auto* stack = getMachineStack(stackIndex))
+        stack->midiOutputChannel = juce::jlimit(1, 16, stack->midiOutputChannel + (direction < 0 ? -1 : 1));
+}
+
 void TrackerMainProcessor::addMachineToStack(std::size_t stackIndex)
 {
     if (auto* stack = getMachineStack(stackIndex))
@@ -2325,7 +2339,7 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
         return;
     }
     enqueueMachineMidi(midiToSend,
-                       getMidiChannelForStackId(machineId),
+                       static_cast<unsigned short>(getStackMidiOutputChannel(static_cast<std::size_t>(machineId))),
                        note,
                        velocity,
                        durInTicks);
