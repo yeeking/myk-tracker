@@ -1158,7 +1158,6 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
             const int keyCode = key.getKeyCode();
             if (keyCode == 'r' || keyCode == 'R')
             {
-                DBG("Going for a reset");
                 seqEditor->requestTrackerReset();
                 audioProcessor.getSequencer()->requestStrUpdate();
                 return true;

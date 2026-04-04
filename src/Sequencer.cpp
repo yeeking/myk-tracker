@@ -262,7 +262,6 @@ void Sequence::tick(bool trigger)
 {
   // write lock
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  
   ++ticksElapsed;
   tickOfFour = (tickOfFour + 1) % 4;
   
@@ -383,7 +382,7 @@ std::size_t Sequence::getNextTicksPerStep() const
     return this->nextTicksPerStep;
   }
 }
-    
+
 std::size_t Sequence::getCurrentStep() const
 {
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
@@ -616,6 +615,16 @@ void Sequence::rewindAtNextZero()
 }
 
 void Sequence::primeForImmediateTrigger()
+{
+  deactivateProcessors();
+  currentStep = 0;
+  rewindAtNextZeroTick = false;
+  nextTicksPerStep = 0;
+  tickOfFour = 3;
+  ticksElapsed = ticksPerStep > 0 ? ticksPerStep - 1 : 0;
+}
+
+void Sequence::resetForTransportStart()
 {
   deactivateProcessors();
   currentStep = 0;
@@ -990,7 +999,7 @@ void Sequencer::setupSeqConfigSpecs()
 {
   seqConfigSpecs.resize(3);
   seqConfigSpecs[Sequence::machineIdConfig] = Parameter("Machine ID", "ID", 0, 31, 1, 1, -1);
-  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1);
+  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Quarter beats per step", "QBS", 1, 16, 1, 4, -1);
   seqConfigSpecs[Sequence::probConfig] = Parameter("Trig Prob", "P", 0.0, 1.0, 0.1, 0.0, -1, 2);
   // TODO
   // seqParamSpecs.push_back(Parameter("Velocity variation plus/minus %", "velvary", 0.0, 1.0, 0.1, 0.0));
@@ -1144,7 +1153,7 @@ void Sequencer::play()
   playing = true; 
 }
 
-bool Sequencer::isPlaying()
+bool Sequencer::isPlaying() const
 {
   return playing; 
 }
@@ -1157,6 +1166,11 @@ void Sequencer::rewindAtNextZero()
 void Sequencer::primeForImmediateTrigger()
 {
   for (Sequence& seq : sequences){seq.primeForImmediateTrigger();}
+}
+
+void Sequencer::resetForTransportStart()
+{
+  for (Sequence& seq : sequences){seq.resetForTransportStart();}
 }
 
 

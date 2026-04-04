@@ -49,7 +49,8 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
             break; 
              
     }
-    std::string playMode = (clock->getCurrentTick() % 8) > 3 ? "+" : "-"; 
+    const int quarterBeat = clock->getCurrentQuarterBeat();
+    std::string playMode = ((juce::jmax(1, quarterBeat) - 1) % 4) >= 2 ? "+" : "-";
     std::string bpm = "@" + std::to_string(static_cast<int>(clock->getBPM()));
     if (sequencer->isPlaying()){
         playMode = "> " + playMode + bpm;

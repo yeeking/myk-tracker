@@ -7,8 +7,9 @@
 #include <JuceHeader.h>
 
 #include "AudioEffectMachine.h"
+#include "ClockAbs.h"
 
-class DelayFxMachine final : public AudioEffectMachine
+class DelayFxMachine final : public AudioEffectMachine, public ClockListener
 {
 public:
     /** Creates the delay effect with default sync timing and mix values. */
@@ -26,6 +27,10 @@ public:
     void setSecondsPerTick(double secondsPerTick) override;
     /** Clears buffered delay audio when transport or notes are stopped. */
     void allNotesOff() override;
+    /** Tracks quarter-beat bar position for synced transport state. */
+    void tick(int quarterBeat) override;
+    /** Clears delay state on transport resets. */
+    void reset() override;
     /** Serialises the delay settings. */
     void getStateInformation(juce::MemoryBlock& destData) override;
     /** Restores the delay settings from serialised state. */
@@ -59,6 +64,8 @@ private:
     juce::AudioBuffer<float> delayBuffer;
     /** Current write head position into the delay buffer. */
     int writePosition = 0;
+    /** Last published quarter-beat position within the bar. */
+    int currentQuarterBeat = 0;
 
     /** Maximum allocated delay time in seconds. */
     static constexpr int kMaxDelaySeconds = 4;

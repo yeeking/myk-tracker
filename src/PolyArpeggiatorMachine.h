@@ -1,11 +1,13 @@
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <vector>
 
+#include "ClockAbs.h"
 #include "MachineInterface.h"
 
-class PolyArpeggiatorMachine final : public MachineInterface
+class PolyArpeggiatorMachine final : public MachineInterface, public ClockListener
 {
 public:
     /** Playback ordering modes for each read head. */
@@ -35,14 +37,20 @@ public:
                             unsigned short velocity,
                             unsigned short durationTicks,
                             MachineNoteEvent& outEvent) override;
-    /** Advances all read heads and emits any notes due on this tick. */
-    bool handleClockTickBatch(std::vector<MachineNoteEvent>& outEvents) override;
     /** Adds a new read head up to the machine limit. */
     void addEntry() override;
     /** Removes an existing read head by index. */
     void removeEntry(int entryIndex) override;
     /** Clears active playback state across all heads. */
     void allNotesOff() override;
+    /** Receives the global quarter-beat clock. */
+    void tick(int quarterBeat) override;
+    /** Resets read heads to the start of the bar. */
+    void reset() override;
+    /** Sets the callback used to emit clocked arp notes. */
+    void setClockEventCallback(std::function<void(const MachineNoteEvent&)> callback);
+    /** Enables or disables note emission on clock ticks. */
+    void setClockActive(bool shouldBeActive);
 
     /** Serialises the poly arp state. */
     void getStateInformation(juce::MemoryBlock& destData) override;
@@ -66,14 +74,12 @@ private:
     /** Playback state for one poly-arp read head. */
     struct ReadHead
     {
-        /** Number of clock ticks required per step for this head. */
-        int ticksPerStep = 1;
+        /** Quarter-beat divisor used for this read head. */
+        int quarterBeatDivisor = 1;
         /** Current playback head index. */
         int playHead = -1;
         /** Current ping-pong direction. */
         int pingPongDirection = 1;
-        /** Clock divider accumulator for this head. */
-        int tickAccumulator = 0;
         /** Playback mode for this head. */
         PlayMode playMode = PlayMode::pingPong;
     };
@@ -84,6 +90,8 @@ private:
     static constexpr int kMaxWidth = 8;
     /** Maximum number of simultaneous read heads. */
     static constexpr int kMaxReadHeads = 8;
+    /** Supported quarter-beat divisors for arp stepping. */
+    static constexpr int kQuarterBeatDivisors[5] = { 1, 2, 4, 8, 16 };
 
     /** Active visible length of the shared note memory. */
     int length = 8;
@@ -97,6 +105,10 @@ private:
     std::vector<NoteSlot> slots;
     /** Playback state for each read head. */
     std::vector<ReadHead> readHeads;
+    /** Emits notes into the downstream machine stack. */
+    std::function<void(const MachineNoteEvent&)> clockEventCallback;
+    /** True when clock ticks should emit notes. */
+    bool clockActive = false;
     /** Protects poly-arp state shared between UI and audio threads. */
     mutable std::mutex stateMutex;
 
@@ -116,6 +128,10 @@ private:
     int getRandomPlayableIndex() const;
     /** Returns the UI label for a play mode. */
     static const char* formatPlayMode(PlayMode mode);
+    /** Returns the display label for a quarter-beat divisor. */
+    static const char* formatQuarterBeatDivisor(int divisor);
+    /** Maps legacy ticks-per-step values onto the new quarter-beat divisors. */
+    static int mapLegacyTicksPerStepToQuarterBeatDivisor(int ticksPerStep);
     /** Formats a MIDI note for compact tracker display. */
     static std::string formatNote(int midiNote);
     /** Returns a stable fill colour for a read head index. */

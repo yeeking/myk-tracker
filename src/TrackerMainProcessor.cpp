@@ -92,6 +92,7 @@ float linearToMeterNormalised(float linearLevel)
     const float db = juce::Decibels::gainToDecibels(linearLevel, -48.0f);
     return juce::jlimit(0.0f, 1.0f, (db + 48.0f) / 48.0f);
 }
+
 }
 
 void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
@@ -161,7 +162,11 @@ void TrackerMainProcessor::resetSongState()
     currentSongRow = 0;
     currentSongRowRepeatIndex = 0;
     playbackAdvancedSinceRowStart = false;
-    lastTransportBeatInBar = -1;
+    pendingTransportQuarterBeatReset = false;
+    pendingTransportStartOnQuarterBeat = false;
+    quarterBeatTicksAccumulator = 0;
+    resetClockTicks();
+    setCurrentQuarterBeat(0);
 }
 
 Sequencer* TrackerMainProcessor::getViewedSequencerInternal()
@@ -220,7 +225,7 @@ void TrackerMainProcessor::schedulePlaybackSequenceSetSwitch(std::size_t index)
     if (auto* pendingSequencer = sequenceSets[safeIndex].get())
     {
         pendingSequencer->stop();
-        pendingSequencer->primeForImmediateTrigger();
+        pendingSequencer->resetForTransportStart();
     }
 }
 
@@ -230,6 +235,7 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
         return;
 
     auto* previousPlaybackSequencer = getPlaybackSequencerInternal();
+    const bool wasPlaying = previousPlaybackSequencer != nullptr && previousPlaybackSequencer->isPlaying();
     activePlaybackSequenceSetIndex = std::min(index, sequenceSets.size() - 1);
     pendingPlaybackSequenceSetIndex.reset();
     playbackAdvancedSinceRowStart = false;
@@ -244,29 +250,24 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
         if (rewindNow)
         {
             playbackSequencer->stop();
-            playbackSequencer->rewindAtNextZero();
+            playbackSequencer->resetForTransportStart();
         }
+        if (wasPlaying)
+            playbackSequencer->play();
     }
 }
 
-void TrackerMainProcessor::applyPendingSequenceSetSwitchForCurrentTransportBeat()
+void TrackerMainProcessor::applyPendingSequenceSetSwitchForCurrentQuarterBeat()
 {
-    const int currentTick = static_cast<int>(getCurrentTick());
-    const int currentBeatInBar = ((juce::jmax(1, currentTick) - 1) / 4) % 4;
-    const bool wrappedToBarStart = lastTransportBeatInBar == 3 && currentBeatInBar == 0;
-    lastTransportBeatInBar = currentBeatInBar;
-
-    if (!pendingPlaybackSequenceSetIndex.has_value() || !wrappedToBarStart)
+    if (!pendingPlaybackSequenceSetIndex.has_value() || ((getCurrentQuarterBeat() - 1) % 4) != 0)
         return;
 
     switchPlaybackSequenceSetImmediately(*pendingPlaybackSequenceSetIndex, false);
-    if (auto* switchedSequencer = getPlaybackSequencerInternal())
-        switchedSequencer->play();
 }
 
 bool TrackerMainProcessor::isPlaybackSequencerAtBoundary() const
 {
-    const auto* playbackSequencer = getPlaybackSequencerInternal();
+    auto* playbackSequencer = getPlaybackSequencerInternal();
     if (playbackSequencer == nullptr)
         return false;
 
@@ -344,9 +345,15 @@ void TrackerMainProcessor::allNotesOffForStack(std::size_t stackIndex)
     if (auto* stack = getMachineStack(stackIndex))
     {
         if (stack->arpeggiator != nullptr)
+        {
             stack->arpeggiator->resetPlayback();
+            stack->arpeggiator->setClockActive(false);
+        }
         if (stack->polyArpeggiator != nullptr)
+        {
             stack->polyArpeggiator->allNotesOff();
+            stack->polyArpeggiator->setClockActive(false);
+        }
         if (stack->wavetableSynth != nullptr)
             stack->wavetableSynth->allNotesOff();
         if (stack->delayFx != nullptr)
@@ -354,16 +361,6 @@ void TrackerMainProcessor::allNotesOffForStack(std::size_t stackIndex)
         samplerEventsToSend.push_back({ stackIndex, MidiMessage::allNotesOff(1), elapsedSamples });
         midiToSend.addEvent(MidiMessage::allNotesOff(static_cast<int>(getMidiChannelForStackId(stackIndex))), elapsedSamples);
         stack->arpeggiatorClockActive = false;
-    }
-}
-
-void TrackerMainProcessor::deactivateStackArpeggiator(std::size_t stackIndex)
-{
-    if (auto* stack = getMachineStack(stackIndex))
-    {
-        if (!stack->arpeggiatorClockActive)
-            return;
-        allNotesOffForStack(stackIndex);
     }
 }
 
@@ -437,6 +434,7 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                 break;
             case CommandType::DistortionFx:
             case CommandType::DelayFx:
+            case CommandType::Log:
                 break;
             default:
                 break;
@@ -453,50 +451,114 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
     }
 }
 
-void TrackerMainProcessor::tickMachineClocks()
+void TrackerMainProcessor::configureClockListeners()
 {
-    auto* playbackSequencer = getPlaybackSequencerInternal();
-    const bool sequencerPlaying = playbackSequencer != nullptr && playbackSequencer->isPlaying();
+    removeClockListeners();
     for (std::size_t i = 0; i < machineStacks.size(); ++i)
     {
-        const bool hasClockedArp = stackContainsType(i, CommandType::Arpeggiator)
-            || stackContainsType(i, CommandType::PolyArpeggiator);
-        const bool shouldBeActive = sequencerPlaying && isStackAssigned(i) && hasClockedArp;
-        if (!shouldBeActive)
-        {
-            deactivateStackArpeggiator(i);
-            continue;
-        }
-
         auto* stack = getMachineStack(i);
         if (stack == nullptr)
             continue;
 
-        stack->arpeggiatorClockActive = true;
-        for (std::size_t slotIndex = 0; slotIndex < stack->order.size(); ++slotIndex)
+        if (stack->arpeggiator != nullptr)
         {
-            const auto type = stack->order[slotIndex];
-            if (type != CommandType::Arpeggiator && type != CommandType::PolyArpeggiator)
-                continue;
-
-            auto* machine = getMachineForStackType(*stack, type);
-            if (machine == nullptr)
-                continue;
-
-            std::vector<MachineNoteEvent> outEvents;
-            if (!machine->handleClockTickBatch(outEvents))
-                continue;
-
-            for (const auto& outEvent : outEvents)
+            stack->arpeggiator->setClockEventCallback([this, i](const MachineNoteEvent& event)
             {
-                dispatchNoteThroughStack(i,
-                                         outEvent.note,
-                                         outEvent.velocity,
-                                         outEvent.durationTicks,
-                                         slotIndex + 1);
-            }
+                emitClockedMachineEvent(i, CommandType::Arpeggiator, event);
+            });
+            ClockAbs::addListener(*stack->arpeggiator);
+        }
+
+        if (stack->polyArpeggiator != nullptr)
+        {
+            stack->polyArpeggiator->setClockEventCallback([this, i](const MachineNoteEvent& event)
+            {
+                emitClockedMachineEvent(i, CommandType::PolyArpeggiator, event);
+            });
+            ClockAbs::addListener(*stack->polyArpeggiator);
+        }
+
+        if (stack->delayFx != nullptr)
+            ClockAbs::addListener(*stack->delayFx);
+    }
+}
+
+void TrackerMainProcessor::removeClockListeners()
+{
+    clearListeners();
+}
+
+void TrackerMainProcessor::updateClockedMachineActivity()
+{
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    const bool sequencerPlaying = playbackSequencer != nullptr && playbackSequencer->isPlaying();
+
+    for (std::size_t i = 0; i < machineStacks.size(); ++i)
+    {
+        auto* stack = getMachineStack(i);
+        if (stack == nullptr)
+            continue;
+
+        const bool stackAssigned = sequencerPlaying && isStackAssigned(i);
+        const bool arpShouldBeActive = stackAssigned
+            && stackContainsType(i, CommandType::Arpeggiator)
+            && stack->arpeggiatorEnabled;
+        const bool polyShouldBeActive = stackAssigned
+            && stackContainsType(i, CommandType::PolyArpeggiator)
+            && stack->polyArpeggiatorEnabled;
+
+        if (stack->arpeggiator != nullptr)
+            stack->arpeggiator->setClockActive(arpShouldBeActive);
+        if (stack->polyArpeggiator != nullptr)
+            stack->polyArpeggiator->setClockActive(polyShouldBeActive);
+        stack->arpeggiatorClockActive = arpShouldBeActive || polyShouldBeActive;
+    }
+}
+
+void TrackerMainProcessor::emitQuarterBeatTickIfNeeded()
+{
+    const int nextQuarterBeat = getCurrentQuarterBeat() <= 0
+        ? 1
+        : ((getCurrentQuarterBeat() % 16) + 1);
+    const bool isBeatStart = ((nextQuarterBeat - 1) % 4) == 0;
+    const bool shouldResetOnThisBoundary = pendingTransportQuarterBeatReset && isBeatStart;
+
+    setCurrentQuarterBeat(nextQuarterBeat);
+    if (shouldResetOnThisBoundary)
+    {
+        resetClockTicks();
+        applyPendingSequenceSetSwitchForCurrentQuarterBeat();
+        if (auto* playbackSequencer = getPlaybackSequencerInternal())
+            playbackSequencer->resetForTransportStart();
+        notifyClockReset();
+        pendingTransportQuarterBeatReset = false;
+        if (pendingTransportStartOnQuarterBeat)
+        {
+            if (auto* playbackSequencer = getPlaybackSequencerInternal())
+                playbackSequencer->play();
+            pendingTransportStartOnQuarterBeat = false;
         }
     }
+    else if (((getCurrentQuarterBeat() - 1) % 4) == 0)
+    {
+        applyPendingSequenceSetSwitchForCurrentQuarterBeat();
+    }
+
+    updateClockedMachineActivity();
+    notifyClockTick(getCurrentQuarterBeat());
+}
+
+void TrackerMainProcessor::emitClockedMachineEvent(std::size_t stackIndex, CommandType machineType, const MachineNoteEvent& event)
+{
+    const auto slotIndex = findMachineInStack(stackIndex, machineType);
+    if (!slotIndex.has_value())
+        return;
+
+    dispatchNoteThroughStack(stackIndex,
+                             event.note,
+                             event.velocity,
+                             event.durationTicks,
+                             *slotIndex + 1);
 }
 
 //==============================================================================
@@ -540,6 +602,7 @@ TrackerMainProcessor::TrackerMainProcessor()
 
 TrackerMainProcessor::~TrackerMainProcessor()
 {
+    removeClockListeners();
     oscReceiver.removeListener(this);
     oscReceiver.disconnect();
 }
@@ -629,6 +692,7 @@ void TrackerMainProcessor::initialiseOsc()
 
 void TrackerMainProcessor::initialiseMachines()
 {
+    removeClockListeners();
     machineStacks.clear();
     machineStacks.resize(kMachineStackCount);
     for (auto& stack : machineStacks)
@@ -654,6 +718,8 @@ void TrackerMainProcessor::initialiseMachines()
         if (stack.delayFx != nullptr)
             stack.delayFx->setSecondsPerTick(secondsPerTick);
     }
+    configureClockListeners();
+    updateClockedMachineActivity();
 }
 
 void TrackerMainProcessor::recreateSequencersAndMachines()
@@ -663,7 +729,6 @@ void TrackerMainProcessor::recreateSequencersAndMachines()
     if (auto* playbackSequencer = getPlaybackSequencerInternal())
         playbackSequencer->stop();
     clearPendingEvents();
-    resetTicks();
     resetSongState();
     bindViewedSequenceSetToEditor();
     seqEditor.resetCursor();
@@ -906,6 +971,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
             stack.delayFx->setSecondsPerTick(secondsPerTick);
         }
     }
+    updateClockedMachineActivity();
 }
 
 void TrackerMainProcessor::releaseResources()
@@ -995,7 +1061,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             const bool hostPlaying = posInfo.isPlaying;
             if (hostPlaying != hostWasPlaying)
             {
-                pendingHostBeatReset = hostPlaying;
+                pendingTransportQuarterBeatReset = hostPlaying;
                 hostWasPlaying = hostPlaying;
             }
 
@@ -1038,22 +1104,12 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                     sampleOffsetToNextTick = (1.0 - tickPhase) * samplesPerTickDouble;
                 }
 
-                const long long ticksPerQuarterInt = static_cast<long long>(ticksPerQuarter);
                 for (double offset = sampleOffsetToNextTick; offset < blockSizeSamples; offset += samplesPerTickDouble, ++tickIndex)
                 {
                     const int tickSampleOffset = static_cast<int>(offset);
                     elapsedSamples = (blockStartSample + tickSampleOffset) % maxHorizon;
-                    if (pendingHostBeatReset && ticksPerQuarterInt > 0 && (tickIndex % ticksPerQuarterInt) == 0)
-                    {
-                        // Reset tracker timing on the first host beat after transport starts.
-                        resetTicks();
-                        if (playbackSequencer != nullptr)
-                            playbackSequencer->rewindAtNextZero();
-                        pendingHostBeatReset = false;
-                    }
-                    // tick is from the clockabs class and it keeps track of the absolute tick 
-                    this->tick(); 
-                    applyPendingSequenceSetSwitchForCurrentTransportBeat();
+                    advanceClockTick();
+                    emitQuarterBeatTickIfNeeded();
                     playbackSequencer = getPlaybackSequencerInternal();
                     // this will cause any pending messages to be added to 'midiToSend'
                     // and trigger any sample players
@@ -1063,7 +1119,6 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                         handleSongAdvanceAfterTick();
                         playbackSequencer = getPlaybackSequencerInternal();
                     }
-                    tickMachineClocks();
                 }
                 elapsedSamples = blockEndSample;
             }
@@ -1074,14 +1129,12 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         hostPpqValid = false;
         hostWasPlaying = false;
-        pendingHostBeatReset = false;
     }
 
     if (!usingHostClock && useInternalClock)
     {
         hostPpqValid = false;
         hostWasPlaying = false;
-        pendingHostBeatReset = false;
         const int samplesPerTickInt = static_cast<int>(samplesPerTick);
         for (int i = 0; i < blockSizeSamples; ++i){
             // weird but since juce midi sample offsets are int not unsigned long, 
@@ -1089,9 +1142,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             // otherwise, behaviour after 13 hours is undefined (samples @441k you can fit in an int)
             elapsedSamples = (elapsedSamples + 1) % maxHorizon;
             if (samplesPerTickInt > 0 && (elapsedSamples % samplesPerTickInt) == 0){
-                // tick is from the clockabs class and it keeps track of the absolute tick 
-                this->tick(); 
-                applyPendingSequenceSetSwitchForCurrentTransportBeat();
+                advanceClockTick();
+                emitQuarterBeatTickIfNeeded();
                 playbackSequencer = getPlaybackSequencerInternal();
                 // this will cause any pending messages to be added to 'midiToSend'
                 // and trigger any sample players
@@ -1101,7 +1153,6 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                     handleSongAdvanceAfterTick();
                     playbackSequencer = getPlaybackSequencerInternal();
                 }
-                tickMachineClocks();
             }
         }
     }
@@ -1997,41 +2048,53 @@ void TrackerMainProcessor::toggleSongPlayback()
         playbackSequencer->stop();
         pendingPlaybackSequenceSetIndex.reset();
         playbackAdvancedSinceRowStart = false;
-        lastTransportBeatInBar = -1;
+        pendingTransportQuarterBeatReset = false;
+        pendingTransportStartOnQuarterBeat = false;
+        updateClockedMachineActivity();
         return;
     }
 
     currentSongRow = std::min(selectedSongRow, songRows.size() - 1);
     currentSongRowRepeatIndex = 0;
     playbackAdvancedSinceRowStart = false;
-    lastTransportBeatInBar = -1;
-    if (auto* targetSequencer = sequenceSets[songRows[currentSongRow].sequenceSetId].get())
+    pendingTransportQuarterBeatReset = true;
+    pendingTransportStartOnQuarterBeat = true;
+    if (!songRows.empty())
+        schedulePlaybackSequenceSetSwitch(songRows[currentSongRow].sequenceSetId);
+    else if (auto* targetSequencer = getPlaybackSequencerInternal())
     {
         targetSequencer->stop();
-        targetSequencer->primeForImmediateTrigger();
+        targetSequencer->resetForTransportStart();
     }
-    switchPlaybackSequenceSetImmediately(songRows[currentSongRow].sequenceSetId, false);
-    if (auto* switchedSequencer = getPlaybackSequencerInternal())
-        switchedSequencer->play();
 }
 
 void TrackerMainProcessor::rewindSongTransport()
 {
     CommandProcessor::sendAllNotesOff();
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    const bool wasPlaying = playbackSequencer != nullptr && playbackSequencer->isPlaying();
     currentSongRow = std::min(selectedSongRow, songRows.empty() ? 0u : songRows.size() - 1);
     currentSongRowRepeatIndex = 0;
     playbackAdvancedSinceRowStart = false;
-    lastTransportBeatInBar = -1;
+    pendingTransportQuarterBeatReset = true;
+    pendingTransportStartOnQuarterBeat = wasPlaying;
     if (!songRows.empty())
         schedulePlaybackSequenceSetSwitch(songRows[currentSongRow].sequenceSetId);
-    if (auto* playbackSequencer = getPlaybackSequencerInternal())
-        playbackSequencer->rewindAtNextZero();
+    else if (auto* targetSequencer = getPlaybackSequencerInternal())
+    {
+        targetSequencer->stop();
+        targetSequencer->resetForTransportStart();
+    }
+    updateClockedMachineActivity();
 }
 
 std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
 {
     switch (type)
     {
+        case CommandType::MidiNote:
+        case CommandType::Log:
+            return 0;
         case CommandType::Sampler:
         case CommandType::Arpeggiator:
         case CommandType::PolyArpeggiator:
@@ -2108,6 +2171,7 @@ void TrackerMainProcessor::addMachineToStack(std::size_t stackIndex)
             if (std::find(stack->order.begin(), stack->order.end(), type) == stack->order.end())
             {
                 stack->order.push_back(type);
+                updateClockedMachineActivity();
                 break;
             }
         }
@@ -2119,7 +2183,10 @@ void TrackerMainProcessor::removeMachineFromStack(std::size_t stackIndex, std::s
     if (auto* stack = getMachineStack(stackIndex))
     {
         if (slotIndex < stack->order.size())
+        {
             stack->order.erase(stack->order.begin() + static_cast<long>(slotIndex));
+            updateClockedMachineActivity();
+        }
     }
 }
 
@@ -2153,6 +2220,7 @@ void TrackerMainProcessor::cycleMachineTypeInStack(std::size_t stackIndex, std::
             if (!duplicate || candidate == stack->order[slotIndex])
             {
                 stack->order[slotIndex] = candidate;
+                updateClockedMachineActivity();
                 return;
             }
         }
@@ -2196,7 +2264,10 @@ void TrackerMainProcessor::toggleMachineEnabledInStack(std::size_t stackIndex, s
         if (slotIndex >= stack->order.size())
             return;
         if (auto* enabled = getMachineEnabledFlag(*stack, stack->order[slotIndex]))
+        {
             *enabled = !*enabled;
+            updateClockedMachineActivity();
+        }
     }
 }
 
@@ -2331,6 +2402,9 @@ MachineInterface* TrackerMainProcessor::getMachineForStackType(MachineStack& sta
 {
     switch (type)
     {
+        case CommandType::MidiNote:
+        case CommandType::Log:
+            return nullptr;
         case CommandType::Sampler: return stack.sampler.get();
         case CommandType::Arpeggiator: return stack.arpeggiator.get();
         case CommandType::PolyArpeggiator: return stack.polyArpeggiator.get();
@@ -2345,6 +2419,9 @@ const MachineInterface* TrackerMainProcessor::getMachineForStackType(const Machi
 {
     switch (type)
     {
+        case CommandType::MidiNote:
+        case CommandType::Log:
+            return nullptr;
         case CommandType::Sampler: return stack.sampler.get();
         case CommandType::Arpeggiator: return stack.arpeggiator.get();
         case CommandType::PolyArpeggiator: return stack.polyArpeggiator.get();
@@ -2359,6 +2436,9 @@ bool* TrackerMainProcessor::getMachineEnabledFlag(MachineStack& stack, CommandTy
 {
     switch (type)
     {
+        case CommandType::MidiNote:
+        case CommandType::Log:
+            return nullptr;
         case CommandType::Sampler: return &stack.samplerEnabled;
         case CommandType::Arpeggiator: return &stack.arpeggiatorEnabled;
         case CommandType::PolyArpeggiator: return &stack.polyArpeggiatorEnabled;
@@ -2373,6 +2453,9 @@ const bool* TrackerMainProcessor::getMachineEnabledFlag(const MachineStack& stac
 {
     switch (type)
     {
+        case CommandType::MidiNote:
+        case CommandType::Log:
+            return nullptr;
         case CommandType::Sampler: return &stack.samplerEnabled;
         case CommandType::Arpeggiator: return &stack.arpeggiatorEnabled;
         case CommandType::PolyArpeggiator: return &stack.polyArpeggiatorEnabled;

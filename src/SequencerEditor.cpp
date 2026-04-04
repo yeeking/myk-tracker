@@ -60,6 +60,7 @@ std::string getStackMachineLabel(CommandType type)
   switch (type)
   {
     case CommandType::MidiNote: return "MIDI";
+    case CommandType::Log: return "LOG";
     case CommandType::Sampler: return "SAMPLER";
     case CommandType::Arpeggiator: return "ARP";
     case CommandType::PolyArpeggiator: return "POLYARP";

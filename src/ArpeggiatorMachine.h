@@ -1,12 +1,14 @@
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <vector>
 
+#include "ClockAbs.h"
 #include "MachineInterface.h"
 
 // Simple note accumulator/arpeggiator machine driven by incoming MIDI notes.
-class ArpeggiatorMachine final : public MachineInterface
+class ArpeggiatorMachine final : public MachineInterface, public ClockListener
 {
 public:
     /** Playback ordering modes for the arpeggiated note memory. */
@@ -36,10 +38,16 @@ public:
                             unsigned short velocity,
                             unsigned short durationTicks,
                             MachineNoteEvent& outEvent) override;
-    /** Advances the arp clock and emits the next note when due. */
-    bool handleClockTick(MachineNoteEvent& outEvent) override;
     /** Clears the playhead state and any currently sounding playback. */
     void resetPlayback();
+    /** Receives the global quarter-beat clock. */
+    void tick(int quarterBeat) override;
+    /** Resets playback counters to the start of the bar. */
+    void reset() override;
+    /** Sets the callback used to emit clocked arp notes. */
+    void setClockEventCallback(std::function<void(const MachineNoteEvent&)> callback);
+    /** Enables or disables note emission on clock ticks. */
+    void setClockActive(bool shouldBeActive);
 
     /** Serialises the arp state. */
     void getStateInformation(juce::MemoryBlock& destData) override;
@@ -64,13 +72,13 @@ private:
     static constexpr int kMaxLength = 16;
     /** Maximum number of note columns before the UI wraps. */
     static constexpr int kMaxWidth = 8;
-    /** Highest supported ticks-per-beat value. */
-    static constexpr int kMaxTicksPerBeat = 8;
+    /** Supported quarter-beat divisors for arp stepping. */
+    static constexpr int kQuarterBeatDivisors[5] = { 1, 2, 4, 8, 16 };
 
     /** Active visible length of the arp memory. */
     int length = 8;
-    /** Number of clock ticks required per arp step. */
-    int ticksPerBeat = kMaxTicksPerBeat;
+    /** Quarter-beat divisor used for arp stepping. */
+    int quarterBeatDivisor = 1;
     /** True when incoming notes should overwrite arp memory. */
     bool recordEnabled = false;
     /** Write head used while recording notes into memory. */
@@ -79,12 +87,14 @@ private:
     int playHead = -1;
     /** Current ping-pong direction for playback. */
     int pingPongDirection = 1;
-    /** Clock divider accumulator used for step timing. */
-    int tickAccumulator = 0;
     /** Current arp playback mode. */
     PlayMode playMode = PlayMode::pingPong;
     /** Fixed note memory for the arp. */
     std::vector<NoteSlot> slots;
+    /** Emits notes into the downstream machine stack. */
+    std::function<void(const MachineNoteEvent&)> clockEventCallback;
+    /** True when clock ticks should emit notes. */
+    bool clockActive = false;
     /** Protects arp state shared between UI and audio threads. */
     mutable std::mutex stateMutex;
 
@@ -102,6 +112,10 @@ private:
     int getRandomPlayableIndex() const;
     /** Returns the UI label for a play mode. */
     static const char* formatPlayMode(PlayMode mode);
+    /** Returns the display label for a quarter-beat divisor. */
+    static const char* formatQuarterBeatDivisor(int divisor);
+    /** Maps legacy ticks-per-beat values onto the new quarter-beat divisors. */
+    static int mapLegacyTicksPerBeatToQuarterBeatDivisor(int ticksPerBeat);
     /** Formats a MIDI note for compact tracker display. */
     static std::string formatNote(int midiNote);
 };

@@ -9,6 +9,23 @@
 namespace
 {
 constexpr double kStateVersion = 1.0;
+
+int nextQuarterBeatDivisor(int currentDivisor, int direction)
+{
+    constexpr int divisors[] = { 1, 2, 4, 8, 16 };
+    int currentIndex = 0;
+    for (int i = 0; i < 5; ++i)
+    {
+        if (divisors[i] == currentDivisor)
+        {
+            currentIndex = i;
+            break;
+        }
+    }
+
+    currentIndex = (currentIndex + direction + 5) % 5;
+    return divisors[currentIndex];
+}
 }
 
 PolyArpeggiatorMachine::PolyArpeggiatorMachine()
@@ -114,16 +131,15 @@ std::vector<std::vector<UIBox>> PolyArpeggiatorMachine::getUIBoxes(const Machine
 
         boxes[0][row] = makeLabelCell("H" + std::to_string(headIndex + 1));
         boxes[1][row].kind = UIBox::Kind::TrackerCell;
-        boxes[1][row].text = "TPS";
+        boxes[1][row].text = "RATE";
 
         boxes[2][row].kind = UIBox::Kind::TrackerCell;
-        boxes[2][row].text = std::to_string(readHeads[static_cast<std::size_t>(headIndex)].ticksPerStep);
+        boxes[2][row].text = formatQuarterBeatDivisor(readHeads[static_cast<std::size_t>(headIndex)].quarterBeatDivisor);
         boxes[2][row].onAdjust = [this, headIndex](int direction)
         {
             const std::lock_guard<std::mutex> guard(stateMutex);
             auto& head = readHeads[static_cast<std::size_t>(headIndex)];
-            head.ticksPerStep = juce::jlimit(1, kMaxWidth, head.ticksPerStep + direction);
-            head.tickAccumulator = 0;
+            head.quarterBeatDivisor = nextQuarterBeatDivisor(head.quarterBeatDivisor, direction < 0 ? -1 : 1);
         };
 
         boxes[3][row].kind = UIBox::Kind::TrackerCell;
@@ -219,39 +235,6 @@ bool PolyArpeggiatorMachine::handleIncomingNote(unsigned short note,
     return false;
 }
 
-bool PolyArpeggiatorMachine::handleClockTickBatch(std::vector<MachineNoteEvent>& outEvents)
-{
-    const std::lock_guard<std::mutex> lock(stateMutex);
-    clampState();
-    if (length <= 0 || countActiveSlots() == 0)
-        return false;
-
-    for (int headIndex = 0; headIndex < readHeadCount; ++headIndex)
-    {
-        auto& head = readHeads[static_cast<std::size_t>(headIndex)];
-        ++head.tickAccumulator;
-        if (head.tickAccumulator < head.ticksPerStep)
-            continue;
-
-        head.tickAccumulator -= head.ticksPerStep;
-        const int nextIndex = advancePlayHead(head);
-        if (nextIndex < 0)
-            continue;
-
-        const auto& slot = slots[static_cast<std::size_t>(nextIndex)];
-        if (!slot.hasNote)
-            continue;
-
-        MachineNoteEvent event;
-        event.note = static_cast<unsigned short>(slot.note);
-        event.velocity = static_cast<unsigned short>(slot.velocity);
-        event.durationTicks = static_cast<unsigned short>(slot.durationTicks);
-        outEvents.push_back(event);
-    }
-
-    return !outEvents.empty();
-}
-
 void PolyArpeggiatorMachine::addEntry()
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
@@ -271,6 +254,66 @@ void PolyArpeggiatorMachine::allNotesOff()
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
     resetReadHeads();
+}
+
+void PolyArpeggiatorMachine::tick(int quarterBeat)
+{
+    std::function<void(const MachineNoteEvent&)> callbackCopy;
+    std::vector<MachineNoteEvent> outEvents;
+
+    {
+        const std::lock_guard<std::mutex> lock(stateMutex);
+        clampState();
+        if (!clockActive || length <= 0 || countActiveSlots() == 0)
+            return;
+        if (quarterBeat < 1 || quarterBeat > 16)
+            return;
+
+        callbackCopy = clockEventCallback;
+        if (callbackCopy == nullptr)
+            return;
+
+        for (int headIndex = 0; headIndex < readHeadCount; ++headIndex)
+        {
+            auto& head = readHeads[static_cast<std::size_t>(headIndex)];
+            if (((quarterBeat - 1) % head.quarterBeatDivisor) != 0)
+                continue;
+
+            const int nextIndex = advancePlayHead(head);
+            if (nextIndex < 0)
+                continue;
+
+            const auto& slot = slots[static_cast<std::size_t>(nextIndex)];
+            if (!slot.hasNote)
+                continue;
+
+            MachineNoteEvent event;
+            event.note = static_cast<unsigned short>(slot.note);
+            event.velocity = static_cast<unsigned short>(slot.velocity);
+            event.durationTicks = static_cast<unsigned short>(slot.durationTicks);
+            outEvents.push_back(event);
+        }
+    }
+
+    for (const auto& event : outEvents)
+        callbackCopy(event);
+}
+
+void PolyArpeggiatorMachine::reset()
+{
+    allNotesOff();
+}
+
+void PolyArpeggiatorMachine::setClockEventCallback(std::function<void(const MachineNoteEvent&)> callback)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clockEventCallback = std::move(callback);
+}
+
+void PolyArpeggiatorMachine::setClockActive(bool shouldBeActive)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clockActive = shouldBeActive;
 }
 
 void PolyArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
@@ -299,10 +342,9 @@ void PolyArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
     for (const auto& head : readHeads)
     {
         juce::DynamicObject::Ptr obj = new juce::DynamicObject();
-        obj->setProperty("ticksPerStep", head.ticksPerStep);
+        obj->setProperty("quarterBeatDivisor", head.quarterBeatDivisor);
         obj->setProperty("playHead", head.playHead);
         obj->setProperty("pingPongDirection", head.pingPongDirection);
-        obj->setProperty("tickAccumulator", head.tickAccumulator);
         obj->setProperty("playMode", static_cast<int>(head.playMode));
         headsVar.add(juce::var(obj));
     }
@@ -367,10 +409,12 @@ void PolyArpeggiatorMachine::setStateInformation(const void* data, int sizeInByt
                 if (!entry.isObject())
                     continue;
                 auto& head = readHeads[static_cast<std::size_t>(i)];
-                head.ticksPerStep = static_cast<int>(entry.getProperty("ticksPerStep", head.ticksPerStep));
+                if (entry.hasProperty("quarterBeatDivisor"))
+                    head.quarterBeatDivisor = static_cast<int>(entry.getProperty("quarterBeatDivisor", head.quarterBeatDivisor));
+                else
+                    head.quarterBeatDivisor = mapLegacyTicksPerStepToQuarterBeatDivisor(static_cast<int>(entry.getProperty("ticksPerStep", head.quarterBeatDivisor)));
                 head.playHead = static_cast<int>(entry.getProperty("playHead", head.playHead));
                 head.pingPongDirection = static_cast<int>(entry.getProperty("pingPongDirection", head.pingPongDirection));
-                head.tickAccumulator = static_cast<int>(entry.getProperty("tickAccumulator", head.tickAccumulator));
                 const int modeIndex = juce::jlimit(0, static_cast<int>(PlayMode::random), static_cast<int>(entry.getProperty("playMode", static_cast<int>(head.playMode))));
                 head.playMode = static_cast<PlayMode>(modeIndex);
             }
@@ -389,12 +433,11 @@ void PolyArpeggiatorMachine::clampState()
 
     for (auto& head : readHeads)
     {
-        head.ticksPerStep = juce::jlimit(1, kMaxWidth, head.ticksPerStep);
+        head.quarterBeatDivisor = mapLegacyTicksPerStepToQuarterBeatDivisor(head.quarterBeatDivisor);
         if (head.playHead < -1 || head.playHead >= length)
             head.playHead = -1;
         if (head.pingPongDirection == 0)
             head.pingPongDirection = 1;
-        head.tickAccumulator = juce::jlimit(0, head.ticksPerStep - 1, head.tickAccumulator);
     }
 }
 
@@ -404,7 +447,6 @@ void PolyArpeggiatorMachine::resetReadHeads()
     {
         head.playHead = -1;
         head.pingPongDirection = 1;
-        head.tickAccumulator = 0;
     }
 }
 
@@ -544,6 +586,32 @@ const char* PolyArpeggiatorMachine::formatPlayMode(PlayMode mode)
     }
 
     return "PING";
+}
+
+const char* PolyArpeggiatorMachine::formatQuarterBeatDivisor(int divisor)
+{
+    switch (divisor)
+    {
+        case 1: return "1/16";
+        case 2: return "1/8";
+        case 4: return "1/4";
+        case 8: return "1/2";
+        case 16: return "1BAR";
+        default: return "1/16";
+    }
+}
+
+int PolyArpeggiatorMachine::mapLegacyTicksPerStepToQuarterBeatDivisor(int ticksPerStep)
+{
+    if (ticksPerStep <= 1)
+        return 16;
+    if (ticksPerStep <= 2)
+        return 8;
+    if (ticksPerStep <= 4)
+        return 4;
+    if (ticksPerStep <= 6)
+        return 2;
+    return 1;
 }
 
 std::string PolyArpeggiatorMachine::formatNote(int midiNote)

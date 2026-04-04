@@ -10,6 +10,23 @@
 namespace
 {
 constexpr double kStateVersion = 2.0;
+
+int nextQuarterBeatDivisor(int currentDivisor, int direction)
+{
+    constexpr int divisors[] = { 1, 2, 4, 8, 16 };
+    int currentIndex = 0;
+    for (int i = 0; i < 5; ++i)
+    {
+        if (divisors[i] == currentDivisor)
+        {
+            currentIndex = i;
+            break;
+        }
+    }
+
+    currentIndex = (currentIndex + direction + 5) % 5;
+    return divisors[currentIndex];
+}
 }
 
 ArpeggiatorMachine::ArpeggiatorMachine()
@@ -112,17 +129,16 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
         else if (col == 3)
         {
             controlCell.kind = UIBox::Kind::TrackerCell;
-            controlCell.text = "TPB";
+            controlCell.text = "RATE";
         }
         else if (col == 4)
         {
             controlCell.kind = UIBox::Kind::TrackerCell;
-            controlCell.text = std::to_string(ticksPerBeat);
+            controlCell.text = formatQuarterBeatDivisor(quarterBeatDivisor);
             controlCell.onAdjust = [this](int direction)
             {
                 const std::lock_guard<std::mutex> guard(stateMutex);
-                ticksPerBeat = juce::jlimit(1, kMaxTicksPerBeat, ticksPerBeat + direction);
-                tickAccumulator = 0;
+                quarterBeatDivisor = nextQuarterBeatDivisor(quarterBeatDivisor, direction < 0 ? -1 : 1);
             };
         }
         else if (col == 5)
@@ -184,36 +200,62 @@ bool ArpeggiatorMachine::handleIncomingNote(unsigned short note,
     return false;
 }
 
-bool ArpeggiatorMachine::handleClockTick(MachineNoteEvent& outEvent)
-{
-    const std::lock_guard<std::mutex> lock(stateMutex);
-    clampLength();
-    if (length <= 0 || countActiveSlots() == 0)
-        return false;
-
-    ++tickAccumulator;
-    if (tickAccumulator < ticksPerBeat)
-        return false;
-
-    tickAccumulator -= ticksPerBeat;
-    const int nextIndex = advancePlayHead();
-    if (nextIndex < 0)
-        return false;
-
-    const auto& slot = slots[static_cast<std::size_t>(nextIndex)];
-    if (!slot.hasNote)
-        return false;
-
-    outEvent.note = static_cast<unsigned short>(slot.note);
-    outEvent.velocity = static_cast<unsigned short>(slot.velocity);
-    outEvent.durationTicks = static_cast<unsigned short>(slot.durationTicks);
-    return true;
-}
-
 void ArpeggiatorMachine::resetPlayback()
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
     resetPlaybackState();
+}
+
+void ArpeggiatorMachine::tick(int quarterBeat)
+{
+    std::function<void(const MachineNoteEvent&)> callbackCopy;
+    MachineNoteEvent outEvent;
+    bool shouldEmit = false;
+
+    {
+        const std::lock_guard<std::mutex> lock(stateMutex);
+        clampLength();
+        if (!clockActive || length <= 0 || countActiveSlots() == 0)
+            return;
+        if (quarterBeat < 1 || quarterBeat > 16)
+            return;
+        if (((quarterBeat - 1) % quarterBeatDivisor) != 0)
+            return;
+
+        const int nextIndex = advancePlayHead();
+        if (nextIndex < 0)
+            return;
+
+        const auto& slot = slots[static_cast<std::size_t>(nextIndex)];
+        if (!slot.hasNote)
+            return;
+
+        outEvent.note = static_cast<unsigned short>(slot.note);
+        outEvent.velocity = static_cast<unsigned short>(slot.velocity);
+        outEvent.durationTicks = static_cast<unsigned short>(slot.durationTicks);
+        callbackCopy = clockEventCallback;
+        shouldEmit = callbackCopy != nullptr;
+    }
+
+    if (shouldEmit)
+        callbackCopy(outEvent);
+}
+
+void ArpeggiatorMachine::reset()
+{
+    resetPlayback();
+}
+
+void ArpeggiatorMachine::setClockEventCallback(std::function<void(const MachineNoteEvent&)> callback)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clockEventCallback = std::move(callback);
+}
+
+void ArpeggiatorMachine::setClockActive(bool shouldBeActive)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    clockActive = shouldBeActive;
 }
 
 void ArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
@@ -222,12 +264,11 @@ void ArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
     root->setProperty("version", kStateVersion);
     root->setProperty("length", length);
-    root->setProperty("ticksPerBeat", ticksPerBeat);
+    root->setProperty("quarterBeatDivisor", quarterBeatDivisor);
     root->setProperty("recordEnabled", recordEnabled);
     root->setProperty("recordHead", recordHead);
     root->setProperty("playHead", playHead);
     root->setProperty("pingPongDirection", pingPongDirection);
-    root->setProperty("tickAccumulator", tickAccumulator);
     root->setProperty("playMode", static_cast<int>(playMode));
 
     juce::Array<juce::var> slotsVar;
@@ -268,9 +309,15 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
     const auto lengthVar = obj->getProperty("length");
     if (!lengthVar.isVoid())
         length = static_cast<int>(lengthVar);
-    const auto ticksVar = obj->getProperty("ticksPerBeat");
-    if (!ticksVar.isVoid())
-        ticksPerBeat = static_cast<int>(ticksVar);
+    const auto divisorVar = obj->getProperty("quarterBeatDivisor");
+    if (!divisorVar.isVoid())
+        quarterBeatDivisor = static_cast<int>(divisorVar);
+    else
+    {
+        const auto legacyTicksVar = obj->getProperty("ticksPerBeat");
+        if (!legacyTicksVar.isVoid())
+            quarterBeatDivisor = mapLegacyTicksPerBeatToQuarterBeatDivisor(static_cast<int>(legacyTicksVar));
+    }
     const auto recordVar = obj->getProperty("recordEnabled");
     if (!recordVar.isVoid())
         recordEnabled = static_cast<bool>(recordVar);
@@ -283,9 +330,6 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
     const auto directionVar = obj->getProperty("pingPongDirection");
     if (!directionVar.isVoid())
         pingPongDirection = static_cast<int>(directionVar);
-    const auto accumulatorVar = obj->getProperty("tickAccumulator");
-    if (!accumulatorVar.isVoid())
-        tickAccumulator = static_cast<int>(accumulatorVar);
     const auto modeVar = obj->getProperty("playMode");
     if (!modeVar.isVoid())
     {
@@ -330,7 +374,7 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
 void ArpeggiatorMachine::clampLength()
 {
     length = juce::jlimit(1, kMaxLength, length);
-    ticksPerBeat = juce::jlimit(1, kMaxTicksPerBeat, ticksPerBeat);
+    quarterBeatDivisor = mapLegacyTicksPerBeatToQuarterBeatDivisor(quarterBeatDivisor);
     if (recordHead < 0 || recordHead >= length)
         recordHead = 0;
     if (playHead < -1 || playHead >= length)
@@ -339,14 +383,12 @@ void ArpeggiatorMachine::clampLength()
         playHead = -1;
     if (pingPongDirection == 0)
         pingPongDirection = 1;
-    tickAccumulator = juce::jlimit(0, kMaxTicksPerBeat - 1, tickAccumulator);
 }
 
 void ArpeggiatorMachine::resetPlaybackState()
 {
     playHead = -1;
     pingPongDirection = 1;
-    tickAccumulator = 0;
 }
 
 int ArpeggiatorMachine::countActiveSlots() const
@@ -474,6 +516,32 @@ const char* ArpeggiatorMachine::formatPlayMode(PlayMode mode)
     }
 
     return "--";
+}
+
+const char* ArpeggiatorMachine::formatQuarterBeatDivisor(int divisor)
+{
+    switch (divisor)
+    {
+        case 1: return "1/16";
+        case 2: return "1/8";
+        case 4: return "1/4";
+        case 8: return "1/2";
+        case 16: return "1BAR";
+        default: return "1/16";
+    }
+}
+
+int ArpeggiatorMachine::mapLegacyTicksPerBeatToQuarterBeatDivisor(int ticksPerBeat)
+{
+    if (ticksPerBeat <= 1)
+        return 16;
+    if (ticksPerBeat <= 2)
+        return 8;
+    if (ticksPerBeat <= 4)
+        return 4;
+    if (ticksPerBeat <= 6)
+        return 2;
+    return 1;
 }
 
 std::string ArpeggiatorMachine::formatNote(int midiNote)

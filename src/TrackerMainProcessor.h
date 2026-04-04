@@ -185,7 +185,8 @@ private:
     std::size_t currentSongRow = 0;
     int currentSongRowRepeatIndex = 0;
     bool playbackAdvancedSinceRowStart = false;
-    int lastTransportBeatInBar = -1;
+    bool pendingTransportQuarterBeatReset = false;
+    bool pendingTransportStartOnQuarterBeat = false;
     /** keep the seq editor in the processor as the plugineditor
      * can be deleted but the processor persists and we want to retain state on the seqeditor
     */
@@ -232,10 +233,10 @@ private:
     int lastSendOnAt{0}; // temp to test when we actually sent it 
     int maxHorizon;   
     unsigned int samplesPerTick; 
+    int quarterBeatTicksAccumulator {0};
     double lastHostPpqPosition {0.0};
     bool hostPpqValid {false};
     bool hostWasPlaying {false};
-    bool pendingHostBeatReset {false};
     bool sequencerWasPlaying {false};
     std::atomic<bool> internalClockEnabled { true };
     std::atomic<bool> hostClockActive { false };
@@ -264,7 +265,7 @@ private:
     void bindViewedSequenceSetToEditor();
     void schedulePlaybackSequenceSetSwitch(std::size_t index);
     void switchPlaybackSequenceSetImmediately(std::size_t index, bool rewindNow);
-    void applyPendingSequenceSetSwitchForCurrentTransportBeat();
+    void applyPendingSequenceSetSwitchForCurrentQuarterBeat();
     bool isPlaybackSequencerAtBoundary() const;
     void handleSongAdvanceAfterTick();
     juce::var serializeSingleSequencer(const Sequencer& sequencerToSave) const;
@@ -284,6 +285,11 @@ private:
     void queueZoomCommand(float delta, float normalizedX, float normalizedY);
     void initialiseOsc();
     void initialiseMachines();
+    void configureClockListeners();
+    void removeClockListeners();
+    void updateClockedMachineActivity();
+    void emitQuarterBeatTickIfNeeded();
+    void emitClockedMachineEvent(std::size_t stackIndex, CommandType machineType, const MachineNoteEvent& event);
     void enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
                             unsigned short channel,
                             unsigned short outNote,
@@ -301,9 +307,7 @@ private:
                                   unsigned short velocity,
                                   unsigned short durInTicks,
                                   std::size_t startSlotIndex = 0);
-    void deactivateStackArpeggiator(std::size_t stackIndex);
     void allNotesOffForStack(std::size_t stackIndex);
-    void tickMachineClocks();
     //==============================================================================
     juce::OSCReceiver oscReceiver;
     juce::OSCSender oscSender;

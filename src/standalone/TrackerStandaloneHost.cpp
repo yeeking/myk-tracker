@@ -459,6 +459,16 @@ public:
         centreWithSize(getWidth(), getHeight());
     }
 
+    ~StandaloneFilterWindow() override
+    {
+        if (auto* content = getContentComponent())
+            if (auto* editor = dynamic_cast<juce::AudioProcessorEditor*>(content))
+                if (auto* processor = pluginHolder != nullptr ? pluginHolder->getAudioProcessor() : nullptr)
+                    processor->editorBeingDeleted(editor);
+
+        clearContentComponent();
+    }
+
     void closeButtonPressed() override
     {
         if (auto* app = juce::JUCEApplicationBase::getInstance())

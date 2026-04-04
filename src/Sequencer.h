@@ -241,6 +241,8 @@ class Sequence{
     void rewindAtNextZero();
     /** prime this sequence so the next tick triggers step zero immediately */
     void primeForImmediateTrigger();
+    /** reset transport counters so the next tick triggers step zero, then resumes normal spacing */
+    void resetForTransportStart();
     /**  when creating new notes, set the channel to this one*/
     // void setDefaulyChannel();
   private:
@@ -376,11 +378,13 @@ class Sequencer : public SequencerAbs {
       void stop();
       /** start playing */
       void play();
-      bool isPlaying();
+      bool isPlaying() const;
       /** on next 0 / 4 ticks, rewind all sequences to step 0. Use in combination with enableAllTriggers to play from the top. */
       void rewindAtNextZero();
       /** prime all sequences so the next tick triggers step zero immediately */
       void primeForImmediateTrigger();
+      /** reset all sequences so the next tick triggers step zero, then resumes normal spacing */
+      void resetForTransportStart();
       
       /** allows a 'keep stepping but do not trigger' when tick is called*/
       void disableAllTriggers();
