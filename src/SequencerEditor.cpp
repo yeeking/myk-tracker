@@ -52,7 +52,8 @@ bool isStackMachineType(CommandType type)
       || type == CommandType::WavetableSynth
       || type == CommandType::PolyArpeggiator
       || type == CommandType::DistortionFx
-      || type == CommandType::DelayFx;
+      || type == CommandType::DelayFx
+      || type == CommandType::ChannelStripFx;
 }
 
 std::string getStackMachineLabel(CommandType type)
@@ -67,6 +68,7 @@ std::string getStackMachineLabel(CommandType type)
     case CommandType::WavetableSynth: return "WAVE";
     case CommandType::DistortionFx: return "DIST";
     case CommandType::DelayFx: return "DELAY";
+    case CommandType::ChannelStripFx: return "CHSTR";
     default: return "MACH";
   }
 }

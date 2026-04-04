@@ -71,12 +71,18 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
     src/SuperSamplePlayer.cpp
 #    src/SuperSamplerEditor.cpp
     src/SuperSamplerProcessor.cpp
-    src/ArpeggiatorMachine.cpp
-    src/PolyArpeggiatorMachine.cpp
-    src/WavetableSynthMachine.cpp
-    src/WaveshaperDistortionMachine.cpp
-    src/DelayFxMachine.cpp
+    src/machines/ArpeggiatorMachine.cpp
+    src/machines/PolyArpeggiatorMachine.cpp
+    src/machines/WavetableSynthMachine.cpp
+    src/machines/WaveshaperDistortionMachine.cpp
+    src/machines/DelayFxMachine.cpp
+    src/machines/ChannelStripMachine.cpp
 )
+
+target_include_directories(myk-tracker-plug
+    PRIVATE
+        src
+        src/machines)
 
     
 target_compile_definitions(myk-tracker-plug
@@ -105,6 +111,7 @@ target_link_libraries(myk-tracker-plug
 #        seq-lib
         # AudioPluginData           
         juce::juce_audio_utils
+        juce::juce_dsp
         juce::juce_osc
         juce::juce_opengl
     PUBLIC

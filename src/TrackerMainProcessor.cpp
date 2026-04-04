@@ -45,7 +45,9 @@ bool isAudioSourceType(CommandType type)
 
 bool isAudioEffectType(CommandType type)
 {
-    return type == CommandType::DistortionFx || type == CommandType::DelayFx;
+    return type == CommandType::DistortionFx
+        || type == CommandType::DelayFx
+        || type == CommandType::ChannelStripFx;
 }
 
 float gainDbToLinear(float gainDb)
@@ -454,6 +456,7 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                 break;
             case CommandType::DistortionFx:
             case CommandType::DelayFx:
+            case CommandType::ChannelStripFx:
             case CommandType::Log:
                 break;
             default:
@@ -724,6 +727,7 @@ void TrackerMainProcessor::initialiseMachines()
         stack.wavetableSynth = std::make_unique<WavetableSynthMachine>();
         stack.distortionFx = std::make_unique<WaveshaperDistortionMachine>();
         stack.delayFx = std::make_unique<DelayFxMachine>();
+        stack.channelStripFx = std::make_unique<ChannelStripMachine>();
         stack.order = { CommandType::MidiNote };
         stack.midiOutputChannel = 1;
         stack.arpeggiatorClockActive = false;
@@ -992,6 +996,8 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
             stack.delayFx->prepareToPlay(sampleRate, samplesPerBlock);
             stack.delayFx->setSecondsPerTick(secondsPerTick);
         }
+        if (stack.channelStripFx != nullptr)
+            stack.channelStripFx->prepareToPlay(sampleRate, samplesPerBlock);
     }
     updateClockedMachineActivity();
 }
@@ -1014,6 +1020,8 @@ void TrackerMainProcessor::releaseResources()
             stack.distortionFx->releaseResources();
         if (stack.delayFx != nullptr)
             stack.delayFx->releaseResources();
+        if (stack.channelStripFx != nullptr)
+            stack.channelStripFx->releaseResources();
     }
 }
 
@@ -1520,7 +1528,7 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
         return;
 
     const auto& seqArray = *seqArrayVar.getArray();
-    const auto seqCount = juce::jmin<std::size_t>(static_cast<std::size_t>(seqArray.size()), target.howManySequences());
+    const auto seqCount = std::min(static_cast<std::size_t>(seqArray.size()), target.howManySequences());
     for (std::size_t i = 0; i < seqCount; ++i)
     {
         const auto& seqObj = seqArray[static_cast<int>(i)];
@@ -1547,7 +1555,7 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
         if (stepsVar.isArray())
         {
             const auto& stepsArray = *stepsVar.getArray();
-            const auto stepsToLoad = juce::jmin<std::size_t>(static_cast<std::size_t>(stepsArray.size()), static_cast<std::size_t>(length));
+            const auto stepsToLoad = std::min(static_cast<std::size_t>(stepsArray.size()), static_cast<std::size_t>(length));
             for (std::size_t step = 0; step < stepsToLoad; ++step)
             {
                 const auto& stepVar = stepsArray[static_cast<int>(step)];
@@ -1656,6 +1664,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         stackObj->setProperty("wavetableSynthEnabled", stack.wavetableSynthEnabled);
         stackObj->setProperty("distortionFxEnabled", stack.distortionFxEnabled);
         stackObj->setProperty("delayFxEnabled", stack.delayFxEnabled);
+        stackObj->setProperty("channelStripFxEnabled", stack.channelStripFxEnabled);
 
         auto encodeMachineState = [](MachineInterface* machine)
         {
@@ -1672,6 +1681,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         stackObj->setProperty("wavetableSynth", encodeMachineState(stack.wavetableSynth.get()));
         stackObj->setProperty("distortionFx", encodeMachineState(stack.distortionFx.get()));
         stackObj->setProperty("delayFx", encodeMachineState(stack.delayFx.get()));
+        stackObj->setProperty("channelStripFx", encodeMachineState(stack.channelStripFx.get()));
         stackStates.add(stackObj.get());
     }
     root->setProperty("machineStacks", stackStates);
@@ -1750,12 +1760,12 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         return;
 
     int seq = static_cast<int>(stateVar.getProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence())));
-    const int maxSeq = static_cast<int>(juce::jmax<std::size_t>(1, viewedSequencer->howManySequences())) - 1;
+    const int maxSeq = static_cast<int>(std::max<std::size_t>(1, viewedSequencer->howManySequences())) - 1;
     seq = juce::jlimit(0, juce::jmax(0, maxSeq), seq);
     seqEditor.setCurrentSequence(seq);
 
     int step = static_cast<int>(stateVar.getProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep())));
-    const int maxStep = static_cast<int>(juce::jmax<std::size_t>(1, viewedSequencer->howManySteps(static_cast<std::size_t>(seq)))) - 1;
+    const int maxStep = static_cast<int>(std::max<std::size_t>(1, viewedSequencer->howManySteps(static_cast<std::size_t>(seq)))) - 1;
     step = juce::jlimit(0, juce::jmax(0, maxStep), step);
     seqEditor.setCurrentStep(step);
 
@@ -1787,7 +1797,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     if (machineStacksVar.isArray())
     {
         const auto& stackArray = *machineStacksVar.getArray();
-        const auto stackCount = juce::jmin<std::size_t>(static_cast<std::size_t>(stackArray.size()), machineStacks.size());
+        const auto stackCount = std::min(static_cast<std::size_t>(stackArray.size()), machineStacks.size());
         for (std::size_t i = 0; i < stackCount; ++i)
         {
             if (!stackArray[static_cast<int>(i)].isObject())
@@ -1806,7 +1816,8 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
                         || type == CommandType::PolyArpeggiator
                         || type == CommandType::WavetableSynth
                         || type == CommandType::DistortionFx
-                        || type == CommandType::DelayFx)
+                        || type == CommandType::DelayFx
+                        || type == CommandType::ChannelStripFx)
                         stack.order.push_back(type);
                 }
             }
@@ -1823,6 +1834,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
             stack.wavetableSynthEnabled = static_cast<bool>(stackArray[static_cast<int>(i)].getProperty("wavetableSynthEnabled", stack.wavetableSynthEnabled));
             stack.distortionFxEnabled = static_cast<bool>(stackArray[static_cast<int>(i)].getProperty("distortionFxEnabled", stack.distortionFxEnabled));
             stack.delayFxEnabled = static_cast<bool>(stackArray[static_cast<int>(i)].getProperty("delayFxEnabled", stack.delayFxEnabled));
+            stack.channelStripFxEnabled = static_cast<bool>(stackArray[static_cast<int>(i)].getProperty("channelStripFxEnabled", stack.channelStripFxEnabled));
 
             auto decodeMachineState = [](const juce::var& encodedVar, MachineInterface* machine)
             {
@@ -1846,6 +1858,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
             decodeMachineState(stackArray[static_cast<int>(i)].getProperty("wavetableSynth", juce::var()), stack.wavetableSynth.get());
             decodeMachineState(stackArray[static_cast<int>(i)].getProperty("distortionFx", juce::var()), stack.distortionFx.get());
             decodeMachineState(stackArray[static_cast<int>(i)].getProperty("delayFx", juce::var()), stack.delayFx.get());
+            decodeMachineState(stackArray[static_cast<int>(i)].getProperty("channelStripFx", juce::var()), stack.channelStripFx.get());
         }
     }
 
@@ -2126,6 +2139,7 @@ std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
         case CommandType::WavetableSynth:
         case CommandType::DistortionFx:
         case CommandType::DelayFx:
+        case CommandType::ChannelStripFx:
             return machineStacks.size();
         default:
             return 0;
@@ -2205,7 +2219,8 @@ void TrackerMainProcessor::addMachineToStack(std::size_t stackIndex)
             CommandType::Arpeggiator,
             CommandType::PolyArpeggiator,
             CommandType::DistortionFx,
-            CommandType::DelayFx
+            CommandType::DelayFx,
+            CommandType::ChannelStripFx
         };
         for (const auto type : cycle)
         {
@@ -2245,7 +2260,8 @@ void TrackerMainProcessor::cycleMachineTypeInStack(std::size_t stackIndex, std::
             CommandType::Arpeggiator,
             CommandType::PolyArpeggiator,
             CommandType::DistortionFx,
-            CommandType::DelayFx
+            CommandType::DelayFx,
+            CommandType::ChannelStripFx
         };
 
         auto currentIt = std::find(cycle.begin(), cycle.end(), stack->order[slotIndex]);
@@ -2336,7 +2352,8 @@ std::string TrackerMainProcessor::describeStepNote(CommandType machineType, unsi
         || machineType == CommandType::PolyArpeggiator
         || machineType == CommandType::WavetableSynth
         || machineType == CommandType::DistortionFx
-        || machineType == CommandType::DelayFx)
+        || machineType == CommandType::DelayFx
+        || machineType == CommandType::ChannelStripFx)
     {
         const auto stackIndex = static_cast<std::size_t>(machineId);
         if (const auto* stack = getMachineStack(stackIndex))
@@ -2360,7 +2377,8 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
         || machineType == CommandType::Sampler
         || machineType == CommandType::WavetableSynth
         || machineType == CommandType::DistortionFx
-        || machineType == CommandType::DelayFx)
+        || machineType == CommandType::DelayFx
+        || machineType == CommandType::ChannelStripFx)
     {
         dispatchNoteThroughStack(static_cast<std::size_t>(machineId), note, velocity, durInTicks);
         return;
@@ -2452,6 +2470,7 @@ MachineInterface* TrackerMainProcessor::getMachineForStackType(MachineStack& sta
         case CommandType::WavetableSynth: return stack.wavetableSynth.get();
         case CommandType::DistortionFx: return stack.distortionFx.get();
         case CommandType::DelayFx: return stack.delayFx.get();
+        case CommandType::ChannelStripFx: return stack.channelStripFx.get();
         default: return nullptr;
     }
 }
@@ -2469,6 +2488,7 @@ const MachineInterface* TrackerMainProcessor::getMachineForStackType(const Machi
         case CommandType::WavetableSynth: return stack.wavetableSynth.get();
         case CommandType::DistortionFx: return stack.distortionFx.get();
         case CommandType::DelayFx: return stack.delayFx.get();
+        case CommandType::ChannelStripFx: return stack.channelStripFx.get();
         default: return nullptr;
     }
 }
@@ -2486,6 +2506,7 @@ bool* TrackerMainProcessor::getMachineEnabledFlag(MachineStack& stack, CommandTy
         case CommandType::WavetableSynth: return &stack.wavetableSynthEnabled;
         case CommandType::DistortionFx: return &stack.distortionFxEnabled;
         case CommandType::DelayFx: return &stack.delayFxEnabled;
+        case CommandType::ChannelStripFx: return &stack.channelStripFxEnabled;
         default: return nullptr;
     }
 }
@@ -2503,6 +2524,7 @@ const bool* TrackerMainProcessor::getMachineEnabledFlag(const MachineStack& stac
         case CommandType::WavetableSynth: return &stack.wavetableSynthEnabled;
         case CommandType::DistortionFx: return &stack.distortionFxEnabled;
         case CommandType::DelayFx: return &stack.delayFxEnabled;
+        case CommandType::ChannelStripFx: return &stack.channelStripFxEnabled;
         default: return nullptr;
     }
 }

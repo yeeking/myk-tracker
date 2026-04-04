@@ -24,11 +24,12 @@
 #include "SequencerEditor.h"
 #include "TrackerController.h"
 #include "SuperSamplerProcessor.h"
-#include "ArpeggiatorMachine.h"
-#include "PolyArpeggiatorMachine.h"
-#include "WavetableSynthMachine.h"
-#include "WaveshaperDistortionMachine.h"
-#include "DelayFxMachine.h"
+#include "machines/ArpeggiatorMachine.h"
+#include "machines/PolyArpeggiatorMachine.h"
+#include "machines/WavetableSynthMachine.h"
+#include "machines/WaveshaperDistortionMachine.h"
+#include "machines/DelayFxMachine.h"
+#include "machines/ChannelStripMachine.h"
 
 
 //==============================================================================
@@ -210,6 +211,7 @@ private:
         std::unique_ptr<WavetableSynthMachine> wavetableSynth;
         std::unique_ptr<WaveshaperDistortionMachine> distortionFx;
         std::unique_ptr<DelayFxMachine> delayFx;
+        std::unique_ptr<ChannelStripMachine> channelStripFx;
         std::vector<CommandType> order;
         bool arpeggiatorClockActive = false;
         bool samplerEnabled = true;
@@ -218,6 +220,7 @@ private:
         bool wavetableSynthEnabled = true;
         bool distortionFxEnabled = true;
         bool delayFxEnabled = true;
+        bool channelStripFxEnabled = true;
         int midiOutputChannel = 1;
         float gainDb = 0.0f;
         float meterLevel = 0.0f;

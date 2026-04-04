@@ -45,6 +45,7 @@ std::string describeStackCursorAction(const std::string& cellText)
     if (cellText == "WAVE") return "wavetable synth";
     if (cellText == "DIST") return "distortion";
     if (cellText == "DELAY") return "delay";
+    if (cellText == "CHSTR") return "channel strip";
     if (cellText == "MIDI") return "midi";
     if (cellText.empty()) return "stack";
     return juce::String(cellText).toLowerCase().toStdString();
@@ -643,6 +644,26 @@ void TrackerMainUI::prepareMachineConfigView()
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         updateCellStates(machineBoxes, rows, cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [delay]";
+        overlayState.color = palette.textPrimary;
+        overlayState.glowColor = palette.gridPlayhead;
+        overlayState.glowStrength = 0.25f;
+        return;
+    }
+    if (detailType.has_value() && detailType.value() == CommandType::ChannelStripFx)
+    {
+        TrackerUIComponent::Style style;
+        style.background = palette.background;
+        style.lightColor = palette.lightColor;
+        style.defaultGlowColor = palette.gridPlayhead;
+        style.ambientStrength = palette.ambientStrength;
+        style.lightDirection = palette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(cellWidth, cellHeight);
+
+        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
+        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [channel strip]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
         overlayState.glowStrength = 0.25f;
