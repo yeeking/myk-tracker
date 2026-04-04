@@ -316,6 +316,16 @@ void Sequence::tick(bool trigger)
 
 }
 
+std::size_t Sequence::getTicksElapsed() const
+{
+  return ticksElapsed;
+}
+
+std::size_t Sequence::getTickOfFour() const
+{
+  return tickOfFour;
+}
+
 void Sequence::triggerStep(std::size_t step, std::size_t row)
 {
   SequenceReadOnly context = getReadOnlyContext();
@@ -729,7 +739,7 @@ void Sequencer::tick()
     stringUpdateRequested = false;
     if (playing)
     {
-      for (Sequence &seq : sequences)
+      for (auto& seq : sequences)
       {
         seq.tick(triggerOnTick);
       }
@@ -1171,6 +1181,16 @@ void Sequencer::primeForImmediateTrigger()
 void Sequencer::resetForTransportStart()
 {
   for (Sequence& seq : sequences){seq.resetForTransportStart();}
+}
+
+std::size_t Sequencer::getTicksElapsed(std::size_t sequence) const
+{
+  return sequences[sequence].getTicksElapsed();
+}
+
+std::size_t Sequencer::getTickOfFour(std::size_t sequence) const
+{
+  return sequences[sequence].getTickOfFour();
 }
 
 

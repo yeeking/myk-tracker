@@ -743,7 +743,7 @@ void TrackerMainUI::prepareSongView()
             boxes[0][displayRow].kind = UIBox::Kind::TrackerCell;
             boxes[0][displayRow].text = "SET " + std::to_string(audioProcessor.getSongRowSequenceSetId(row) + 1);
             boxes[1][displayRow].kind = UIBox::Kind::TrackerCell;
-            boxes[1][displayRow].text = "REP " + std::to_string(audioProcessor.getSongRowRepeatCount(row));
+            boxes[1][displayRow].text = "BEAT " + std::to_string(audioProcessor.getSongRowBeatCount(row));
             boxes[2][displayRow].kind = UIBox::Kind::TrackerCell;
             boxes[2][displayRow].text = "EDIT";
             boxes[3][displayRow].kind = UIBox::Kind::TrackerCell;

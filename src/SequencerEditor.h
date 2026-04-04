@@ -62,13 +62,13 @@ public:
   virtual std::size_t getCurrentPlaybackSongRow() const = 0;
   virtual void setSelectedSongRow(std::size_t row) = 0;
   virtual std::size_t getSongRowSequenceSetId(std::size_t row) const = 0;
-  virtual int getSongRowRepeatCount(std::size_t row) const = 0;
+  virtual int getSongRowBeatCount(std::size_t row) const = 0;
   virtual SongPlayMode getSongPlayMode() const = 0;
   virtual void setSongPlayMode(SongPlayMode mode) = 0;
   virtual std::size_t addSongRowByCloningViewedSet() = 0;
   virtual void removeSongRow(std::size_t row) = 0;
   virtual void adjustSongRowSequenceSetId(std::size_t row, int direction) = 0;
-  virtual void adjustSongRowRepeatCount(std::size_t row, int direction) = 0;
+  virtual void adjustSongRowBeatCount(std::size_t row, int direction) = 0;
   virtual void toggleSongPlayback() = 0;
   virtual void rewindSongTransport() = 0;
 };

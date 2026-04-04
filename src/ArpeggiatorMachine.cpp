@@ -3,13 +3,14 @@
 #include <JuceHeader.h>
 #include <algorithm>
 #include <cstring>
+#include <random>
 #include <tuple>
 
 #include "MachineUtilsAbs.h"
 
 namespace
 {
-constexpr double kStateVersion = 2.0;
+constexpr double kStateVersion = 3.0;
 constexpr std::uint32_t kActiveStepFillArgb = 0xff2fbf71u;
 constexpr std::uint32_t kActiveStepTextArgb = 0xfff4fff7u;
 
@@ -73,7 +74,7 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
     clampLength();
 
     const std::size_t noteRows = static_cast<std::size_t>((length + kMaxWidth - 1) / kMaxWidth);
-    const std::size_t rows = juce::jmax<std::size_t>(static_cast<std::size_t>(1), noteRows) + 1;
+    const std::size_t rows = juce::jmax<std::size_t>(static_cast<std::size_t>(1), noteRows) + 2;
     const std::size_t cols = static_cast<std::size_t>(kMaxWidth);
     std::vector<std::vector<UIBox>> boxes(cols, std::vector<UIBox>(rows));
 
@@ -139,7 +140,7 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
         }
     }
 
-    const std::size_t controlRow = rows - 1;
+    const std::size_t controlRow = rows - 2;
     for (std::size_t col = 0; col < cols; ++col)
     {
         UIBox controlCell;
@@ -206,6 +207,18 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
                 playMode = static_cast<PlayMode>(modeIndex);
                 if (playMode == PlayMode::up || playMode == PlayMode::down)
                     sortActiveSlots();
+                else
+                    resetPlaybackState();
+            };
+        }
+        else if (col == 7)
+        {
+            controlCell.kind = UIBox::Kind::TrackerCell;
+            controlCell.text = "SHUF";
+            controlCell.onActivate = [this]()
+            {
+                const std::lock_guard<std::mutex> guard(stateMutex);
+                shuffleSlots();
             };
         }
         else
@@ -215,6 +228,34 @@ std::vector<std::vector<UIBox>> ArpeggiatorMachine::getUIBoxes(const MachineUiCo
             controlCell.isDisabled = true;
         }
         boxes[col][controlRow] = std::move(controlCell);
+    }
+
+    const std::size_t secondaryRow = rows - 1;
+    for (std::size_t col = 0; col < cols; ++col)
+    {
+        UIBox controlCell;
+        if (col == 0)
+        {
+            controlCell.kind = UIBox::Kind::TrackerCell;
+            controlCell.text = "OCT";
+        }
+        else if (col == 1)
+        {
+            controlCell.kind = UIBox::Kind::TrackerCell;
+            controlCell.text = std::to_string(octaveSpan);
+            controlCell.onAdjust = [this](int direction)
+            {
+                const std::lock_guard<std::mutex> guard(stateMutex);
+                octaveSpan = juce::jlimit(1, 4, octaveSpan + direction);
+                currentOctaveIndex = juce::jlimit(0, octaveSpan - 1, currentOctaveIndex);
+            };
+        }
+        else
+        {
+            controlCell.kind = UIBox::Kind::None;
+            controlCell.isDisabled = true;
+        }
+        boxes[col][secondaryRow] = std::move(controlCell);
     }
 
     return boxes;
@@ -278,7 +319,7 @@ void ArpeggiatorMachine::tick(int quarterBeat)
         if (!slot.hasNote)
             return;
 
-        outEvent.note = static_cast<unsigned short>(slot.note);
+        outEvent.note = static_cast<unsigned short>(getPlaybackNoteForSlot(slot.note));
         outEvent.velocity = static_cast<unsigned short>(slot.velocity);
         outEvent.durationTicks = static_cast<unsigned short>(slot.durationTicks);
         callbackCopy = clockEventCallback;
@@ -354,10 +395,12 @@ void ArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("version", kStateVersion);
     root->setProperty("length", length);
     root->setProperty("quarterBeatDivisor", quarterBeatDivisor);
+    root->setProperty("octaveSpan", octaveSpan);
     root->setProperty("recordEnabled", recordEnabled);
     root->setProperty("recordHead", recordHead);
     root->setProperty("playHead", playHead);
     root->setProperty("pingPongDirection", pingPongDirection);
+    root->setProperty("currentOctaveIndex", currentOctaveIndex);
     root->setProperty("playMode", static_cast<int>(playMode));
 
     juce::Array<juce::var> slotsVar;
@@ -395,6 +438,7 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
         return;
 
     const auto* obj = parsed.getDynamicObject();
+    const double version = static_cast<double>(parsed.getProperty("version", 0.0));
     const auto lengthVar = obj->getProperty("length");
     if (!lengthVar.isVoid())
         length = static_cast<int>(lengthVar);
@@ -410,6 +454,9 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
     const auto recordVar = obj->getProperty("recordEnabled");
     if (!recordVar.isVoid())
         recordEnabled = static_cast<bool>(recordVar);
+    const auto octaveSpanVar = obj->getProperty("octaveSpan");
+    if (!octaveSpanVar.isVoid())
+        octaveSpan = static_cast<int>(octaveSpanVar);
     const auto recordHeadVar = obj->getProperty("recordHead");
     if (!recordHeadVar.isVoid())
         recordHead = static_cast<int>(recordHeadVar);
@@ -419,10 +466,16 @@ void ArpeggiatorMachine::setStateInformation(const void* data, int sizeInBytes)
     const auto directionVar = obj->getProperty("pingPongDirection");
     if (!directionVar.isVoid())
         pingPongDirection = static_cast<int>(directionVar);
+    const auto octaveIndexVar = obj->getProperty("currentOctaveIndex");
+    if (!octaveIndexVar.isVoid())
+        currentOctaveIndex = static_cast<int>(octaveIndexVar);
     const auto modeVar = obj->getProperty("playMode");
     if (!modeVar.isVoid())
     {
-        const int modeIndex = juce::jlimit(0, static_cast<int>(PlayMode::random), static_cast<int>(modeVar));
+        int modeIndex = static_cast<int>(modeVar);
+        if (version < 3.0 && modeIndex >= static_cast<int>(PlayMode::linear))
+            ++modeIndex;
+        modeIndex = juce::jlimit(0, static_cast<int>(PlayMode::random), modeIndex);
         playMode = static_cast<PlayMode>(modeIndex);
     }
 
@@ -465,18 +518,21 @@ void ArpeggiatorMachine::clampLength()
     length = juce::jlimit(1, kMaxLength, length);
     if (!isValidQuarterBeatDivisor(quarterBeatDivisor))
         quarterBeatDivisor = mapLegacyTicksPerBeatToQuarterBeatDivisor(quarterBeatDivisor);
+    octaveSpan = juce::jlimit(1, 4, octaveSpan);
     if (recordHead < 0 || recordHead >= length)
         recordHead = 0;
     if (playHead < -1 || playHead >= length)
         playHead = -1;
     if (pingPongDirection == 0)
         pingPongDirection = 1;
+    currentOctaveIndex = juce::jlimit(0, octaveSpan - 1, currentOctaveIndex);
 }
 
 void ArpeggiatorMachine::resetPlaybackState()
 {
     playHead = -1;
     pingPongDirection = 1;
+    currentOctaveIndex = 0;
     ticksSinceStep = juce::jmax(0, quarterBeatDivisor - 1);
 }
 
@@ -522,6 +578,13 @@ void ArpeggiatorMachine::sortActiveSlots()
     resetPlaybackState();
 }
 
+void ArpeggiatorMachine::shuffleSlots()
+{
+    std::mt19937 rng(static_cast<std::mt19937::result_type>(juce::Random::getSystemRandom().nextInt()));
+    std::shuffle(slots.begin(), slots.begin() + length, rng);
+    resetPlaybackState();
+}
+
 int ArpeggiatorMachine::advancePlayHead()
 {
     if (countActiveSlots() == 0)
@@ -530,8 +593,12 @@ int ArpeggiatorMachine::advancePlayHead()
     if (playMode == PlayMode::random)
     {
         playHead = juce::Random::getSystemRandom().nextInt(juce::jmax(1, length));
+        currentOctaveIndex = juce::Random::getSystemRandom().nextInt(juce::jmax(1, octaveSpan));
         return playHead;
     }
+
+    const int previousPlayHead = playHead;
+    const int previousDirection = pingPongDirection;
 
     if (playMode == PlayMode::pingPong)
     {
@@ -561,27 +628,34 @@ int ArpeggiatorMachine::advancePlayHead()
             }
         }
     }
+    else if (playMode == PlayMode::down)
+    {
+        if (playHead < 0)
+            playHead = length;
+        playHead = (playHead - 1 + length) % length;
+    }
     else
     {
         playHead = (playHead + 1 + length) % length;
     }
 
+    bool advanceOctave = false;
+    if (playMode == PlayMode::linear || playMode == PlayMode::up)
+        advanceOctave = previousPlayHead >= 0 && playHead <= previousPlayHead;
+    else if (playMode == PlayMode::down)
+        advanceOctave = previousPlayHead >= 0 && playHead >= previousPlayHead;
+    else if (playMode == PlayMode::pingPong)
+        advanceOctave = previousPlayHead == 0 && previousDirection < 0 && pingPongDirection > 0;
+
+    if (advanceOctave && octaveSpan > 1)
+        currentOctaveIndex = (currentOctaveIndex + 1) % octaveSpan;
+
     return playHead;
 }
 
-int ArpeggiatorMachine::getRandomPlayableIndex() const
+int ArpeggiatorMachine::getPlaybackNoteForSlot(int slotNote)
 {
-    std::vector<int> activeIndices;
-    activeIndices.reserve(static_cast<std::size_t>(length));
-    for (int i = 0; i < length; ++i)
-        if (slots[static_cast<std::size_t>(i)].hasNote)
-            activeIndices.push_back(i);
-
-    if (activeIndices.empty())
-        return -1;
-
-    const int randomIndex = juce::Random::getSystemRandom().nextInt(static_cast<int>(activeIndices.size()));
-    return activeIndices[static_cast<std::size_t>(randomIndex)];
+    return juce::jlimit(0, 127, slotNote + (12 * currentOctaveIndex));
 }
 
 const char* ArpeggiatorMachine::formatPlayMode(PlayMode mode)
@@ -590,6 +664,8 @@ const char* ArpeggiatorMachine::formatPlayMode(PlayMode mode)
     {
         case PlayMode::pingPong:
             return "PING";
+        case PlayMode::linear:
+            return "LINE";
         case PlayMode::up:
             return "UP";
         case PlayMode::down:

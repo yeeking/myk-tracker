@@ -102,7 +102,7 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
     const int samplesSinceLast = onSample - lastQdOnAt; 
     lastQdOnAt = onSample;
 
-    DBG("q-ing midi: delta since last note on " << samplesSinceLast << " on at " << onSample << " off at " << offSample);
+    // DBG("q-ing midi: delta since last note on " << samplesSinceLast << " on at " << onSample << " off at " << offSample);
     
     targetBuffer.addEvent(MidiMessage::noteOn((int)channel, (int)outNote, (uint8)outVelocity), onSample);
     targetBuffer.addEvent(MidiMessage::noteOff((int)channel, (int)outNote, (uint8)outVelocity), offSample);
@@ -147,15 +147,14 @@ void TrackerMainProcessor::resetSongState()
     sequenceSets.clear();
     sequenceSets.push_back(createDefaultSequenceSet());
     songRows.clear();
-    songRows.push_back({ 0, 1 });
+    songRows.push_back({ 0, 16 });
     songPlayMode = SongPlayMode::sequence;
     viewedSequenceSetIndex = 0;
     activePlaybackSequenceSetIndex = 0;
     pendingPlaybackSequenceSetIndex.reset();
     selectedSongRow = 0;
     currentSongRow = 0;
-    currentSongRowRepeatIndex = 0;
-    playbackAdvancedSinceRowStart = false;
+    currentSongRowBeatCounter = 0;
     pendingTransportQuarterBeatReset = false;
     pendingTransportStartOnQuarterBeat = false;
     quarterBeatTicksAccumulator = 0;
@@ -216,6 +215,16 @@ void TrackerMainProcessor::schedulePlaybackSequenceSetSwitch(std::size_t index)
         return;
     const auto safeIndex = std::min(index, sequenceSets.size() - 1);
     pendingPlaybackSequenceSetIndex = safeIndex;
+    primeSequenceSetForTransportStart(safeIndex);
+}
+
+void TrackerMainProcessor::primeSequenceSetForTransportStart(std::size_t index)
+{
+    if (sequenceSets.empty())
+        return;
+    const auto safeIndex = std::min(index, sequenceSets.size() - 1);
+    if (safeIndex == activePlaybackSequenceSetIndex)
+        return;
     if (auto* pendingSequencer = sequenceSets[safeIndex].get())
     {
         pendingSequencer->stop();
@@ -230,9 +239,23 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
 
     auto* previousPlaybackSequencer = getPlaybackSequencerInternal();
     const bool wasPlaying = previousPlaybackSequencer != nullptr && previousPlaybackSequencer->isPlaying();
-    activePlaybackSequenceSetIndex = std::min(index, sequenceSets.size() - 1);
+    const auto targetIndex = std::min(index, sequenceSets.size() - 1);
+    const bool sameSequenceSet = previousPlaybackSequencer != nullptr && targetIndex == activePlaybackSequenceSetIndex;
+    if (sameSequenceSet)
+    {
+        pendingPlaybackSequenceSetIndex.reset();
+        if (songPlayMode == SongPlayMode::sequence)
+            setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
+
+        if (rewindNow && previousPlaybackSequencer != nullptr)
+        {
+            previousPlaybackSequencer->resetForTransportStart();
+        }
+        return;
+    }
+
+    activePlaybackSequenceSetIndex = targetIndex;
     pendingPlaybackSequenceSetIndex.reset();
-    playbackAdvancedSinceRowStart = false;
     if (previousPlaybackSequencer != nullptr)
         previousPlaybackSequencer->stop();
     if (songPlayMode == SongPlayMode::sequence)
@@ -240,12 +263,8 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
 
     if (auto* playbackSequencer = getPlaybackSequencerInternal())
     {
-        CommandProcessor::sendAllNotesOff();
         if (rewindNow)
-        {
-            playbackSequencer->stop();
             playbackSequencer->resetForTransportStart();
-        }
         if (wasPlaying)
             playbackSequencer->play();
     }
@@ -256,7 +275,7 @@ void TrackerMainProcessor::applyPendingSequenceSetSwitchForCurrentQuarterBeat()
     if (!pendingPlaybackSequenceSetIndex.has_value() || ((getCurrentQuarterBeat() - 1) % 4) != 0)
         return;
 
-    switchPlaybackSequenceSetImmediately(*pendingPlaybackSequenceSetIndex, false);
+    switchPlaybackSequenceSetImmediately(*pendingPlaybackSequenceSetIndex, true);
 }
 
 bool TrackerMainProcessor::isPlaybackSequencerAtBoundary() const
@@ -276,37 +295,44 @@ bool TrackerMainProcessor::isPlaybackSequencerAtBoundary() const
     return true;
 }
 
-void TrackerMainProcessor::handleSongAdvanceAfterTick()
+void TrackerMainProcessor::handleSongBeatBoundary()
 {
     auto* playbackSequencer = getPlaybackSequencerInternal();
     if (playbackSequencer == nullptr || !playbackSequencer->isPlaying() || songRows.empty())
         return;
 
-    if (!playbackAdvancedSinceRowStart)
-    {
-        playbackAdvancedSinceRowStart = !isPlaybackSequencerAtBoundary();
-        return;
-    }
-
-    if (!isPlaybackSequencerAtBoundary())
-        return;
-
-    playbackAdvancedSinceRowStart = false;
     if (songPlayMode == SongPlayMode::sequence)
         return;
 
     if (currentSongRow >= songRows.size())
         currentSongRow = 0;
 
-    ++currentSongRowRepeatIndex;
-    const int repeatCount = juce::jmax(1, songRows[currentSongRow].repeatCount);
-    if (currentSongRowRepeatIndex < repeatCount)
+    if (currentSongRowBeatCounter <= 0)
+    {
+        currentSongRowBeatCounter = juce::jmax(1, songRows[currentSongRow].beatCount);
+        primeSequenceSetForTransportStart(songRows[(currentSongRow + 1) % songRows.size()].sequenceSetId);
+    }
+
+    if (currentSongRowBeatCounter <= 0)
         return;
 
-    currentSongRowRepeatIndex = 0;
+    --currentSongRowBeatCounter;
+
+    if (currentSongRowBeatCounter > 0)
+    {
+        if (currentSongRowBeatCounter == 1 && songRows.size() > 1)
+            primeSequenceSetForTransportStart(songRows[(currentSongRow + 1) % songRows.size()].sequenceSetId);
+        return;
+    }
+
     currentSongRow = (currentSongRow + 1) % songRows.size();
     selectedSongRow = currentSongRow;
+    currentSongRowBeatCounter = juce::jmax(1, songRows[currentSongRow].beatCount);
     schedulePlaybackSequenceSetSwitch(songRows[currentSongRow].sequenceSetId);
+    applyPendingSequenceSetSwitchForCurrentQuarterBeat();
+
+    if (songRows.size() > 1)
+        primeSequenceSetForTransportStart(songRows[(currentSongRow + 1) % songRows.size()].sequenceSetId);
 }
 
 bool TrackerMainProcessor::stackContainsType(std::size_t stackIndex, CommandType machineType) const
@@ -535,6 +561,7 @@ void TrackerMainProcessor::emitQuarterBeatTickIfNeeded()
     }
     else if (((getCurrentQuarterBeat() - 1) % 4) == 0)
     {
+        handleSongBeatBoundary();
         applyPendingSequenceSetSwitchForCurrentQuarterBeat();
     }
 
@@ -806,7 +833,7 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
             if (songCol == 0)
                 return "SET " + juce::String(static_cast<int>(songRows[rowIndex].sequenceSetId + 1));
             if (songCol == 1)
-                return "REP " + juce::String(songRows[rowIndex].repeatCount);
+                return "BEAT " + juce::String(songRows[rowIndex].beatCount);
             if (songCol == 3)
                 return "DEL";
             return "EDIT";
@@ -1111,7 +1138,6 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                     if (playbackSequencer != nullptr)
                     {
                         playbackSequencer->tick();
-                        handleSongAdvanceAfterTick();
                         playbackSequencer = getPlaybackSequencerInternal();
                     }
                 }
@@ -1145,7 +1171,6 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 if (playbackSequencer != nullptr)
                 {
                     playbackSequencer->tick();
-                    handleSongAdvanceAfterTick();
                     playbackSequencer = getPlaybackSequencerInternal();
                 }
             }
@@ -1185,7 +1210,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 if (metadata.getMessage().isNoteOn()){
                     const int delta = metadata.samplePosition - lastSendOnAt; 
 
-                    DBG("On Event delta: " << delta << "  blockStart " << blockStartSample << " at " << metadata.samplePosition - blockStartSample);
+                    // DBG("On Event delta: " << delta << "  blockStart " << blockStartSample << " at " << metadata.samplePosition - blockStartSample);
                     lastSendOnAt = metadata.samplePosition;
                 }
                 midiMessages.addEvent(metadata.getMessage(),  metadata.samplePosition - blockStartSample);
@@ -1590,7 +1615,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     root->setProperty("activePlaybackSequenceSetIndex", static_cast<int>(activePlaybackSequenceSetIndex));
     root->setProperty("selectedSongRow", static_cast<int>(selectedSongRow));
     root->setProperty("currentSongRow", static_cast<int>(currentSongRow));
-    root->setProperty("currentSongRowRepeatIndex", currentSongRowRepeatIndex);
+    root->setProperty("currentSongRowBeatCounter", currentSongRowBeatCounter);
     root->setProperty("songPlayMode", songPlayMode == SongPlayMode::song ? "song" : "sequence");
     root->setProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence()));
     root->setProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep()));
@@ -1610,7 +1635,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     {
         juce::DynamicObject::Ptr rowObj = new juce::DynamicObject();
         rowObj->setProperty("sequenceSetId", static_cast<int>(row.sequenceSetId));
-        rowObj->setProperty("repeatCount", row.repeatCount);
+        rowObj->setProperty("beatCount", row.beatCount);
         songRowsVar.add(rowObj.get());
     }
     root->setProperty("songRows", songRowsVar);
@@ -1689,14 +1714,14 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
                 continue;
             SongRow row;
             row.sequenceSetId = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(rowVar.getProperty("sequenceSetId", 0))));
-            row.repeatCount = juce::jmax(1, static_cast<int>(rowVar.getProperty("repeatCount", 1)));
+            row.beatCount = juce::jmax(1, static_cast<int>(rowVar.getProperty("beatCount", rowVar.getProperty("repeatCount", 16))));
             if (!sequenceSets.empty())
                 row.sequenceSetId = std::min(row.sequenceSetId, sequenceSets.size() - 1);
             songRows.push_back(row);
         }
     }
     if (songRows.empty())
-        songRows.push_back({ 0, 1 });
+        songRows.push_back({ 0, 16 });
 
     viewedSequenceSetIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("viewedSequenceSetIndex", 0))));
     activePlaybackSequenceSetIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("activePlaybackSequenceSetIndex", static_cast<int>(viewedSequenceSetIndex)))));
@@ -1713,12 +1738,11 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         selectedSongRow = std::min(selectedSongRow, songRows.size() - 1);
         currentSongRow = std::min(currentSongRow, songRows.size() - 1);
     }
-    currentSongRowRepeatIndex = juce::jmax(0, static_cast<int>(stateVar.getProperty("currentSongRowRepeatIndex", 0)));
+    currentSongRowBeatCounter = juce::jmax(1, static_cast<int>(stateVar.getProperty("currentSongRowBeatCounter", songRows.empty() ? 16 : songRows[currentSongRow].beatCount)));
     songPlayMode = stateVar.getProperty("songPlayMode", "sequence").toString().equalsIgnoreCase("song")
         ? SongPlayMode::song
         : SongPlayMode::sequence;
     pendingPlaybackSequenceSetIndex.reset();
-    playbackAdvancedSinceRowStart = false;
 
     bindViewedSequenceSetToEditor();
     auto* viewedSequencer = getViewedSequencerInternal();
@@ -1899,6 +1923,7 @@ void TrackerMainProcessor::setSelectedSongRow(std::size_t row)
     if (songRows.empty())
         return;
     selectedSongRow = std::min(row, songRows.size() - 1);
+    currentSongRowBeatCounter = juce::jmax(1, songRows[selectedSongRow].beatCount);
     if (songPlayMode == SongPlayMode::sequence)
     {
         if (auto* playbackSequencer = getPlaybackSequencerInternal())
@@ -1906,7 +1931,7 @@ void TrackerMainProcessor::setSelectedSongRow(std::size_t row)
             if (playbackSequencer->isPlaying())
             {
                 currentSongRow = selectedSongRow;
-                currentSongRowRepeatIndex = 0;
+                currentSongRowBeatCounter = juce::jmax(1, songRows[selectedSongRow].beatCount);
                 schedulePlaybackSequenceSetSwitch(songRows[selectedSongRow].sequenceSetId);
             }
             else
@@ -1928,11 +1953,11 @@ std::size_t TrackerMainProcessor::getSongRowSequenceSetId(std::size_t row) const
     return songRows[row].sequenceSetId;
 }
 
-int TrackerMainProcessor::getSongRowRepeatCount(std::size_t row) const
+int TrackerMainProcessor::getSongRowBeatCount(std::size_t row) const
 {
     if (row >= songRows.size())
-        return 1;
-    return songRows[row].repeatCount;
+        return 16;
+    return songRows[row].beatCount;
 }
 
 SongPlayMode TrackerMainProcessor::getSongPlayMode() const
@@ -1960,7 +1985,7 @@ std::size_t TrackerMainProcessor::addSongRowByCloningViewedSet()
     restoreSingleSequencer(*newSequenceSet, serializeSingleSequencer(*viewedSequencer));
     sequenceSets.push_back(std::move(newSequenceSet));
     const std::size_t newSetIndex = sequenceSets.size() - 1;
-    songRows.push_back({ newSetIndex, 1 });
+    songRows.push_back({ newSetIndex, 16 });
     return songRows.size() - 1;
 }
 
@@ -2012,6 +2037,8 @@ void TrackerMainProcessor::removeSongRow(std::size_t row)
         selectedSongRow = songRows.size() - 1;
     if (currentSongRow >= songRows.size())
         currentSongRow = songRows.size() - 1;
+    if (!songRows.empty())
+        currentSongRowBeatCounter = juce::jmax(1, songRows[currentSongRow].beatCount);
 
     setSelectedSongRow(selectedSongRow);
 }
@@ -2027,11 +2054,13 @@ void TrackerMainProcessor::adjustSongRowSequenceSetId(std::size_t row, int direc
         setSelectedSongRow(row);
 }
 
-void TrackerMainProcessor::adjustSongRowRepeatCount(std::size_t row, int direction)
+void TrackerMainProcessor::adjustSongRowBeatCount(std::size_t row, int direction)
 {
     if (row >= songRows.size() || direction == 0)
         return;
-    songRows[row].repeatCount = juce::jmax(1, songRows[row].repeatCount + direction);
+    songRows[row].beatCount = juce::jmax(1, songRows[row].beatCount + direction);
+    if (row == currentSongRow)
+        currentSongRowBeatCounter = juce::jmax(1, songRows[row].beatCount);
 }
 
 void TrackerMainProcessor::toggleSongPlayback()
@@ -2045,7 +2074,6 @@ void TrackerMainProcessor::toggleSongPlayback()
     {
         playbackSequencer->stop();
         pendingPlaybackSequenceSetIndex.reset();
-        playbackAdvancedSinceRowStart = false;
         pendingTransportQuarterBeatReset = false;
         pendingTransportStartOnQuarterBeat = false;
         updateClockedMachineActivity();
@@ -2053,8 +2081,7 @@ void TrackerMainProcessor::toggleSongPlayback()
     }
 
     currentSongRow = std::min(selectedSongRow, songRows.size() - 1);
-    currentSongRowRepeatIndex = 0;
-    playbackAdvancedSinceRowStart = false;
+    currentSongRowBeatCounter = juce::jmax(1, songRows[currentSongRow].beatCount);
     pendingTransportQuarterBeatReset = true;
     pendingTransportStartOnQuarterBeat = true;
     if (!songRows.empty())
@@ -2072,8 +2099,8 @@ void TrackerMainProcessor::rewindSongTransport()
     auto* playbackSequencer = getPlaybackSequencerInternal();
     const bool wasPlaying = playbackSequencer != nullptr && playbackSequencer->isPlaying();
     currentSongRow = std::min(selectedSongRow, songRows.empty() ? 0u : songRows.size() - 1);
-    currentSongRowRepeatIndex = 0;
-    playbackAdvancedSinceRowStart = false;
+    if (!songRows.empty())
+        currentSongRowBeatCounter = juce::jmax(1, songRows[currentSongRow].beatCount);
     pendingTransportQuarterBeatReset = true;
     pendingTransportStartOnQuarterBeat = wasPlaying;
     if (!songRows.empty())

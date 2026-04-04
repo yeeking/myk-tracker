@@ -15,6 +15,7 @@ public:
     enum class PlayMode
     {
         pingPong,
+        linear,
         up,
         down,
         random
@@ -71,7 +72,7 @@ private:
     };
 
     /** Maximum number of note slots in arp memory. */
-    static constexpr int kMaxLength = 16;
+    static constexpr int kMaxLength = 64;
     /** Maximum number of note columns before the UI wraps. */
     static constexpr int kMaxWidth = 8;
     /** Supported quarter-beat divisors for arp stepping. */
@@ -81,6 +82,8 @@ private:
     int length = 8;
     /** Quarter-beat divisor used for arp stepping. */
     int quarterBeatDivisor = 1;
+    /** Number of octaves cycled during playback. */
+    int octaveSpan = 1;
     /** Number of received clock ticks since the last emitted arp step. */
     int ticksSinceStep = 0;
     /** True when incoming notes should overwrite arp memory. */
@@ -91,6 +94,8 @@ private:
     int playHead = -1;
     /** Current ping-pong direction for playback. */
     int pingPongDirection = 1;
+    /** Current octave layer used during playback. */
+    int currentOctaveIndex = 0;
     /** Current arp playback mode. */
     PlayMode playMode = PlayMode::pingPong;
     /** Fixed note memory for the arp. */
@@ -110,10 +115,12 @@ private:
     int countActiveSlots() const;
     /** Sorts active note slots according to the current mode. */
     void sortActiveSlots();
+    /** Randomises the note memory order within the active length. */
+    void shuffleSlots();
     /** Advances the playhead and returns the next slot index. */
     int advancePlayHead();
-    /** Returns a random playable slot index. */
-    int getRandomPlayableIndex() const;
+    /** Returns the playback note after applying the current octave span. */
+    int getPlaybackNoteForSlot(int slotNote);
     /** Returns the UI label for a play mode. */
     static const char* formatPlayMode(PlayMode mode);
     /** Returns the display label for a quarter-beat divisor. */

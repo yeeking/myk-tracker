@@ -243,6 +243,8 @@ class Sequence{
     void primeForImmediateTrigger();
     /** reset transport counters so the next tick triggers step zero, then resumes normal spacing */
     void resetForTransportStart();
+    std::size_t getTicksElapsed() const;
+    std::size_t getTickOfFour() const;
     /**  when creating new notes, set the channel to this one*/
     // void setDefaulyChannel();
   private:
@@ -384,7 +386,9 @@ class Sequencer : public SequencerAbs {
       /** prime all sequences so the next tick triggers step zero immediately */
       void primeForImmediateTrigger();
       /** reset all sequences so the next tick triggers step zero, then resumes normal spacing */
-      void resetForTransportStart();
+    void resetForTransportStart();
+    std::size_t getTicksElapsed(std::size_t sequence) const;
+    std::size_t getTickOfFour(std::size_t sequence) const;
       
       /** allows a 'keep stepping but do not trigger' when tick is called*/
       void disableAllTriggers();

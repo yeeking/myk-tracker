@@ -14,6 +14,7 @@ public:
     enum class PlayMode
     {
         pingPong,
+        linear,
         up,
         down,
         random
@@ -84,12 +85,16 @@ private:
         int pingPongDirection = 1;
         /** Playback mode for this head. */
         PlayMode playMode = PlayMode::pingPong;
+        /** Number of octaves cycled during playback for this head. */
+        int octaveSpan = 1;
         /** Number of received clock ticks since this head last emitted a step. */
         int ticksSinceStep = 0;
+        /** Current octave layer used during playback for this head. */
+        int currentOctaveIndex = 0;
     };
 
     /** Maximum number of note slots in shared memory. */
-    static constexpr int kMaxLength = 16;
+    static constexpr int kMaxLength = 64;
     /** Maximum number of note columns before the UI wraps. */
     static constexpr int kMaxWidth = 8;
     /** Maximum number of simultaneous read heads. */
@@ -124,12 +129,14 @@ private:
     int countActiveSlots() const;
     /** Sorts active note slots according to ordered playback modes. */
     void sortActiveSlots();
+    /** Randomises the note memory order within the active length. */
+    void shuffleSlots();
     /** Returns true when any read head requires ordered note layout. */
     bool anyOrderedHeadActive() const;
     /** Advances a read head and returns the next slot index. */
     int advancePlayHead(ReadHead& head);
-    /** Returns a random playable slot index. */
-    int getRandomPlayableIndex() const;
+    /** Returns the playback note after applying the current octave span. */
+    int getPlaybackNoteForSlot(const ReadHead& head, int slotNote);
     /** Returns the UI label for a play mode. */
     static const char* formatPlayMode(PlayMode mode);
     /** Returns the display label for a quarter-beat divisor. */

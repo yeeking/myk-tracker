@@ -1518,7 +1518,7 @@ void SequencerEditor::incrementOnSongPage()
   if (currentSongCol == 0)
     songHost->adjustSongRowSequenceSetId(songRowIndex, 1);
   else if (currentSongCol == 1)
-    songHost->adjustSongRowRepeatCount(songRowIndex, 1);
+    songHost->adjustSongRowBeatCount(songRowIndex, 1);
 }
 
 void SequencerEditor::incrementOnSequenceConfigPage()
@@ -1561,7 +1561,7 @@ void SequencerEditor::decrementOnSongPage()
   if (currentSongCol == 0)
     songHost->adjustSongRowSequenceSetId(songRowIndex, -1);
   else if (currentSongCol == 1)
-    songHost->adjustSongRowRepeatCount(songRowIndex, -1);
+    songHost->adjustSongRowBeatCount(songRowIndex, -1);
 }
 
 void SequencerEditor::decrementOnSequenceConfigPage()

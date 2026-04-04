@@ -115,7 +115,7 @@ void CommandProcessor::initialiseCommands() {
                     if (random_number < triggerProbability){ 
                         // double now = CommandData::masterClock->getCurrentTick();
                         
-                        std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
+                        // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
                         // DBG("in the midi command... ");
                         CommandData::machineUtils->sendMessageToMachine(
                             static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),

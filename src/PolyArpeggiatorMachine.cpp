@@ -2,13 +2,14 @@
 
 #include <JuceHeader.h>
 #include <algorithm>
+#include <random>
 #include <tuple>
 
 #include "MachineUtilsAbs.h"
 
 namespace
 {
-constexpr double kStateVersion = 1.0;
+constexpr double kStateVersion = 2.0;
 
 int nextQuarterBeatDivisor(int currentDivisor, int direction)
 {
@@ -195,9 +196,24 @@ std::vector<std::vector<UIBox>> PolyArpeggiatorMachine::getUIBoxes(const Machine
             head.playMode = static_cast<PlayMode>(modeIndex);
             if (anyOrderedHeadActive())
                 sortActiveSlots();
+            else
+                resetReadHeads();
         };
 
-        for (std::size_t col = 5; col < cols; ++col)
+        boxes[5][row].kind = UIBox::Kind::TrackerCell;
+        boxes[5][row].text = "OCT";
+
+        boxes[6][row].kind = UIBox::Kind::TrackerCell;
+        boxes[6][row].text = std::to_string(readHeads[static_cast<std::size_t>(headIndex)].octaveSpan);
+        boxes[6][row].onAdjust = [this, headIndex](int direction)
+        {
+            const std::lock_guard<std::mutex> guard(stateMutex);
+            auto& head = readHeads[static_cast<std::size_t>(headIndex)];
+            head.octaveSpan = juce::jlimit(1, 4, head.octaveSpan + direction);
+            head.currentOctaveIndex = juce::jlimit(0, head.octaveSpan - 1, head.currentOctaveIndex);
+        };
+
+        for (std::size_t col = 7; col < cols; ++col)
         {
             boxes[col][row].kind = UIBox::Kind::None;
             boxes[col][row].isDisabled = true;
@@ -238,7 +254,15 @@ std::vector<std::vector<UIBox>> PolyArpeggiatorMachine::getUIBoxes(const Machine
         clampState();
     };
 
-    for (std::size_t col = 5; col < cols; ++col)
+    boxes[5][globalRow].kind = UIBox::Kind::TrackerCell;
+    boxes[5][globalRow].text = "SHUF";
+    boxes[5][globalRow].onActivate = [this]()
+    {
+        const std::lock_guard<std::mutex> guard(stateMutex);
+        shuffleSlots();
+    };
+
+    for (std::size_t col = 6; col < cols; ++col)
     {
         boxes[col][globalRow].kind = UIBox::Kind::None;
         boxes[col][globalRow].isDisabled = true;
@@ -328,7 +352,7 @@ void PolyArpeggiatorMachine::tick(int quarterBeat)
                 continue;
 
             MachineNoteEvent event;
-            event.note = static_cast<unsigned short>(slot.note);
+            event.note = static_cast<unsigned short>(getPlaybackNoteForSlot(head, slot.note));
             event.velocity = static_cast<unsigned short>(slot.velocity);
             event.durationTicks = static_cast<unsigned short>(slot.durationTicks);
             outEvents.push_back(event);
@@ -426,6 +450,8 @@ void PolyArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
         obj->setProperty("quarterBeatDivisor", head.quarterBeatDivisor);
         obj->setProperty("playHead", head.playHead);
         obj->setProperty("pingPongDirection", head.pingPongDirection);
+        obj->setProperty("octaveSpan", head.octaveSpan);
+        obj->setProperty("currentOctaveIndex", head.currentOctaveIndex);
         obj->setProperty("playMode", static_cast<int>(head.playMode));
         headsVar.add(juce::var(obj));
     }
@@ -453,6 +479,7 @@ void PolyArpeggiatorMachine::setStateInformation(const void* data, int sizeInByt
         return;
 
     const auto* obj = parsed.getDynamicObject();
+    const double version = static_cast<double>(parsed.getProperty("version", 0.0));
     length = static_cast<int>(parsed.getProperty("length", length));
     recordEnabled = static_cast<bool>(parsed.getProperty("recordEnabled", recordEnabled));
     recordHead = static_cast<int>(parsed.getProperty("recordHead", recordHead));
@@ -496,7 +523,12 @@ void PolyArpeggiatorMachine::setStateInformation(const void* data, int sizeInByt
                     head.quarterBeatDivisor = mapLegacyTicksPerStepToQuarterBeatDivisor(static_cast<int>(entry.getProperty("ticksPerStep", head.quarterBeatDivisor)));
                 head.playHead = static_cast<int>(entry.getProperty("playHead", head.playHead));
                 head.pingPongDirection = static_cast<int>(entry.getProperty("pingPongDirection", head.pingPongDirection));
-                const int modeIndex = juce::jlimit(0, static_cast<int>(PlayMode::random), static_cast<int>(entry.getProperty("playMode", static_cast<int>(head.playMode))));
+                head.octaveSpan = static_cast<int>(entry.getProperty("octaveSpan", head.octaveSpan));
+                head.currentOctaveIndex = static_cast<int>(entry.getProperty("currentOctaveIndex", head.currentOctaveIndex));
+                int modeIndex = static_cast<int>(entry.getProperty("playMode", static_cast<int>(head.playMode)));
+                if (version < 2.0 && modeIndex >= static_cast<int>(PlayMode::linear))
+                    ++modeIndex;
+                modeIndex = juce::jlimit(0, static_cast<int>(PlayMode::random), modeIndex);
                 head.playMode = static_cast<PlayMode>(modeIndex);
             }
         }
@@ -516,10 +548,12 @@ void PolyArpeggiatorMachine::clampState()
     {
         if (!isValidQuarterBeatDivisor(head.quarterBeatDivisor))
             head.quarterBeatDivisor = mapLegacyTicksPerStepToQuarterBeatDivisor(head.quarterBeatDivisor);
+        head.octaveSpan = juce::jlimit(1, 4, head.octaveSpan);
         if (head.playHead < -1 || head.playHead >= length)
             head.playHead = -1;
         if (head.pingPongDirection == 0)
             head.pingPongDirection = 1;
+        head.currentOctaveIndex = juce::jlimit(0, head.octaveSpan - 1, head.currentOctaveIndex);
     }
 }
 
@@ -529,6 +563,7 @@ void PolyArpeggiatorMachine::resetReadHeads()
     {
         head.playHead = -1;
         head.pingPongDirection = 1;
+        head.currentOctaveIndex = 0;
         head.ticksSinceStep = juce::jmax(0, head.quarterBeatDivisor - 1);
     }
 }
@@ -571,6 +606,14 @@ void PolyArpeggiatorMachine::sortActiveSlots()
     recordHead = activeSlots.size() < static_cast<std::size_t>(length)
         ? static_cast<int>(activeSlots.size())
         : 0;
+    resetReadHeads();
+}
+
+void PolyArpeggiatorMachine::shuffleSlots()
+{
+    std::mt19937 rng(static_cast<std::mt19937::result_type>(juce::Random::getSystemRandom().nextInt()));
+    std::shuffle(slots.begin(), slots.begin() + length, rng);
+    resetReadHeads();
 }
 
 bool PolyArpeggiatorMachine::anyOrderedHeadActive() const
@@ -592,8 +635,12 @@ int PolyArpeggiatorMachine::advancePlayHead(ReadHead& head)
     if (head.playMode == PlayMode::random)
     {
         head.playHead = juce::Random::getSystemRandom().nextInt(juce::jmax(1, length));
+        head.currentOctaveIndex = juce::Random::getSystemRandom().nextInt(juce::jmax(1, head.octaveSpan));
         return head.playHead;
     }
+
+    const int previousPlayHead = head.playHead;
+    const int previousDirection = head.pingPongDirection;
 
     if (head.playMode == PlayMode::pingPong)
     {
@@ -626,7 +673,7 @@ int PolyArpeggiatorMachine::advancePlayHead(ReadHead& head)
     else if (head.playMode == PlayMode::down)
     {
         if (head.playHead < 0)
-            head.playHead = 0;
+            head.playHead = length;
         head.playHead = (head.playHead - 1 + length) % length;
     }
     else
@@ -634,22 +681,23 @@ int PolyArpeggiatorMachine::advancePlayHead(ReadHead& head)
         head.playHead = (head.playHead + 1 + length) % length;
     }
 
+    bool advanceOctave = false;
+    if (head.playMode == PlayMode::linear || head.playMode == PlayMode::up)
+        advanceOctave = previousPlayHead >= 0 && head.playHead <= previousPlayHead;
+    else if (head.playMode == PlayMode::down)
+        advanceOctave = previousPlayHead >= 0 && head.playHead >= previousPlayHead;
+    else if (head.playMode == PlayMode::pingPong)
+        advanceOctave = previousPlayHead == 0 && previousDirection < 0 && head.pingPongDirection > 0;
+
+    if (advanceOctave && head.octaveSpan > 1)
+        head.currentOctaveIndex = (head.currentOctaveIndex + 1) % head.octaveSpan;
+
     return head.playHead;
 }
 
-int PolyArpeggiatorMachine::getRandomPlayableIndex() const
+int PolyArpeggiatorMachine::getPlaybackNoteForSlot(const ReadHead& head, int slotNote)
 {
-    std::vector<int> activeIndices;
-    activeIndices.reserve(static_cast<std::size_t>(length));
-    for (int i = 0; i < length; ++i)
-        if (slots[static_cast<std::size_t>(i)].hasNote)
-            activeIndices.push_back(i);
-
-    if (activeIndices.empty())
-        return -1;
-
-    const int randomIndex = juce::Random::getSystemRandom().nextInt(static_cast<int>(activeIndices.size()));
-    return activeIndices[static_cast<std::size_t>(randomIndex)];
+    return juce::jlimit(0, 127, slotNote + (12 * head.currentOctaveIndex));
 }
 
 const char* PolyArpeggiatorMachine::formatPlayMode(PlayMode mode)
@@ -657,6 +705,7 @@ const char* PolyArpeggiatorMachine::formatPlayMode(PlayMode mode)
     switch (mode)
     {
         case PlayMode::pingPong: return "PING";
+        case PlayMode::linear: return "LINE";
         case PlayMode::up: return "UP";
         case PlayMode::down: return "DOWN";
         case PlayMode::random: return "RAND";

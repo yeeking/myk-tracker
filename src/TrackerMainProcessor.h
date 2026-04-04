@@ -128,13 +128,13 @@ public:
     std::size_t getCurrentPlaybackSongRow() const override;
     void setSelectedSongRow(std::size_t row) override;
     std::size_t getSongRowSequenceSetId(std::size_t row) const override;
-    int getSongRowRepeatCount(std::size_t row) const override;
+    int getSongRowBeatCount(std::size_t row) const override;
     SongPlayMode getSongPlayMode() const override;
     void setSongPlayMode(SongPlayMode mode) override;
     std::size_t addSongRowByCloningViewedSet() override;
     void removeSongRow(std::size_t row) override;
     void adjustSongRowSequenceSetId(std::size_t row, int direction) override;
-    void adjustSongRowRepeatCount(std::size_t row, int direction) override;
+    void adjustSongRowBeatCount(std::size_t row, int direction) override;
     void toggleSongPlayback() override;
     void rewindSongTransport() override;
     void sendCurrentCellValueOverOscIfChanged();
@@ -175,7 +175,7 @@ private:
     struct SongRow
     {
         std::size_t sequenceSetId = 0;
-        int repeatCount = 1;
+        int beatCount = 16;
     };
     std::vector<std::unique_ptr<Sequencer>> sequenceSets;
     std::vector<SongRow> songRows;
@@ -185,8 +185,7 @@ private:
     std::optional<std::size_t> pendingPlaybackSequenceSetIndex;
     std::size_t selectedSongRow = 0;
     std::size_t currentSongRow = 0;
-    int currentSongRowRepeatIndex = 0;
-    bool playbackAdvancedSinceRowStart = false;
+    int currentSongRowBeatCounter = 0;
     bool pendingTransportQuarterBeatReset = false;
     bool pendingTransportStartOnQuarterBeat = false;
     /** keep the seq editor in the processor as the plugineditor
@@ -270,7 +269,8 @@ private:
     void switchPlaybackSequenceSetImmediately(std::size_t index, bool rewindNow);
     void applyPendingSequenceSetSwitchForCurrentQuarterBeat();
     bool isPlaybackSequencerAtBoundary() const;
-    void handleSongAdvanceAfterTick();
+    void handleSongBeatBoundary();
+    void primeSequenceSetForTransportStart(std::size_t index);
     juce::var serializeSingleSequencer(const Sequencer& sequencerToSave) const;
     void restoreSingleSequencer(Sequencer& target, const juce::var& seqVar);
     static constexpr std::size_t kMachineStackCount = 32;

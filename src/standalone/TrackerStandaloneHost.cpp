@@ -1,4 +1,5 @@
 #include "TrackerStandaloneHost.h"
+#include "../TrackerMainProcessor.h"
 
 #include <juce_audio_plugin_client/detail/juce_CreatePluginFilter.h>
 
@@ -8,6 +9,11 @@ namespace tracker::standalone
 {
 namespace
 {
+bool shouldAutoStartSongPlayback()
+{
+    return juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_AUTOPLAY", {}) == "1";
+}
+
 void initialiseIoBuffers(juce::Span<const float* const> ins,
                          juce::Span<float* const> outs,
                          int numSamples,
@@ -641,6 +647,12 @@ void StandalonePluginHolder::handleCreatePlugin()
     processor->disableNonMainBuses();
     processor->setRateAndBufferSizeDetails(44100, 512);
     processorHasPotentialFeedbackLoop = (getNumInputChannels() > 0 && getNumOutputChannels() > 0);
+    if (shouldAutoStartSongPlayback())
+        if (auto* trackerProcessor = dynamic_cast<TrackerMainProcessor*>(processor.get()))
+        {
+            trackerProcessor->setSongPlayMode(SongPlayMode::song);
+            trackerProcessor->toggleSongPlayback();
+        }
 }
 
 void StandalonePluginHolder::handleDeletePlugin()
