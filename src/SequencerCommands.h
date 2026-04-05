@@ -70,6 +70,8 @@ enum class CommandType : std::size_t {
     DistortionFx = 6,
     DelayFx = 7,
     ChannelStripFx = 8,
+    AuxSend1Fx = 9,
+    AuxSend2Fx = 10,
 };
 
 

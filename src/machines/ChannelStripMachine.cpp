@@ -65,57 +65,53 @@ std::vector<std::vector<UIBox>> ChannelStripMachine::getUIBoxes(const MachineUiC
 {
     juce::ignoreUnused(context);
 
-    std::vector<std::vector<UIBox>> boxes(4, std::vector<UIBox>(4));
+    std::vector<std::vector<UIBox>> boxes(5, std::vector<UIBox>(8));
 
-    boxes[0][0] = makeLabelCell("SAT");
-    boxes[1][0] = makeDbCell(satDriveDb, 1.0f, kMinSatDriveDb, kMaxSatDriveDb, 1);
-    boxes[2][0] = makeLabelCell("COUT");
-    boxes[3][0] = makeDbCell(compOutputDb, 1.0f, kMinCompOutputDb, kMaxCompOutputDb, 1);
-
-    boxes[0][1] = makeLabelCell("SMIX");
-    boxes[1][1] = makeValueCell(satMix, 0.05f, kMinSatMix, kMaxSatMix, 2);
-    boxes[2][1] = makeLabelCell("LIM");
-    boxes[3][1] = makeDbCell(limiterThresholdDb, 0.5f, kMinLimiterThresholdDb, kMaxLimiterThresholdDb, 1);
-
-    boxes[0][2] = makeLabelCell("DDRV");
-    boxes[1][2] = makeDbCell(distDriveDb, 1.0f, kMinDistDriveDb, kMaxDistDriveDb, 1);
-    boxes[2][2] = makeLabelCell("BAS");
-    boxes[3][2] = makeDbCell(bassDb, 1.0f, kMinEqDb, kMaxEqDb, 1);
-
-    boxes[0][3] = makeLabelCell("DOUT");
-    boxes[1][3] = makeDbCell(distOutputDb, 1.0f, kMinDistOutputDb, kMaxDistOutputDb, 1);
-    boxes[2][3] = makeLabelCell("MID");
-    boxes[3][3] = makeDbCell(midDb, 1.0f, kMinEqDb, kMaxEqDb, 1);
-
-    boxes.push_back({ makeLabelCell("CIN"), makeLabelCell("THR"), makeLabelCell("RAT"), makeLabelCell("ATT") });
-    boxes.push_back({
-        makeDbCell(compInputDb, 1.0f, kMinCompInputDb, kMaxCompInputDb, 1),
-        makeDbCell(compThresholdDb, 1.0f, kMinCompThresholdDb, kMaxCompThresholdDb, 1),
-        makeValueCell(compRatio, 0.5f, kMinCompRatio, kMaxCompRatio, 1),
-        makeValueCell(compAttackMs, 1.0f, kMinCompAttackMs, kMaxCompAttackMs, 1)
-    });
-
-    boxes.push_back({ makeLabelCell("MFQ"), makeLabelCell("TRE"), makeLabelCell(""), makeLabelCell("") });
-    boxes.push_back({
-        makeFrequencyCell(midFreqHz, 50.0f, kMinMidFreqHz, kMaxMidFreqHz),
-        makeDbCell(trebleDb, 1.0f, kMinEqDb, kMaxEqDb, 1),
-        UIBox{},
-        UIBox{}
-    });
-
-    for (std::size_t row = 0; row < boxes.back().size(); ++row)
+    auto blankCell = []()
     {
-        if (boxes[6][row].kind == UIBox::Kind::None)
-        {
-            boxes[6][row].kind = UIBox::Kind::None;
-            boxes[6][row].isDisabled = true;
-        }
-        if (boxes[7][row].kind == UIBox::Kind::None)
-        {
-            boxes[7][row].kind = UIBox::Kind::None;
-            boxes[7][row].isDisabled = true;
-        }
-    }
+        UIBox cell;
+        cell.kind = UIBox::Kind::None;
+        cell.isDisabled = true;
+        return cell;
+    };
+
+    for (auto& column : boxes)
+        for (auto& cell : column)
+            cell = blankCell();
+
+    // Input / saturation section
+    boxes[0][0] = makeLabelCell("SAT");
+    boxes[0][1] = makeDbCell(satDriveDb, 1.0f, kMinSatDriveDb, kMaxSatDriveDb, 1);
+    boxes[1][0] = makeLabelCell("SMIX");
+    boxes[1][1] = makeValueCell(satMix, 0.05f, kMinSatMix, kMaxSatMix, 2);
+    boxes[2][0] = makeLabelCell("DDRV");
+    boxes[2][1] = makeDbCell(distDriveDb, 1.0f, kMinDistDriveDb, kMaxDistDriveDb, 1);
+    boxes[3][0] = makeLabelCell("DOUT");
+    boxes[3][1] = makeDbCell(distOutputDb, 1.0f, kMinDistOutputDb, kMaxDistOutputDb, 1);
+
+    // Compressor section
+    boxes[0][3] = makeLabelCell("CIN");
+    boxes[0][4] = makeDbCell(compInputDb, 1.0f, kMinCompInputDb, kMaxCompInputDb, 1);
+    boxes[1][3] = makeLabelCell("THR");
+    boxes[1][4] = makeDbCell(compThresholdDb, 1.0f, kMinCompThresholdDb, kMaxCompThresholdDb, 1);
+    boxes[2][3] = makeLabelCell("RAT");
+    boxes[2][4] = makeValueCell(compRatio, 0.5f, kMinCompRatio, kMaxCompRatio, 1);
+    boxes[3][3] = makeLabelCell("ATT");
+    boxes[3][4] = makeValueCell(compAttackMs, 1.0f, kMinCompAttackMs, kMaxCompAttackMs, 1);
+    boxes[4][3] = makeLabelCell("COUT");
+    boxes[4][4] = makeDbCell(compOutputDb, 1.0f, kMinCompOutputDb, kMaxCompOutputDb, 1);
+
+    // EQ / output section
+    boxes[0][6] = makeLabelCell("BAS");
+    boxes[0][7] = makeDbCell(bassDb, 1.0f, kMinEqDb, kMaxEqDb, 1);
+    boxes[1][6] = makeLabelCell("MID");
+    boxes[1][7] = makeDbCell(midDb, 1.0f, kMinEqDb, kMaxEqDb, 1);
+    boxes[2][6] = makeLabelCell("MFQ");
+    boxes[2][7] = makeFrequencyCell(midFreqHz, 50.0f, kMinMidFreqHz, kMaxMidFreqHz);
+    boxes[3][6] = makeLabelCell("TRE");
+    boxes[3][7] = makeDbCell(trebleDb, 1.0f, kMinEqDb, kMaxEqDb, 1);
+    boxes[4][6] = makeLabelCell("LIM");
+    boxes[4][7] = makeDbCell(limiterThresholdDb, 0.5f, kMinLimiterThresholdDb, kMaxLimiterThresholdDb, 1);
 
     return boxes;
 }

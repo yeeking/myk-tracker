@@ -77,6 +77,7 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
     src/machines/WaveshaperDistortionMachine.cpp
     src/machines/DelayFxMachine.cpp
     src/machines/ChannelStripMachine.cpp
+    src/machines/AuxReverbMachine.cpp
 )
 
 target_include_directories(myk-tracker-plug

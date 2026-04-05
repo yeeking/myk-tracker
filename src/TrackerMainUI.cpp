@@ -669,6 +669,28 @@ void TrackerMainUI::prepareMachineConfigView()
         overlayState.glowStrength = 0.25f;
         return;
     }
+    if (detailType.has_value() && (detailType.value() == CommandType::AuxSend1Fx || detailType.value() == CommandType::AuxSend2Fx))
+    {
+        TrackerUIComponent::Style style;
+        style.background = palette.background;
+        style.lightColor = palette.lightColor;
+        style.defaultGlowColor = palette.gridPlayhead;
+        style.ambientStrength = palette.ambientStrength;
+        style.lightDirection = palette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(cellWidth, cellHeight);
+
+        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
+        overlayState.text = detailType.value() == CommandType::AuxSend1Fx
+            ? "Shared aux [1] reverb"
+            : "Shared aux [2] reverb";
+        overlayState.color = palette.textPrimary;
+        overlayState.glowColor = palette.gridPlayhead;
+        overlayState.glowStrength = 0.25f;
+        return;
+    }
     if (detailType.has_value() && detailType.value() == CommandType::MidiNote)
     {
         TrackerUIComponent::Style style;

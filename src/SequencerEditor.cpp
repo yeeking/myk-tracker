@@ -11,7 +11,7 @@
 
 namespace
 {
-constexpr int kMachineStackCount = 32;
+constexpr int kMachineStackCount = 16;
 constexpr std::size_t kSeqConfigBaseRows = 3;
 constexpr std::size_t kSeqConfigMixerRows = 8;
 constexpr float kSeqConfigMinGainDb = -48.0f;
@@ -53,7 +53,18 @@ bool isStackMachineType(CommandType type)
       || type == CommandType::PolyArpeggiator
       || type == CommandType::DistortionFx
       || type == CommandType::DelayFx
-      || type == CommandType::ChannelStripFx;
+      || type == CommandType::ChannelStripFx
+      || type == CommandType::AuxSend1Fx
+      || type == CommandType::AuxSend2Fx;
+}
+
+bool showsStackSendLevel(CommandType type)
+{
+  return type == CommandType::DistortionFx
+      || type == CommandType::DelayFx
+      || type == CommandType::ChannelStripFx
+      || type == CommandType::AuxSend1Fx
+      || type == CommandType::AuxSend2Fx;
 }
 
 std::string getStackMachineLabel(CommandType type)
@@ -69,8 +80,15 @@ std::string getStackMachineLabel(CommandType type)
     case CommandType::DistortionFx: return "DIST";
     case CommandType::DelayFx: return "DELAY";
     case CommandType::ChannelStripFx: return "CHSTR";
+    case CommandType::AuxSend1Fx: return "AUX1";
+    case CommandType::AuxSend2Fx: return "AUX2";
     default: return "MACH";
   }
+}
+
+std::string formatStackLevelDb(float value)
+{
+  return juce::String(value, 0).toStdString();
 }
 
 bool isSeqConfigMixerRow(std::size_t row)
@@ -469,7 +487,7 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     if (column == Step::noteInd)
       syncOctaveFromMidiNote(value);
     // move to the next step down
-    moveCursorDown();
+    // moveCursorDown();
   }
 }
 
@@ -1990,7 +2008,7 @@ MachineInterface* SequencerEditor::getActiveMachine(CommandType type) const
 
 std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::size_t stackIndex)
 {
-  std::vector<std::vector<UIBox>> boxes(5);
+  std::vector<std::vector<UIBox>> boxes(7);
 
   UIBox addCell;
   addCell.kind = UIBox::Kind::TrackerCell;
@@ -2036,6 +2054,36 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
     };
     boxes[1].push_back(std::move(enabledCell));
 
+    UIBox sendCell;
+    sendCell.kind = UIBox::Kind::TrackerCell;
+    const bool hasSend = showsStackSendLevel(stackTypes[slotIndex]);
+    sendCell.text = hasSend ? "S" + formatStackLevelDb(machineHost->getMachineSendLevelDbInStack(stackIndex, slotIndex)) : "";
+    sendCell.isDisabled = !hasSend;
+    if (hasSend)
+    {
+      sendCell.onAdjust = [this, stackIndex, slotIndex](int direction)
+      {
+        if (machineHost != nullptr)
+          machineHost->adjustMachineSendLevelDbInStack(stackIndex, slotIndex, direction);
+      };
+    }
+    boxes[2].push_back(std::move(sendCell));
+
+    UIBox returnCell;
+    returnCell.kind = UIBox::Kind::TrackerCell;
+    const bool hasReturn = machineHost->machineHasReturnLevelInStack(stackIndex, slotIndex);
+    returnCell.text = hasReturn ? "R" + formatStackLevelDb(machineHost->getMachineReturnLevelDbInStack(stackIndex, slotIndex)) : "";
+    returnCell.isDisabled = !hasReturn;
+    if (hasReturn)
+    {
+      returnCell.onAdjust = [this, stackIndex, slotIndex](int direction)
+      {
+        if (machineHost != nullptr)
+          machineHost->adjustMachineReturnLevelDbInStack(stackIndex, slotIndex, direction);
+      };
+    }
+    boxes[3].push_back(std::move(returnCell));
+
     UIBox upCell;
     upCell.kind = UIBox::Kind::TrackerCell;
     upCell.text = slotIndex == 0 ? "" : "UP";
@@ -2048,7 +2096,7 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
           machineHost->moveMachineInStack(stackIndex, slotIndex, -1);
       };
     }
-    boxes[2].push_back(std::move(upCell));
+    boxes[4].push_back(std::move(upCell));
 
     UIBox downCell;
     downCell.kind = UIBox::Kind::TrackerCell;
@@ -2062,7 +2110,7 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
           machineHost->moveMachineInStack(stackIndex, slotIndex, 1);
       };
     }
-    boxes[3].push_back(std::move(downCell));
+    boxes[5].push_back(std::move(downCell));
 
     UIBox deleteCell;
     deleteCell.kind = UIBox::Kind::TrackerCell;
@@ -2072,7 +2120,7 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
       if (machineHost != nullptr)
         machineHost->removeMachineFromStack(stackIndex, slotIndex);
     };
-    boxes[4].push_back(std::move(deleteCell));
+    boxes[6].push_back(std::move(deleteCell));
   }
 
   return boxes;

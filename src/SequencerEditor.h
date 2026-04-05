@@ -42,6 +42,11 @@ public:
   virtual void moveMachineInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
   virtual bool isMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
   virtual void toggleMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) = 0;
+  virtual float getMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
+  virtual void adjustMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
+  virtual bool machineHasReturnLevelInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
+  virtual float getMachineReturnLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
+  virtual void adjustMachineReturnLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
   virtual float getStackMeterLevel(std::size_t stackIndex) const = 0;
   virtual float getStackGainDb(std::size_t stackIndex) const = 0;
   virtual void setStackGainDb(std::size_t stackIndex, float gainDb) = 0;

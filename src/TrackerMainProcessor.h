@@ -30,6 +30,7 @@
 #include "machines/WaveshaperDistortionMachine.h"
 #include "machines/DelayFxMachine.h"
 #include "machines/ChannelStripMachine.h"
+#include "machines/AuxReverbMachine.h"
 
 
 //==============================================================================
@@ -116,6 +117,11 @@ public:
     void moveMachineInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
     bool isMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
     void toggleMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) override;
+    float getMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
+    void adjustMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
+    bool machineHasReturnLevelInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
+    float getMachineReturnLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
+    void adjustMachineReturnLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
     float getStackMeterLevel(std::size_t stackIndex) const override;
     float getStackGainDb(std::size_t stackIndex) const override;
     void setStackGainDb(std::size_t stackIndex, float gainDb) override;
@@ -205,6 +211,14 @@ private:
     };
     struct MachineStack
     {
+        struct SlotState
+        {
+            CommandType type = CommandType::MidiNote;
+            bool enabled = true;
+            float sendLevelDb = 0.0f;
+            float returnLevelDb = 0.0f;
+        };
+
         std::unique_ptr<SuperSamplerProcessor> sampler;
         std::unique_ptr<ArpeggiatorMachine> arpeggiator;
         std::unique_ptr<PolyArpeggiatorMachine> polyArpeggiator;
@@ -212,21 +226,24 @@ private:
         std::unique_ptr<WaveshaperDistortionMachine> distortionFx;
         std::unique_ptr<DelayFxMachine> delayFx;
         std::unique_ptr<ChannelStripMachine> channelStripFx;
-        std::vector<CommandType> order;
+        std::vector<SlotState> slots;
+        juce::AudioBuffer<float> renderBuffer;
         bool arpeggiatorClockActive = false;
-        bool samplerEnabled = true;
-        bool arpeggiatorEnabled = true;
-        bool polyArpeggiatorEnabled = true;
-        bool wavetableSynthEnabled = true;
-        bool distortionFxEnabled = true;
-        bool delayFxEnabled = true;
-        bool channelStripFxEnabled = true;
+        bool audioProcessingActive = false;
         int midiOutputChannel = 1;
         float gainDb = 0.0f;
         float meterLevel = 0.0f;
     };
+    struct SharedAuxBus
+    {
+        std::unique_ptr<AuxReverbMachine> machine;
+        juce::AudioBuffer<float> inputBuffer;
+        int id = 0;
+    };
     std::vector<ScheduledSamplerEvent> samplerEventsToSend;
     std::vector<MachineStack> machineStacks;
+    SharedAuxBus auxBus1;
+    SharedAuxBus auxBus2;
     std::mutex audioMutex;
     std::atomic<bool> processing { false };
 
@@ -276,13 +293,21 @@ private:
     void primeSequenceSetForTransportStart(std::size_t index);
     juce::var serializeSingleSequencer(const Sequencer& sequencerToSave) const;
     void restoreSingleSequencer(Sequencer& target, const juce::var& seqVar);
-    static constexpr std::size_t kMachineStackCount = 32;
+    static constexpr std::size_t kMachineStackCount = 16;
     MachineStack* getMachineStack(std::size_t stackIndex);
     const MachineStack* getMachineStack(std::size_t stackIndex) const;
+    MachineStack::SlotState* getMachineSlot(std::size_t stackIndex, std::size_t slotIndex);
+    const MachineStack::SlotState* getMachineSlot(std::size_t stackIndex, std::size_t slotIndex) const;
     MachineInterface* getMachineForStackType(MachineStack& stack, CommandType type);
     const MachineInterface* getMachineForStackType(const MachineStack& stack, CommandType type) const;
-    bool* getMachineEnabledFlag(MachineStack& stack, CommandType type);
-    const bool* getMachineEnabledFlag(const MachineStack& stack, CommandType type) const;
+    SharedAuxBus* getAuxBusForType(CommandType type);
+    const SharedAuxBus* getAuxBusForType(CommandType type) const;
+    static MachineStack::SlotState makeDefaultSlotState(CommandType type);
+    static bool isAuxSendType(CommandType type);
+    static bool slotSupportsReturnLevel(CommandType type);
+    static bool slotAllowsDuplicate(CommandType type);
+    void refreshStackAudioProcessingState(MachineStack& stack);
+    void refreshAllStackAudioProcessingStates();
     void oscMessageReceived(const juce::OSCMessage& message) override;
     void oscBundleReceived(const juce::OSCBundle& bundle) override;
     juce::String getCurrentCellOscPayload();
