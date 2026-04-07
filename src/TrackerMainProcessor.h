@@ -228,8 +228,14 @@ private:
         std::unique_ptr<ChannelStripMachine> channelStripFx;
         std::vector<SlotState> slots;
         juce::AudioBuffer<float> renderBuffer;
+        juce::AudioBuffer<float> delayTailBuffer;
+        juce::MidiBuffer samplerMidiBuffer;
         bool arpeggiatorClockActive = false;
         bool audioProcessingActive = false;
+        bool samplerProcessingActive = false;
+        bool wavetableProcessingActive = false;
+        bool arpeggiatorProcessingActive = false;
+        bool polyArpeggiatorProcessingActive = false;
         int midiOutputChannel = 1;
         float gainDb = 0.0f;
         float meterLevel = 0.0f;
@@ -241,11 +247,13 @@ private:
         int id = 0;
     };
     std::vector<ScheduledSamplerEvent> samplerEventsToSend;
+    std::vector<ScheduledSamplerEvent> scratchFutureSamplerEvents;
     std::vector<MachineStack> machineStacks;
     SharedAuxBus auxBus1;
     SharedAuxBus auxBus2;
     std::mutex audioMutex;
     std::atomic<bool> processing { false };
+    juce::MidiBuffer emptyMidiBuffer;
 
 
     // unsigned long elapsedSamples;
@@ -306,8 +314,10 @@ private:
     static bool isAuxSendType(CommandType type);
     static bool slotSupportsReturnLevel(CommandType type);
     static bool slotAllowsDuplicate(CommandType type);
-    void refreshStackAudioProcessingState(MachineStack& stack);
-    void refreshAllStackAudioProcessingStates();
+    void refreshStackProcessingState(MachineStack& stack);
+    void refreshAllStackProcessingStates();
+    AudioEffectMachine* getAudioEffectForStackType(MachineStack& stack, CommandType type);
+    const AudioEffectMachine* getAudioEffectForStackType(const MachineStack& stack, CommandType type) const;
     void oscMessageReceived(const juce::OSCMessage& message) override;
     void oscBundleReceived(const juce::OSCBundle& bundle) override;
     juce::String getCurrentCellOscPayload();
@@ -321,6 +331,7 @@ private:
     void updateClockedMachineActivity();
     void emitQuarterBeatTickIfNeeded();
     void emitClockedMachineEvent(std::size_t stackIndex, CommandType machineType, const MachineNoteEvent& event);
+    void processPlaybackTickBoundary();
     void enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
                             unsigned short channel,
                             unsigned short outNote,

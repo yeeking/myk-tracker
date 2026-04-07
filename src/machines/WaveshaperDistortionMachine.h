@@ -1,6 +1,7 @@
 #pragma once
 
-#include <mutex>
+#include <array>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -33,18 +34,16 @@ private:
     /** Maximum allowed drive multiplier. */
     static constexpr float kMaxDrive = 50.0f;
 
-    /** Protects parameters shared between the UI and audio threads. */
-    mutable std::mutex stateMutex;
     /** Current sample rate used for tone filtering. */
-    double currentSampleRate = 44100.0;
+    std::atomic<double> currentSampleRate { 44100.0 };
     /** Input gain applied before soft clipping. */
-    float drive = 4.0f;
+    std::atomic<float> drive { 4.0f };
     /** Tone blend between darker and brighter shaped output. */
-    float tone = 0.6f;
+    std::atomic<float> tone { 0.6f };
     /** Wet/dry mix control. */
-    float mix = 1.0f;
+    std::atomic<float> mix { 1.0f };
     /** Final output gain after shaping. */
-    float output = 0.8f;
+    std::atomic<float> output { 0.8f };
     /** Per-channel filter state for the tone stage. */
     std::array<float, 2> toneState {};
 
