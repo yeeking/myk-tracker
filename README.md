@@ -70,3 +70,44 @@ The standalone app is produced under:
 ```bash
 build/myk-tracker-plug_artefacts/Debug/Standalone/
 ```
+
+## Local MCP control
+
+The standalone application starts a local-only MCP Streamable HTTP server at
+`http://127.0.0.1:8080/mcp`. Set `MYK_TRACKER_MCP_PORT` before launching the
+app to use another port. The server implements MCP `2026-07-28`; it does not
+provide remote access, TLS, or authentication.
+
+The same `/mcp` endpoint also accepts the tool-focused legacy handshake used
+by LM Studio and similar clients: `initialize`, `notifications/initialized`,
+`tools/list`, and `tools/call`. It negotiates `2024-11-05`, `2025-03-26`,
+`2025-06-18`, or `2025-11-25` and routes every tool through the same tracker
+control service. No token or OAuth configuration is needed for this loopback
+server; resources remain a modern-MCP feature.
+
+Useful resources include `myktracker://state`, `myktracker://view`,
+`myktracker://song`, and `myktracker://capabilities`. The server exposes tools
+for transport, steps, sequences, song rows, machine stacks, machine cells,
+local sample loading, GUI-equivalent actions, and confirmed application actions.
+`tracker_application` requires `confirm: true` for reset and quit. Sample loads
+return a `loadId`; call `tracker_load_sample` with `action: "status"` to poll.
+
+Every RPC request needs the modern MCP headers and a per-request protocol
+envelope in `params._meta`. For example:
+
+```bash
+curl -X POST http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/call' \
+  -H 'Mcp-Name: tracker_get_state' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tracker_get_state","arguments":{"scope":"view"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}'
+```
+
+Mutating tools can include `expectedContentRevision` and
+`expectedViewRevision` from a prior response. State-changing musical edits
+advance the former; navigation advances the latter. The endpoint is bound to
+IPv4 loopback and rejects non-loopback `Host` and `Origin` values.
+
+The `/health` endpoint is available for local diagnostics. If port binding
+fails, the tracker continues running without MCP control.

@@ -10,6 +10,7 @@
 
 #include <JuceHeader.h>
 #include "TrackerMainProcessor.h"
+#include "TrackerControlService.h"
 // #include "StringTable.h"
 #include "SequencerEditor.h"
 #include "TrackerUIComponent.h"
@@ -60,6 +61,7 @@ private:
     const float cellHeight{1.0f};
     
     TrackerMainProcessor& audioProcessor;
+    TrackerControlService::TrackerViewSnapshot currentView;
 
     // StringTable controlPanelTable;
     SequencerEditor* seqEditor;
@@ -90,6 +92,10 @@ private:
     void moveDown(float amount);
     void moveLeft(float amount);
     void moveRight(float amount);
+    void chooseStateSaveDirectory();
+    void chooseStateFileToLoad();
+    juce::File initialStateDirectory() const;
+    void showStateFileError(const juce::String& message) const;
     std::vector<std::vector<UIBox>> buildBoxesFromGrid(const std::vector<std::vector<std::string>>& data,
                                                        size_t cursorCol,
                                                        size_t cursorRow,
@@ -120,6 +126,8 @@ private:
     std::vector<float> samplerColumnWidths;
     bool samplerViewActive = false;
     bool customMachineColumnWidthsActive = false;
+    juce::File lastStateDirectory;
+    std::unique_ptr<juce::FileChooser> stateFileChooser;
 
     bool waitingForPaint;
     bool updateSeqStrOnNextDraw;

@@ -9,7 +9,7 @@
 
 namespace
 {
-constexpr double kStateVersion = 2.0;
+constexpr double kStateVersion = 3.0;
 
 int nextQuarterBeatDivisor(int currentDivisor, int direction)
 {
@@ -441,6 +441,10 @@ void PolyArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
         obj->setProperty("hasNote", slot.hasNote);
         slotsVar.add(juce::var(obj));
     }
+    // `sequence` is the semantic name used by the machine editor.  Keep the
+    // old `slots` spelling too so saved documents remain readable by builds
+    // that preceded the dedicated poly-arp state format.
+    root->setProperty("sequence", slotsVar);
     root->setProperty("slots", slotsVar);
 
     juce::Array<juce::var> headsVar;
@@ -448,6 +452,7 @@ void PolyArpeggiatorMachine::getStateInformation(juce::MemoryBlock& destData)
     {
         juce::DynamicObject::Ptr obj = new juce::DynamicObject();
         obj->setProperty("quarterBeatDivisor", head.quarterBeatDivisor);
+        obj->setProperty("rate", head.quarterBeatDivisor);
         obj->setProperty("playHead", head.playHead);
         obj->setProperty("pingPongDirection", head.pingPongDirection);
         obj->setProperty("octaveSpan", head.octaveSpan);
@@ -485,7 +490,10 @@ void PolyArpeggiatorMachine::setStateInformation(const void* data, int sizeInByt
     recordHead = static_cast<int>(parsed.getProperty("recordHead", recordHead));
     readHeadCount = static_cast<int>(parsed.getProperty("readHeadCount", readHeadCount));
 
-    if (const auto slotsVar = obj->getProperty("slots"); slotsVar.isArray())
+    auto slotsVar = obj->getProperty("sequence");
+    if (!slotsVar.isArray())
+        slotsVar = obj->getProperty("slots");
+    if (slotsVar.isArray())
     {
         const auto* array = slotsVar.getArray();
         if (array != nullptr)
@@ -519,6 +527,8 @@ void PolyArpeggiatorMachine::setStateInformation(const void* data, int sizeInByt
                 auto& head = readHeads[static_cast<std::size_t>(i)];
                 if (entry.hasProperty("quarterBeatDivisor"))
                     head.quarterBeatDivisor = static_cast<int>(entry.getProperty("quarterBeatDivisor", head.quarterBeatDivisor));
+                else if (entry.hasProperty("rate"))
+                    head.quarterBeatDivisor = static_cast<int>(entry.getProperty("rate", head.quarterBeatDivisor));
                 else
                     head.quarterBeatDivisor = mapLegacyTicksPerStepToQuarterBeatDivisor(static_cast<int>(entry.getProperty("ticksPerStep", head.quarterBeatDivisor)));
                 head.playHead = static_cast<int>(entry.getProperty("playHead", head.playHead));
@@ -535,6 +545,10 @@ void PolyArpeggiatorMachine::setStateInformation(const void* data, int sizeInByt
     }
 
     clampState();
+    // Playback position is transient, but timing must start from the restored
+    // rate.  Resetting here prevents stale tick counters from making a loaded
+    // head appear to use its default rate until its next bar boundary.
+    resetReadHeads();
 }
 
 void PolyArpeggiatorMachine::clampState()

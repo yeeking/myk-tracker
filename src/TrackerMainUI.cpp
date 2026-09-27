@@ -7,6 +7,7 @@
 */
 
 #include "TrackerMainProcessor.h"
+#include "TrackerControlService.h"
 #include "TrackerMainUI.h"
 #include "SequencerCommands.h"
 // #include "SimpleClock.h"
@@ -64,6 +65,21 @@ std::string makeStepTitle(std::size_t sequenceIndex, std::size_t stepIndex, std:
     return "Step [" + std::to_string(sequenceIndex + 1)
         + "-" + std::to_string(stepIndex + 1)
         + "/" + std::to_string(stepCount) + "]";
+}
+
+std::vector<std::vector<std::string>> gridFromSnapshot(const juce::var& value)
+{
+    std::vector<std::vector<std::string>> grid;
+    if (!value.isArray()) return grid;
+    grid.reserve(static_cast<size_t>(value.getArray()->size()));
+    for (const auto& sourceColumn : *value.getArray())
+    {
+        std::vector<std::string> column;
+        if (sourceColumn.isArray())
+            for (const auto& cell : *sourceColumn.getArray()) column.push_back(cell.toString().toStdString());
+        grid.push_back(std::move(column));
+    }
+    return grid;
 }
 }
 
@@ -176,6 +192,7 @@ void TrackerMainUI::timerCallback ()
     ++framesDrawn;
 
     if (waitingForPaint) {return;}// already waiting for a repaint
+  currentView = audioProcessor.getControlService().getViewSnapshot();
   for (const auto& zoomCommand : audioProcessor.consumePendingZoomCommands())
   {
       adjustZoomAroundPoint(zoomCommand.delta,
@@ -185,10 +202,13 @@ void TrackerMainUI::timerCallback ()
   // check what to draw based on the state of the 
   // editor
   SequencerEditorMode editMode = SequencerEditorMode::selectingSeqAndStep;
-  audioProcessor.withAudioThreadExclusive([&]()
-  {
-      editMode = seqEditor->getEditMode();
-  });
+  const auto snapshotUi = currentView.state.getProperty("ui", juce::var());
+  const auto snapshotMode = snapshotUi.getProperty("mode", "sequence").toString();
+  if (snapshotMode == "song") editMode = SequencerEditorMode::arrangingSong;
+  else if (snapshotMode == "step") editMode = SequencerEditorMode::editingStep;
+  else if (snapshotMode == "config") editMode = SequencerEditorMode::configuringSequence;
+  else if (snapshotMode == "machine") editMode = SequencerEditorMode::machineConfig;
+  else if (snapshotMode == "reset") editMode = SequencerEditorMode::resetConfirmation;
   switch(editMode){
 
       case SequencerEditorMode::arrangingSong:
@@ -223,10 +243,6 @@ void TrackerMainUI::timerCallback ()
           break;
       }
   }
-  audioProcessor.withAudioThreadExclusive([&]()
-  {
-      audioProcessor.sendCurrentCellValueOverOscIfChanged();
-  });
     if (editMode != SequencerEditorMode::machineConfig
         && editMode != SequencerEditorMode::arrangingSong
         && editMode != SequencerEditorMode::resetConfirmation)
@@ -298,23 +314,16 @@ void TrackerMainUI::prepareSequenceView()
   size_t currentStep = 0;
   size_t armedSequence = SequencerAbs::notArmed;
   bool isPlaying = false;
-  audioProcessor.withAudioThreadExclusive([&]()
-  {
-      currentSequence = seqEditor->getCurrentSequence();
-      currentStep = seqEditor->getCurrentStep();
-      armedSequence = seqEditor->getArmedSequence();
-      auto* seq = audioProcessor.getSequencer();
-      isPlaying = seq->isPlaying();
-      const size_t sequenceCount = seq->howManySequences();
-      playHeads.clear();
-      playHeads.reserve(sequenceCount);
-      for (size_t col = 0; col < sequenceCount; ++col)
-      {
-          playHeads.emplace_back(static_cast<int>(col),
-                                 static_cast<int>(seq->getCurrentStep(col)));
-      }
-      grid = seq->getSequenceAsGridOfStrings();
-  });
+  const auto ui = currentView.state.getProperty("ui", juce::var());
+  currentSequence = static_cast<size_t>(static_cast<int>(ui.getProperty("currentSequence", 0)));
+  currentStep = static_cast<size_t>(static_cast<int>(ui.getProperty("currentStep", 0)));
+  armedSequence = static_cast<size_t>(static_cast<int>(ui.getProperty("armedSequence", static_cast<int>(SequencerAbs::notArmed))));
+  isPlaying = static_cast<bool>(ui.getProperty("isPlaying", false));
+  grid = gridFromSnapshot(ui.getProperty("sequenceGrid", juce::var()));
+  const auto snapshotPlayheads = ui.getProperty("playHeads", juce::var());
+  if (snapshotPlayheads.isArray())
+      for (const auto& item : *snapshotPlayheads.getArray())
+          playHeads.emplace_back(static_cast<int>(item.getProperty("sequence", 0)), static_cast<int>(item.getProperty("step", 0)));
   style.glowPulseEnabled = !isPlaying;
   const auto boxes = buildBoxesFromGrid(grid,
                                         currentSequence,
@@ -346,24 +355,19 @@ void TrackerMainUI::prepareStepView()
     size_t currentStepCol = 0;
     size_t currentStepRow = 0;
     bool isPlaying = false;
-    audioProcessor.withAudioThreadExclusive([&]()
-    {
-        currentSequence = seqEditor->getCurrentSequence();
-        currentStep = seqEditor->getCurrentStep();
-        currentStepCol = seqEditor->getCurrentStepCol();
-        currentStepRow = seqEditor->getCurrentStepRow();
-        auto* seq = audioProcessor.getSequencer();
-        isPlaying = seq->isPlaying();
-        if (seq->getCurrentStep(currentSequence) == currentStep)
-        {
-            const int cols = static_cast<int>(seq->howManyStepDataCols(currentSequence, currentStep));
-            playHeads.clear();
-            playHeads.reserve(static_cast<size_t>(cols));
-            for (int col = 0; col < cols; ++col)
-                playHeads.emplace_back(col, 0);
-        }
-        grid = seq->getStepAsGridOfStrings(currentSequence, currentStep);
-    });
+    const auto ui = currentView.state.getProperty("ui", juce::var());
+    currentSequence = static_cast<size_t>(static_cast<int>(ui.getProperty("currentSequence", 0)));
+    currentStep = static_cast<size_t>(static_cast<int>(ui.getProperty("currentStep", 0)));
+    currentStepCol = static_cast<size_t>(static_cast<int>(ui.getProperty("currentStepCol", 0)));
+    currentStepRow = static_cast<size_t>(static_cast<int>(ui.getProperty("currentStepRow", 0)));
+    isPlaying = static_cast<bool>(ui.getProperty("isPlaying", false));
+    grid = gridFromSnapshot(ui.getProperty("stepGrid", juce::var()));
+    const auto snapshotPlayheads = ui.getProperty("playHeads", juce::var());
+    if (snapshotPlayheads.isArray())
+        for (const auto& item : *snapshotPlayheads.getArray())
+            if (static_cast<size_t>(static_cast<int>(item.getProperty("sequence", -1))) == currentSequence
+                && static_cast<size_t>(static_cast<int>(item.getProperty("step", -1))) == currentStep)
+                for (size_t col = 0; col < grid.size(); ++col) playHeads.emplace_back(static_cast<int>(col), 0);
     style.glowPulseEnabled = !isPlaying;
     const auto boxes = buildBoxesFromGrid(grid,
                                           currentStepCol,
@@ -1183,6 +1187,31 @@ float TrackerMainUI::getSamplerCellDepthScale(const UIBox& cell) const
 bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
     juce::ignoreUnused(originatingComponent);
+    if (key.getModifiers().isCtrlDown())
+    {
+        const auto keyCode = key.getKeyCode();
+        if (keyCode == 's' || keyCode == 'S')
+        {
+            chooseStateSaveDirectory();
+            return true;
+        }
+        if (keyCode == 'l' || keyCode == 'L')
+        {
+            chooseStateFileToLoad();
+            return true;
+        }
+    }
+    auto arguments = juce::var(new juce::DynamicObject());
+    arguments.getDynamicObject()->setProperty("action", "key");
+    arguments.getDynamicObject()->setProperty("keyCode", key.getKeyCode());
+    arguments.getDynamicObject()->setProperty("text", juce::String::charToString(key.getTextCharacter()));
+    arguments.getDynamicObject()->setProperty("ctrl", key.getModifiers().isCtrlDown());
+    arguments.getDynamicObject()->setProperty("shift", key.getModifiers().isShiftDown());
+    TrackerControlService::Command command;
+    command.kind = TrackerControlService::CommandKind::uiAction;
+    command.arguments = arguments;
+    return audioProcessor.getControlService().execute(command).ok;
+#if 0 // Kept temporarily as a behaviour reference while the view migration lands.
     return audioProcessor.withAudioThreadExclusive([&]() -> bool
     {
         if (key.getModifiers().isShiftDown())
@@ -1390,6 +1419,99 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
 
         return handled;
     });
+#endif
+}
+
+juce::File TrackerMainUI::initialStateDirectory() const
+{
+    if (lastStateDirectory.isDirectory())
+        return lastStateDirectory;
+
+    const auto documents = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+    return documents.isDirectory() ? documents : juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+}
+
+void TrackerMainUI::showStateFileError(const juce::String& message) const
+{
+    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                                           "MYK Tracker state",
+                                           message,
+                                           "OK");
+}
+
+void TrackerMainUI::chooseStateSaveDirectory()
+{
+    if (stateFileChooser != nullptr)
+        return;
+
+    stateFileChooser = std::make_unique<juce::FileChooser>("Choose a folder for the tracker state",
+                                                             initialStateDirectory());
+    juce::Component::SafePointer<TrackerMainUI> safeThis(this);
+    stateFileChooser->launchAsync(juce::FileBrowserComponent::openMode
+                                      | juce::FileBrowserComponent::canSelectDirectories,
+        [safeThis] (const juce::FileChooser& chooser)
+        {
+            if (safeThis == nullptr)
+                return;
+
+            const auto directory = chooser.getResult();
+            safeThis->stateFileChooser.reset();
+            if (!directory.isDirectory())
+                return; // User cancelled the directory browser.
+
+            safeThis->lastStateDirectory = directory;
+            const auto timestamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
+            const auto file = directory.getNonexistentChildFile("MYK-Tracker-" + timestamp, ".myktracker");
+            juce::MemoryBlock state;
+            safeThis->audioProcessor.getStateInformation(state);
+            if (state.getSize() == 0 || !file.replaceWithData(state.getData(), state.getSize()))
+            {
+                safeThis->showStateFileError("Could not save the tracker state to:\n" + file.getFullPathName());
+                return;
+            }
+
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+                                                   "MYK Tracker state saved",
+                                                   file.getFullPathName(),
+                                                   "OK");
+        });
+}
+
+void TrackerMainUI::chooseStateFileToLoad()
+{
+    if (stateFileChooser != nullptr)
+        return;
+
+    stateFileChooser = std::make_unique<juce::FileChooser>("Load tracker state",
+                                                             initialStateDirectory(),
+                                                             "*.myktracker");
+    juce::Component::SafePointer<TrackerMainUI> safeThis(this);
+    stateFileChooser->launchAsync(juce::FileBrowserComponent::openMode
+                                      | juce::FileBrowserComponent::canSelectFiles,
+        [safeThis] (const juce::FileChooser& chooser)
+        {
+            if (safeThis == nullptr)
+                return;
+
+            const auto file = chooser.getResult();
+            safeThis->stateFileChooser.reset();
+            if (!file.existsAsFile())
+                return; // User cancelled the file browser.
+
+            juce::MemoryBlock state;
+            if (!file.loadFileAsData(state) || state.getSize() == 0)
+            {
+                safeThis->showStateFileError("Could not read tracker state from:\n" + file.getFullPathName());
+                return;
+            }
+
+            safeThis->audioProcessor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+            safeThis->lastStateDirectory = file.getParentDirectory();
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+                                                   "MYK Tracker state loaded",
+                                                   file.getFullPathName(),
+                                                   "OK");
+        });
 }
 
 bool TrackerMainUI::keyStateChanged(bool isKeyDown, juce::Component* originatingComponent)

@@ -1,5 +1,6 @@
 #include "TrackerStandaloneHost.h"
 #include "../TrackerMainProcessor.h"
+#include "../HTTPServer.h"
 
 #include <juce_audio_plugin_client/detail/juce_CreatePluginFilter.h>
 
@@ -522,9 +523,17 @@ public:
 
     void shutdown() override
     {
+        // shutdown() is reached by several JUCE exit paths that do not first
+        // pass through systemRequestedQuit().  Persist while the processor and
+        // its machine instances still exist, before destroying either holder.
+        if (pluginHolder != nullptr)
+            pluginHolder->savePluginState();
+        if (mainWindow != nullptr && mainWindow->pluginHolder != nullptr)
+            mainWindow->pluginHolder->savePluginState();
+
+        appProperties.saveIfNeeded();
         pluginHolder = nullptr;
         mainWindow = nullptr;
-        appProperties.saveIfNeeded();
     }
 
     void systemRequestedQuit() override
@@ -597,11 +606,18 @@ StandalonePluginHolder::StandalonePluginHolder(juce::PropertySet* settingsToUse,
 
     setupAudioDevices(preferredDefaultDeviceName, options.get());
     reloadPluginState();
+    if (auto* trackerProcessor = dynamic_cast<TrackerMainProcessor*>(processor.get()))
+    {
+        const auto configuredPort = juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_MCP_PORT", "8080").getIntValue();
+        mcpServer = std::make_unique<TrackerMcpServer>(trackerProcessor->getControlService(), configuredPort > 0 ? configuredPort : 8080);
+        mcpServer->startThread();
+    }
     startPlaying();
 }
 
 StandalonePluginHolder::~StandalonePluginHolder()
 {
+    mcpServer.reset();
     if (midiOutput != nullptr && midiOutput->isBackgroundThreadRunning())
         midiOutput->stopBackgroundThread();
 

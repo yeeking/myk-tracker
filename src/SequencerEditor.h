@@ -244,6 +244,8 @@ public:
   bool cycleMachineDetailNext();
   bool isEditingMachineDetail() const;
   std::optional<CommandType> getFocusedMachineDetailType() const;
+  /** Slot selected by the current machine-detail page, when one is open. */
+  std::optional<std::size_t> getFocusedMachineDetailSlot() const;
   bool machineWantsExclusiveKeyboardInput() const;
   void requestTrackerReset();
   void requestApplicationQuit();
@@ -256,6 +258,7 @@ public:
   void machineAdjustCurrentCell(int direction);
   bool machineInsertCurrentCell(double value);
   bool machinePreviewCurrentCell();
+  bool machineResetCurrentCell();
   bool machineHandleTextInput(char character);
   bool machineHandleTextBackspace();
   bool machineShiftNoteCurrentCell(int semitones);
@@ -308,6 +311,10 @@ public:
   void setCurrentSequence(int seq);
   /** move the cursor to a specific step*/
   void setCurrentStep(int step);
+  /** Sets the focused data cell after a direct external edit. */
+  void setStepCursor(std::size_t row, std::size_t col);
+  /** Sets the focused machine UI cell after an external control action. */
+  void setMachineCursor(std::size_t row, std::size_t col);
   /** write the sent data to the current step and sequence */
   void writeStepData(std::vector<std::vector<double>> data);
   /** write the sent data to the sequence at 'currentSequence' - 1D data version for simple one value per step -style sequences*/

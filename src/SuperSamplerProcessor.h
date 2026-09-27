@@ -95,6 +95,10 @@ public:
     std::string describeNoteForSequencer (int midiNote) const;
     /** Returns true while the integrated file browser is open. */
     bool isBrowsingFiles() const;
+    /** Starts an asynchronous local-file load for the shared control API. */
+    void loadSampleFromControl (int playerId, const juce::File& file, std::function<void (bool, juce::String)> onComplete);
+    /** Creates a sampler player with an inclusive MIDI range for control/API use. */
+    int addSamplePlayerForControl (int lowNote, int highNote);
 
     /** Builds the machine-editor UI cells for the sampler. */
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;

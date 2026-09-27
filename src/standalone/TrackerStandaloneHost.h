@@ -3,6 +3,8 @@
 #include <JuceHeader.h>
 #include <memory>
 
+class TrackerMcpServer;
+
 namespace tracker::standalone
 {
 
@@ -56,6 +58,7 @@ private:
     std::unique_ptr<juce::AudioProcessor> processor;
     juce::AudioDeviceManager deviceManager;
     std::unique_ptr<TrackerStandaloneProcessorPlayer> player;
+    std::unique_ptr<TrackerMcpServer> mcpServer;
     juce::Array<PluginInOuts> channelConfiguration;
     juce::MidiOutput* midiOutput = nullptr;
     bool processorHasPotentialFeedbackLoop = true;

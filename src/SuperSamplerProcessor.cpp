@@ -827,6 +827,22 @@ juce::var SuperSamplerProcessor::toVar() const
     return juce::var (root);
 }
 
+void SuperSamplerProcessor::loadSampleFromControl (int playerId, const juce::File& file, std::function<void (bool, juce::String)> onComplete)
+{
+    loadSampleAsync(playerId, file, std::move(onComplete));
+}
+
+int SuperSamplerProcessor::addSamplePlayerForControl (int lowNote, int highNote)
+{
+    const std::lock_guard<std::mutex> lock (playerMutex);
+    const auto id = nextId++;
+    auto player = std::make_unique<SuperSamplePlayer> (id);
+    player->prepareToPlay (currentOutputSampleRate, currentBlockSize);
+    player->setMidiRange (lowNote, highNote);
+    players.push_back (std::move (player));
+    return id;
+}
+
 void SuperSamplerProcessor::loadSampleAsync (int playerId, const juce::File& file, std::function<void (bool, juce::String)> onComplete)
 {
     std::thread ([this, playerId, file, cb = std::move (onComplete)]() mutable

@@ -8,6 +8,7 @@
 */
 
 #include "TrackerMainProcessor.h"
+#include "TrackerControlService.h"
 #include "TrackerMainUI.h"
 #include <algorithm>
 #include <cmath>
@@ -115,7 +116,9 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
 
 TrackerMainProcessor::MachineStack::SlotState TrackerMainProcessor::makeDefaultSlotState(CommandType type)
 {
+    static std::atomic<std::uint64_t> nextSlotId { 1 };
     MachineStack::SlotState slot;
+    slot.id = "slot-" + std::to_string(nextSlotId.fetch_add(1));
     slot.type = type;
     slot.enabled = type != CommandType::MidiNote;
     slot.sendLevelDb = 0.0f;
@@ -733,12 +736,18 @@ TrackerMainProcessor::TrackerMainProcessor()
     {
         recreateSequencersAndMachines();
     });
+    seqEditor.setQuitConfirmationHandler([]()
+    {
+        if (auto* app = juce::JUCEApplicationBase::getInstance())
+            app->systemRequestedQuit();
+    });
 
     // sequencer.decrementSeqParam(0, 1);
     // sequencer.decrementSeqParam(0, 1);
 
     // put some test notes into the sequencer to see if they flow through
     initialiseOsc();
+    controlService = std::make_unique<TrackerControlService>(*this);
 }
 
 TrackerMainProcessor::~TrackerMainProcessor()
@@ -1847,6 +1856,11 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
 juce::var TrackerMainProcessor::serializeSequencerState()
 {
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
+    // Keep file saves and host/plugin saves identical.  The arrangement and
+    // machine data below are not useful without the transport they were made
+    // against, so persist the tracker-owned clock settings alongside them.
+    root->setProperty("bpm", getBPM());
+    root->setProperty("internalClockEnabled", isInternalClockEnabled());
     juce::Array<juce::var> sequenceSetStates;
     for (const auto& sequenceSet : sequenceSets)
         if (sequenceSet != nullptr)
@@ -1889,6 +1903,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         for (const auto& slot : stack.slots)
         {
             juce::DynamicObject::Ptr slotObj = new juce::DynamicObject();
+            slotObj->setProperty("id", juce::String(slot.id));
             slotObj->setProperty("type", static_cast<int>(slot.type));
             slotObj->setProperty("enabled", slot.enabled);
             slotObj->setProperty("sendLevelDb", slot.sendLevelDb);
@@ -1940,6 +1955,11 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
 {
     if (!stateVar.isObject())
         return;
+
+    const auto restoredBpm = static_cast<double>(stateVar.getProperty("bpm", getBPM()));
+    if (restoredBpm > 0.0)
+        setBPM(restoredBpm);
+    setInternalClockEnabled(static_cast<bool>(stateVar.getProperty("internalClockEnabled", isInternalClockEnabled())));
 
     resetSongState();
 
@@ -2060,6 +2080,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
                         continue;
                     const auto type = static_cast<CommandType>(static_cast<int>(slotVar.getProperty("type", static_cast<int>(CommandType::MidiNote))));
                     auto slot = makeDefaultSlotState(type);
+                    slot.id = slotVar.getProperty("id", juce::String(slot.id)).toString().toStdString();
                     slot.enabled = static_cast<bool>(slotVar.getProperty("enabled", slot.enabled));
                     slot.sendLevelDb = juce::jlimit(-60.0f, 12.0f, static_cast<float>(slotVar.getProperty("sendLevelDb", slot.sendLevelDb)));
                     slot.returnLevelDb = juce::jlimit(-60.0f, 12.0f, static_cast<float>(slotVar.getProperty("returnLevelDb", slot.returnLevelDb)));
@@ -2198,6 +2219,12 @@ SequencerEditor* TrackerMainProcessor::getSequenceEditor()
 TrackerController* TrackerMainProcessor::getTrackerController()
 {
     return &trackerController;
+}
+
+TrackerControlService& TrackerMainProcessor::getControlService()
+{
+    jassert(controlService != nullptr);
+    return *controlService;
 }
 
 std::size_t TrackerMainProcessor::getSequenceSetCount() const
@@ -2603,7 +2630,9 @@ void TrackerMainProcessor::cycleMachineTypeInStack(std::size_t stackIndex, std::
                 });
             if (!duplicate || candidate == stack->slots[slotIndex].type || slotAllowsDuplicate(candidate))
             {
+                const auto stableId = stack->slots[slotIndex].id;
                 stack->slots[slotIndex] = makeDefaultSlotState(candidate);
+                stack->slots[slotIndex].id = stableId;
                 refreshStackProcessingState(*stack);
                 updateClockedMachineActivity();
                 return;

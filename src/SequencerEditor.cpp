@@ -1624,6 +1624,20 @@ void SequencerEditor::setCurrentStep(int step)
   else
     currentStep = static_cast<std::size_t>(step);
 }
+
+void SequencerEditor::setStepCursor(std::size_t row, std::size_t col)
+{
+  currentStepRow = row;
+  currentStepCol = col;
+  clampStepCursorToCurrentStep();
+}
+
+void SequencerEditor::setMachineCursor(std::size_t row, std::size_t col)
+{
+  machineCursorRow = row;
+  machineCursorCol = col;
+  rebuildMachineCells();
+}
 /** write the sent data to the current step and sequence */
 void SequencerEditor::writeStepData(std::vector<std::vector<double>> data)
 {
@@ -2315,6 +2329,19 @@ bool SequencerEditor::machinePreviewCurrentCell()
   return true;
 }
 
+bool SequencerEditor::machineResetCurrentCell()
+{
+  if (!isMachineUiForCurrentSequence() || machineCells.empty() || machineCells[0].empty())
+    return false;
+  if (machineCursorCol >= machineCells.size() || machineCursorRow >= machineCells[machineCursorCol].size())
+    return false;
+  const auto& cell = machineCells[machineCursorCol][machineCursorRow];
+  if (!cell.onReset)
+    return false;
+  cell.onReset();
+  return true;
+}
+
 bool SequencerEditor::machineHandleTextInput(char character)
 {
   if (!isMachineUiForCurrentSequence() || !machineStackDetailMode)
@@ -2503,6 +2530,13 @@ std::optional<CommandType> SequencerEditor::getFocusedMachineDetailType() const
   if (!machineStackDetailMode)
     return std::nullopt;
   return getSelectedStackMachineType();
+}
+
+std::optional<std::size_t> SequencerEditor::getFocusedMachineDetailSlot() const
+{
+  if (!machineStackDetailMode)
+    return std::nullopt;
+  return machineSelectedStackSlot;
 }
 
 bool SequencerEditor::machineWantsExclusiveKeyboardInput() const

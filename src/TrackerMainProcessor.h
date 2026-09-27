@@ -32,6 +32,7 @@
 #include "machines/ChannelStripMachine.h"
 #include "machines/AuxReverbMachine.h"
 
+class TrackerControlService;
 
 //==============================================================================
 /**
@@ -106,6 +107,8 @@ public:
     Sequencer* getSequencer();
     SequencerEditor* getSequenceEditor();
     TrackerController* getTrackerController();
+    /** Returns the shared control boundary used by the GUI and local MCP server. */
+    TrackerControlService& getControlService();
     std::size_t getMachineCount(CommandType type) const override;
     MachineInterface* getMachine(CommandType type, std::size_t index) override;
     const MachineInterface* getMachine(CommandType type, std::size_t index) const override;
@@ -179,6 +182,7 @@ public:
     }
     
 private:
+    friend class TrackerControlService;
     struct SongRow
     {
         std::size_t sequenceSetId = 0;
@@ -201,6 +205,7 @@ private:
     SequencerEditor seqEditor; 
     /** as for the seqeditor, this is here for easy statefulness*/
     TrackerController trackerController;
+    std::unique_ptr<TrackerControlService> controlService;
     /** temporary place where we store midi as we generate it. it is later filtered to 'send in this block' and 'send in the future' events */
     juce::MidiBuffer midiToSend; 
     struct ScheduledSamplerEvent
@@ -213,6 +218,8 @@ private:
     {
         struct SlotState
         {
+            /** Persisted identity; grid coordinates are deliberately not an API. */
+            std::string id;
             CommandType type = CommandType::MidiNote;
             bool enabled = true;
             float sendLevelDb = 0.0f;

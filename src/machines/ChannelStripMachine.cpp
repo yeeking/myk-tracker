@@ -40,7 +40,6 @@ void ChannelStripMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
     bassShelf.prepare(processSpec);
     midPeak.prepare(processSpec);
     trebleShelf.prepare(processSpec);
-    limiter.prepare(processSpec);
 
     saturatorInputGain.setRampDurationSeconds(0.02);
     distGain.setRampDurationSeconds(0.02);
@@ -110,8 +109,8 @@ std::vector<std::vector<UIBox>> ChannelStripMachine::getUIBoxes(const MachineUiC
     boxes[2][7] = makeFrequencyCell(midFreqHz, 50.0f, kMinMidFreqHz, kMaxMidFreqHz);
     boxes[3][6] = makeLabelCell("TRE");
     boxes[3][7] = makeDbCell(trebleDb, 1.0f, kMinEqDb, kMaxEqDb, 1);
-    boxes[4][6] = makeLabelCell("LIM");
-    boxes[4][7] = makeDbCell(limiterThresholdDb, 0.5f, kMinLimiterThresholdDb, kMaxLimiterThresholdDb, 1);
+    boxes[4][6] = makeLabelCell("CEIL");
+    boxes[4][7] = makeDbCell(limiterCeilingDb, 0.5f, kMinLimiterCeilingDb, kMaxLimiterCeilingDb, 1);
 
     return boxes;
 }
@@ -163,7 +162,15 @@ void ChannelStripMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
     bassShelf.process(context);
     midPeak.process(context);
     trebleShelf.process(context);
-    limiter.process(context);
+
+    // This must be the final stage: a displayed ceiling of -6 dB means no
+    // output sample can exceed -6 dBFS, regardless of preceding gain/EQ.
+    for (int channel = 0; channel < channelsToProcess; ++channel)
+        juce::FloatVectorOperations::clip(buffer.getWritePointer(channel),
+                                          buffer.getWritePointer(channel),
+                                          -limiterCeilingGain,
+                                          limiterCeilingGain,
+                                          buffer.getNumSamples());
 }
 
 void ChannelStripMachine::getStateInformation(juce::MemoryBlock& destData)
@@ -181,7 +188,7 @@ void ChannelStripMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("compRatio", parameters.compRatio);
     root->setProperty("compAttackMs", parameters.compAttackMs);
     root->setProperty("compOutputDb", parameters.compOutputDb);
-    root->setProperty("limiterThresholdDb", parameters.limiterThresholdDb);
+    root->setProperty("limiterCeilingDb", parameters.limiterCeilingDb);
     root->setProperty("bassDb", parameters.bassDb);
     root->setProperty("midDb", parameters.midDb);
     root->setProperty("midFreqHz", parameters.midFreqHz);
@@ -216,7 +223,11 @@ void ChannelStripMachine::setStateInformation(const void* data, int sizeInBytes)
     compRatio.store(clampParameter(static_cast<float>(parsed.getProperty("compRatio", compRatio.load())), kMinCompRatio, kMaxCompRatio));
     compAttackMs.store(clampParameter(static_cast<float>(parsed.getProperty("compAttackMs", compAttackMs.load())), kMinCompAttackMs, kMaxCompAttackMs));
     compOutputDb.store(clampParameter(static_cast<float>(parsed.getProperty("compOutputDb", compOutputDb.load())), kMinCompOutputDb, kMaxCompOutputDb));
-    limiterThresholdDb.store(clampParameter(static_cast<float>(parsed.getProperty("limiterThresholdDb", limiterThresholdDb.load())), kMinLimiterThresholdDb, kMaxLimiterThresholdDb));
+    // limiterThresholdDb was the old, misleadingly named persisted field.
+    // Continue accepting it so existing sessions retain their displayed value.
+    limiterCeilingDb.store(clampParameter(static_cast<float>(parsed.getProperty(
+        "limiterCeilingDb", parsed.getProperty("limiterThresholdDb", limiterCeilingDb.load()))),
+        kMinLimiterCeilingDb, kMaxLimiterCeilingDb));
     bassDb.store(clampParameter(static_cast<float>(parsed.getProperty("bassDb", bassDb.load())), kMinEqDb, kMaxEqDb));
     midDb.store(clampParameter(static_cast<float>(parsed.getProperty("midDb", midDb.load())), kMinEqDb, kMaxEqDb));
     midFreqHz.store(clampParameter(static_cast<float>(parsed.getProperty("midFreqHz", midFreqHz.load())), kMinMidFreqHz, kMaxMidFreqHz));
@@ -238,7 +249,7 @@ ChannelStripMachine::ParameterSnapshot ChannelStripMachine::captureParameters() 
     parameters.compRatio = compRatio.load(std::memory_order_relaxed);
     parameters.compAttackMs = compAttackMs.load(std::memory_order_relaxed);
     parameters.compOutputDb = compOutputDb.load(std::memory_order_relaxed);
-    parameters.limiterThresholdDb = limiterThresholdDb.load(std::memory_order_relaxed);
+    parameters.limiterCeilingDb = limiterCeilingDb.load(std::memory_order_relaxed);
     parameters.bassDb = bassDb.load(std::memory_order_relaxed);
     parameters.midDb = midDb.load(std::memory_order_relaxed);
     parameters.midFreqHz = midFreqHz.load(std::memory_order_relaxed);
@@ -257,8 +268,7 @@ void ChannelStripMachine::updateDSPSettings(const ParameterSnapshot& parameters)
     compressor.setAttack(parameters.compAttackMs);
     compressor.setRelease(80.0f);
     compOutputGain.setGainDecibels(parameters.compOutputDb);
-    limiter.setThreshold(parameters.limiterThresholdDb);
-    limiter.setRelease(50.0f);
+    limiterCeilingGain = juce::Decibels::decibelsToGain(parameters.limiterCeilingDb);
     satMixSmoothed.setTargetValue(parameters.satMix);
     updateEQCoefficients(parameters);
 }
@@ -310,7 +320,6 @@ void ChannelStripMachine::resetDSPState()
     bassShelf.reset();
     midPeak.reset();
     trebleShelf.reset();
-    limiter.reset();
     satMixSmoothed.reset(currentSampleRate, 0.02);
     satMixSmoothed.setCurrentAndTargetValue(satMix.load(std::memory_order_relaxed));
     saturationDryBuffer.clear();

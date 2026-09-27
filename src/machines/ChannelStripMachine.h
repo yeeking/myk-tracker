@@ -26,7 +26,7 @@ private:
         juce::dsp::IIR::Filter<float>,
         juce::dsp::IIR::Coefficients<float>>;
 
-    static constexpr double kStateVersion = 1.0;
+    static constexpr double kStateVersion = 2.0;
     static constexpr std::size_t kMaxChannels = 2;
 
     static constexpr float kMinSatDriveDb = 0.0f;
@@ -47,8 +47,8 @@ private:
     static constexpr float kMaxCompAttackMs = 100.0f;
     static constexpr float kMinCompOutputDb = -18.0f;
     static constexpr float kMaxCompOutputDb = 18.0f;
-    static constexpr float kMinLimiterThresholdDb = -6.0f;
-    static constexpr float kMaxLimiterThresholdDb = 0.0f;
+    static constexpr float kMinLimiterCeilingDb = -6.0f;
+    static constexpr float kMaxLimiterCeilingDb = 0.0f;
     static constexpr float kMinEqDb = -15.0f;
     static constexpr float kMaxEqDb = 15.0f;
     static constexpr float kMinMidFreqHz = 250.0f;
@@ -63,7 +63,8 @@ private:
     std::atomic<float> compRatio { 4.0f };
     std::atomic<float> compAttackMs { 10.0f };
     std::atomic<float> compOutputDb { 0.0f };
-    std::atomic<float> limiterThresholdDb { -1.0f };
+    // This is a true post-processing ceiling, not a compressor threshold.
+    std::atomic<float> limiterCeilingDb { -1.0f };
     std::atomic<float> bassDb { 0.0f };
     std::atomic<float> midDb { 0.0f };
     std::atomic<float> midFreqHz { 1000.0f };
@@ -86,7 +87,7 @@ private:
     Filter bassShelf;
     Filter midPeak;
     Filter trebleShelf;
-    juce::dsp::Limiter<float> limiter;
+    float limiterCeilingGain = juce::Decibels::decibelsToGain(-1.0f);
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> satMixSmoothed;
 
     std::atomic<bool> dspDirty { true };
@@ -103,7 +104,7 @@ private:
         float compRatio = 4.0f;
         float compAttackMs = 10.0f;
         float compOutputDb = 0.0f;
-        float limiterThresholdDb = -1.0f;
+        float limiterCeilingDb = -1.0f;
         float bassDb = 0.0f;
         float midDb = 0.0f;
         float midFreqHz = 1000.0f;
