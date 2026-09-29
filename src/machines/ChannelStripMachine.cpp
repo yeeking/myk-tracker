@@ -15,7 +15,8 @@ void ChannelStripMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
 
     processSpec.sampleRate = currentSampleRate;
-    processSpec.maximumBlockSize = static_cast<juce::uint32>(juce::jmax(1, samplesPerBlock));
+    processSpec.maximumBlockSize = juce::jmax(kMinimumPreparedBlockSize,
+                                               static_cast<juce::uint32>(juce::jmax(1, samplesPerBlock)));
     processSpec.numChannels = kMaxChannels;
 
     oversampling.reset();
@@ -130,47 +131,63 @@ void ChannelStripMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
     if (channelsToProcess <= 0)
         return;
 
-    jassert(buffer.getNumSamples() <= saturationDryBuffer.getNumSamples());
-    for (int channel = 0; channel < channelsToProcess; ++channel)
-        saturationDryBuffer.copyFrom(channel, 0, buffer, channel, 0, buffer.getNumSamples());
+    const int preparedSamples = saturationDryBuffer.getNumSamples();
+    if (preparedSamples <= 0)
+        return;
 
-    auto block = juce::dsp::AudioBlock<float>(buffer).getSubsetChannelBlock(0, static_cast<std::size_t>(channelsToProcess));
-    auto upsampledBlock = oversampling.processSamplesUp(block);
-    juce::dsp::ProcessContextReplacing<float> upContext(upsampledBlock);
-    saturatorInputGain.process(upContext);
-    saturator.process(upContext);
-    oversampling.processSamplesDown(block);
+    const auto channelBlock = juce::dsp::AudioBlock<float>(buffer)
+        .getSubsetChannelBlock(0, static_cast<std::size_t>(channelsToProcess));
 
-    for (int channel = 0; channel < channelsToProcess; ++channel)
+    // Do not resize here: this is the audio thread.  The dry buffer and DSP
+    // chain are prepared once, then oversized callbacks are split into
+    // contiguous chunks that fit the prepared processing capacity.
+    for (int startSample = 0; startSample < buffer.getNumSamples(); startSample += preparedSamples)
     {
-        auto* wetSamples = buffer.getWritePointer(channel);
-        const auto* drySamples = saturationDryBuffer.getReadPointer(channel);
-        for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
+        const int numSamples = juce::jmin(preparedSamples, buffer.getNumSamples() - startSample);
+        for (int channel = 0; channel < channelsToProcess; ++channel)
+            saturationDryBuffer.copyFrom(channel, 0, buffer, channel, startSample, numSamples);
+
+        auto block = channelBlock.getSubBlock(static_cast<std::size_t>(startSample),
+                                              static_cast<std::size_t>(numSamples));
+        auto upsampledBlock = oversampling.processSamplesUp(block);
+        juce::dsp::ProcessContextReplacing<float> upContext(upsampledBlock);
+        saturatorInputGain.process(upContext);
+        saturator.process(upContext);
+        oversampling.processSamplesDown(block);
+
+        for (int channel = 0; channel < channelsToProcess; ++channel)
         {
-            const float wet = wetSamples[sampleIndex];
-            wetSamples[sampleIndex] = juce::jmap(satMixSmoothed.getNextValue(), drySamples[sampleIndex], wet);
+            auto* wetSamples = buffer.getWritePointer(channel, startSample);
+            const auto* drySamples = saturationDryBuffer.getReadPointer(channel);
+            for (int sampleIndex = 0; sampleIndex < numSamples; ++sampleIndex)
+            {
+                const float wet = wetSamples[sampleIndex];
+                wetSamples[sampleIndex] = juce::jmap(satMixSmoothed.getNextValue(), drySamples[sampleIndex], wet);
+            }
+        }
+
+        juce::dsp::ProcessContextReplacing<float> context(block);
+        distGain.process(context);
+        distShaper.process(context);
+        distOutputGain.process(context);
+        compInputGain.process(context);
+        compressor.process(context);
+        compOutputGain.process(context);
+        bassShelf.process(context);
+        midPeak.process(context);
+        trebleShelf.process(context);
+
+        // This must be the final stage: a displayed ceiling of -6 dB means no
+        // output sample can exceed -6 dBFS, regardless of preceding gain/EQ.
+        for (int channel = 0; channel < channelsToProcess; ++channel)
+        {
+            auto* samples = buffer.getWritePointer(channel, startSample);
+            juce::FloatVectorOperations::clip(samples, samples,
+                                              -limiterCeilingGain,
+                                              limiterCeilingGain,
+                                              numSamples);
         }
     }
-
-    juce::dsp::ProcessContextReplacing<float> context(block);
-    distGain.process(context);
-    distShaper.process(context);
-    distOutputGain.process(context);
-    compInputGain.process(context);
-    compressor.process(context);
-    compOutputGain.process(context);
-    bassShelf.process(context);
-    midPeak.process(context);
-    trebleShelf.process(context);
-
-    // This must be the final stage: a displayed ceiling of -6 dB means no
-    // output sample can exceed -6 dBFS, regardless of preceding gain/EQ.
-    for (int channel = 0; channel < channelsToProcess; ++channel)
-        juce::FloatVectorOperations::clip(buffer.getWritePointer(channel),
-                                          buffer.getWritePointer(channel),
-                                          -limiterCeilingGain,
-                                          limiterCeilingGain,
-                                          buffer.getNumSamples());
 }
 
 void ChannelStripMachine::getStateInformation(juce::MemoryBlock& destData)

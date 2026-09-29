@@ -32,7 +32,6 @@ struct Parameter {
 };
 
 struct SequenceReadOnly {
-    double triggerProbability;
     double machineType;
     double machineId;
 };
@@ -64,9 +63,9 @@ enum class CommandType : std::size_t {
     MidiNote = 0,
     Log = 1,
     Sampler = 2,
-    Arpeggiator = 3,
+    LegacyArpeggiator = 3,
     WavetableSynth = 4,
-    PolyArpeggiator = 5,
+    LegacyPolyArpeggiator = 5,
     DistortionFx = 6,
     DelayFx = 7,
     ChannelStripFx = 8,

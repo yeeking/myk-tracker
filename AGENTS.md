@@ -25,7 +25,8 @@ be reflected there.
 - `src/SequencerEditor.*`, `src/TrackerController.*`: editor navigation and
   high-level tracker actions.
 - `src/MachineInterface.h`, `src/machines/`: machine contract and the internal
-  instruments, arpeggiators, and effects.
+  instruments and effects. Arpeggiation is implemented by sequence read heads,
+  not stack machines.
 - `src/SuperSamplerProcessor.*`, `src/SuperSamplePlayer.*`: sample loading and
   playback.
 - `src/standalone/`: the custom standalone audio/MIDI host.
@@ -88,6 +89,9 @@ are hardware-oriented utility scripts, not the main application's test suite.
 - Tracker grids use a column-major convention: the outer vector is columns and
   each inner vector contains rows. Preserve this convention in model, editor,
   and `UIBox` code.
+- Sequence events contain exactly `[command, note, velocity, duration]`.
+  Probability, traversal, rhythm, and timing belong to the sequence's one to
+  three read heads. Legacy five-/six-field rows are migrated on restore.
 - Machines implement `MachineInterface`; audio-only effects additionally use
   the conventions in `AudioEffectMachine.h`. Keep preparation, note/clock
   handling, UI cells, state persistence, and `allNotesOff` behaviour coherent.

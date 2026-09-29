@@ -10,8 +10,10 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 class TrackerMainProcessor;
+struct UIBox;
 
 /** The UI- and transport-neutral command surface for a tracker instance.
     All mutations are serialised onto the JUCE message thread before they touch
@@ -31,7 +33,8 @@ public:
 
     enum class CommandKind
     {
-        getState, transport, setStep, editSequence, editSong, editMachineStack,
+        getState, getTrackNotes, getStepValues, setTrackNotes, setTrackLengths,
+        transport, setStep, editSequence, editSong, editMachineStack,
         machineControl, loadSample, uiAction, application
     };
 
@@ -70,9 +73,13 @@ private:
     bool revisionsMatch(const Command& command, Result& failure) const;
     void changed(bool content, bool view);
     void synchroniseAsyncCompletions();
+    juce::var makeUiNow();
     juce::var makeStateNow();
     juce::var makeViewNow();
     juce::var makeMachineCellsNow();
+    juce::var makeMachineControlsNow();
+    juce::var serialiseMachineCells(std::size_t stackIndex, const juce::String& slotId,
+                                    const std::vector<std::vector<UIBox>>& cells) const;
     juce::var serialiseGrid(const std::vector<std::vector<std::string>>& grid) const;
 
     template <typename Fn>
@@ -118,4 +125,19 @@ private:
         std::atomic<std::uint64_t> nextId { 1 };
     };
     std::shared_ptr<AsyncState> asyncState = std::make_shared<AsyncState>();
+    /** Session-local sequence clipboard.  It intentionally is not persisted. */
+    struct SequenceClipboard
+    {
+        bool hasSteps = false;
+        bool pasteAtCursor = false;
+        std::size_t wholeSequenceLength = 0;
+        std::vector<std::vector<std::vector<double>>> steps;
+    } sequenceClipboard;
+    struct SequenceSelection
+    {
+        bool active = false;
+        std::size_t sequence = 0;
+        std::size_t anchorStep = 0;
+        std::size_t cursorStep = 0;
+    } sequenceSelection;
 };

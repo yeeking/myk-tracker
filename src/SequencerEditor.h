@@ -50,6 +50,11 @@ public:
   virtual float getStackMeterLevel(std::size_t stackIndex) const = 0;
   virtual float getStackGainDb(std::size_t stackIndex) const = 0;
   virtual void setStackGainDb(std::size_t stackIndex, float gainDb) = 0;
+  virtual bool isStackMuted(std::size_t stackIndex) const = 0;
+  virtual bool isStackSolo(std::size_t stackIndex) const = 0;
+  virtual void setStackMuted(std::size_t stackIndex, bool muted) = 0;
+  virtual void setStackSolo(std::size_t stackIndex, bool solo) = 0;
+  virtual void silenceStack(std::size_t stackIndex) = 0;
   virtual int getStackMidiOutputChannel(std::size_t stackIndex) const = 0;
   virtual void adjustStackMidiOutputChannel(std::size_t stackIndex, int direction) = 0;
 };
@@ -104,8 +109,8 @@ class SequencerAbs{
     virtual void incrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
     virtual void decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col) = 0;
     virtual std::vector<Parameter>& getSeqConfigSpecs() = 0;
-    virtual void incrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
-    virtual void decrementSeqParam(std::size_t seq, std::size_t paramIndex) = 0;
+    virtual void incrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex = 0) = 0;
+    virtual void decrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex = 0) = 0;
     virtual void toggleStepActive(std::size_t sequence, std::size_t step) = 0;
 };
 
@@ -120,6 +125,7 @@ enum class SequencerEditorMode
   configuringSequence,
   editingStep,
   machineConfig,
+  mixer,
   resetConfirmation
 };
 
@@ -140,6 +146,7 @@ enum class SequencerEditorPage
   step,
   sequenceConfig,
   machine,
+  mixer,
   resetConfirmation
 };
 
@@ -226,6 +233,7 @@ public:
   void gotoSequenceConfigPage();
   /** enter machine configuration page */
   void gotoMachineConfigPage();
+  void gotoMixerPage();
   void gotoSequencePage();
   void gotoStepPage();
   void gotoResetConfirmationPage();
@@ -302,6 +310,9 @@ public:
   size_t getCurrentStepCol() const;
   /** which seq param index are we editing? */
   size_t getCurrentSeqParam() const; 
+  std::size_t getCurrentConfigHead() const { return currentConfigHead; }
+  std::size_t getMixerStack() const { return mixerStack; }
+  std::size_t getMixerRow() const { return mixerRow; }
   std::size_t getCurrentSongRow() const;
   std::size_t getCurrentSongCol() const;
   void setSelectedSongCursor(std::size_t row, std::size_t col);
@@ -410,6 +421,9 @@ private:
   size_t currentStepCol;
   /** which sequence param are you editing?*/
   size_t currentSeqParam; 
+  std::size_t currentConfigHead = 0;
+  std::size_t mixerStack = 0;
+  std::size_t mixerRow = 0;
   /** which song row is selected on the song page */
   std::size_t currentSongRow;
   /** which song page column is selected */

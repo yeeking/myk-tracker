@@ -24,8 +24,6 @@
 #include "SequencerEditor.h"
 #include "TrackerController.h"
 #include "SuperSamplerProcessor.h"
-#include "machines/ArpeggiatorMachine.h"
-#include "machines/PolyArpeggiatorMachine.h"
 #include "machines/WavetableSynthMachine.h"
 #include "machines/WaveshaperDistortionMachine.h"
 #include "machines/DelayFxMachine.h"
@@ -109,6 +107,11 @@ public:
     TrackerController* getTrackerController();
     /** Returns the shared control boundary used by the GUI and local MCP server. */
     TrackerControlService& getControlService();
+    /** Copies one step's event rows without constructing the full saved document. */
+    bool getStepValuesForSequenceSet(std::size_t setIndex, std::size_t sequenceIndex,
+                                     std::size_t stepIndex, std::vector<std::vector<double>>& values) const;
+    /** Returns a track's step count, or zero if the set/track is invalid. */
+    std::size_t getStepCountForSequenceSet(std::size_t setIndex, std::size_t sequenceIndex) const;
     std::size_t getMachineCount(CommandType type) const override;
     MachineInterface* getMachine(CommandType type, std::size_t index) override;
     const MachineInterface* getMachine(CommandType type, std::size_t index) const override;
@@ -128,6 +131,11 @@ public:
     float getStackMeterLevel(std::size_t stackIndex) const override;
     float getStackGainDb(std::size_t stackIndex) const override;
     void setStackGainDb(std::size_t stackIndex, float gainDb) override;
+    bool isStackMuted(std::size_t stackIndex) const override;
+    bool isStackSolo(std::size_t stackIndex) const override;
+    void setStackMuted(std::size_t stackIndex, bool muted) override;
+    void setStackSolo(std::size_t stackIndex, bool solo) override;
+    void silenceStack(std::size_t stackIndex) override;
     int getStackMidiOutputChannel(std::size_t stackIndex) const override;
     void adjustStackMidiOutputChannel(std::size_t stackIndex, int direction) override;
     std::size_t getSequenceSetCount() const override;
@@ -227,8 +235,6 @@ private:
         };
 
         std::unique_ptr<SuperSamplerProcessor> sampler;
-        std::unique_ptr<ArpeggiatorMachine> arpeggiator;
-        std::unique_ptr<PolyArpeggiatorMachine> polyArpeggiator;
         std::unique_ptr<WavetableSynthMachine> wavetableSynth;
         std::unique_ptr<WaveshaperDistortionMachine> distortionFx;
         std::unique_ptr<DelayFxMachine> delayFx;
@@ -237,12 +243,11 @@ private:
         juce::AudioBuffer<float> renderBuffer;
         juce::AudioBuffer<float> delayTailBuffer;
         juce::MidiBuffer samplerMidiBuffer;
-        bool arpeggiatorClockActive = false;
         bool audioProcessingActive = false;
         bool samplerProcessingActive = false;
         bool wavetableProcessingActive = false;
-        bool arpeggiatorProcessingActive = false;
-        bool polyArpeggiatorProcessingActive = false;
+        bool muted = false;
+        bool solo = false;
         int midiOutputChannel = 1;
         float gainDb = 0.0f;
         float meterLevel = 0.0f;
@@ -322,6 +327,7 @@ private:
     static bool slotSupportsReturnLevel(CommandType type);
     static bool slotAllowsDuplicate(CommandType type);
     void refreshStackProcessingState(MachineStack& stack);
+    bool isStackAudible(std::size_t stackIndex) const;
     void refreshAllStackProcessingStates();
     AudioEffectMachine* getAudioEffectForStackType(MachineStack& stack, CommandType type);
     const AudioEffectMachine* getAudioEffectForStackType(const MachineStack& stack, CommandType type) const;

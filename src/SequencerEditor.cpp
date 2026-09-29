@@ -12,10 +12,7 @@
 namespace
 {
 constexpr int kMachineStackCount = 16;
-constexpr std::size_t kSeqConfigBaseRows = 3;
-constexpr std::size_t kSeqConfigMixerRows = 8;
-constexpr float kSeqConfigMinGainDb = -48.0f;
-constexpr float kSeqConfigMaxGainDb = 6.0f;
+constexpr std::size_t kSeqConfigBaseRows = Sequence::configCount;
 
 bool isSequencerPlaying(SequencerAbs *sequencer)
 {
@@ -45,19 +42,6 @@ const std::vector<ChordShortcut> kChordShortcuts = {
   {'p', {0, 3, 7, 10, 14}}
 };
 
-bool isStackMachineType(CommandType type)
-{
-  return type == CommandType::Sampler
-      || type == CommandType::Arpeggiator
-      || type == CommandType::WavetableSynth
-      || type == CommandType::PolyArpeggiator
-      || type == CommandType::DistortionFx
-      || type == CommandType::DelayFx
-      || type == CommandType::ChannelStripFx
-      || type == CommandType::AuxSend1Fx
-      || type == CommandType::AuxSend2Fx;
-}
-
 bool showsStackSendLevel(CommandType type)
 {
   return type == CommandType::DistortionFx
@@ -74,8 +58,8 @@ std::string getStackMachineLabel(CommandType type)
     case CommandType::MidiNote: return "MIDI";
     case CommandType::Log: return "LOG";
     case CommandType::Sampler: return "SAMPLER";
-    case CommandType::Arpeggiator: return "ARP";
-    case CommandType::PolyArpeggiator: return "POLYARP";
+    case CommandType::LegacyArpeggiator:
+    case CommandType::LegacyPolyArpeggiator: return "LEGACY";
     case CommandType::WavetableSynth: return "WAVE";
     case CommandType::DistortionFx: return "DIST";
     case CommandType::DelayFx: return "DELAY";
@@ -91,19 +75,9 @@ std::string formatStackLevelDb(float value)
   return juce::String(value, 0).toStdString();
 }
 
-bool isSeqConfigMixerRow(std::size_t row)
-{
-  return row >= kSeqConfigBaseRows && row < (kSeqConfigBaseRows + kSeqConfigMixerRows);
-}
-
 std::size_t getSequenceConfigRowCount()
 {
-  return kSeqConfigBaseRows + kSeqConfigMixerRows;
-}
-
-float getSeqConfigGainStepDb()
-{
-  return (kSeqConfigMaxGainDb - kSeqConfigMinGainDb) / static_cast<float>(kSeqConfigMixerRows - 1);
+  return kSeqConfigBaseRows;
 }
 
 bool normalizeEditableStepData(SequencerAbs* sequencer,
@@ -234,6 +208,8 @@ SequencerEditorPage SequencerEditor::getCurrentPage() const
     return SequencerEditorPage::sequenceConfig;
   case SequencerEditorMode::machineConfig:
     return SequencerEditorPage::machine;
+  case SequencerEditorMode::mixer:
+    return SequencerEditorPage::mixer;
   case SequencerEditorMode::resetConfirmation:
     return SequencerEditorPage::resetConfirmation;
   }
@@ -274,6 +250,9 @@ void SequencerEditor::selectPage(SequencerEditorPage page)
   case SequencerEditorPage::machine:
     gotoMachineConfigPage();
     break;
+  case SequencerEditorPage::mixer:
+    gotoMixerPage();
+    break;
   case SequencerEditorPage::resetConfirmation:
     gotoResetConfirmationPage();
     break;
@@ -301,6 +280,9 @@ bool SequencerEditor::selectPageShortcut(int shortcut)
   case 6:
     selectPage(SequencerEditorPage::sequenceConfig);
     return true;
+  case 7:
+    selectPage(SequencerEditorPage::mixer);
+    return true;
   default:
     return false;
   }
@@ -325,6 +307,7 @@ void SequencerEditor::cycleEditMode()
     this->editSubMode = SequencerEditor::cycleSubModeRight(this->editSubMode);
     return;
   case SequencerEditorMode::machineConfig:
+  case SequencerEditorMode::mixer:
     return;
   case SequencerEditorMode::resetConfirmation:
     return;
@@ -346,6 +329,13 @@ void SequencerEditor::cycleAtCursor()
   case SequencerEditorMode::machineConfig:
     if (isMachineUiForCurrentSequence())
       machineActivateCurrentCell();
+    break;
+  case SequencerEditorMode::mixer:
+    if (machineHost != nullptr)
+    {
+      if (mixerRow == 1) machineHost->setStackMuted(mixerStack, !machineHost->isStackMuted(mixerStack));
+      else if (mixerRow == 2) machineHost->setStackSolo(mixerStack, !machineHost->isStackSolo(mixerStack));
+    }
     break;
 
   case SequencerEditorMode::selectingSeqAndStep:
@@ -385,6 +375,9 @@ void SequencerEditor::click()
   case SequencerEditorPage::machine:
     clickOnMachinePage();
     break;
+  case SequencerEditorPage::mixer:
+    cycleAtCursor();
+    break;
   case SequencerEditorPage::resetConfirmation:
     clickOnResetConfirmationPage();
     break;
@@ -406,6 +399,8 @@ void SequencerEditor::resetAtCursor()
   case SequencerEditorPage::sequenceConfig:
     break;
   case SequencerEditorPage::machine:
+    break;
+  case SequencerEditorPage::mixer:
     break;
   case SequencerEditorPage::resetConfirmation:
     resetOnResetConfirmationPage();
@@ -436,6 +431,9 @@ void SequencerEditor::enterAtCursor()
     machineEditMode = false;
     gotoSequencePage();
     break;
+  case SequencerEditorPage::mixer:
+    gotoSequencePage();
+    break;
   case SequencerEditorPage::resetConfirmation:
     resetOnResetConfirmationPage();
     break;
@@ -464,9 +462,9 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     std::vector<std::vector<double>> data = sequencer->getStepData(currentSequence, currentStep);
     normalizeEditableStepData(sequencer, currentSequence, currentStepRow, data);
 
-    // set the vel, len and probability values for the
+    // Set velocity and length defaults when entering a fresh note.
     // new step data to defaults if they are currently at zero
-    const std::size_t cols[] = {Step::velInd, Step::lengthInd, Step::probInd};
+    const std::size_t cols[] = {Step::velInd, Step::lengthInd};
     for (std::size_t col : cols)
     {
       if (std::abs(data[currentStepRow][col]) < std::numeric_limits<double>::epsilon())
@@ -534,6 +532,7 @@ void SequencerEditor::incrementOctave()
     break;
   }
   case SequencerEditorMode::machineConfig:
+  case SequencerEditorMode::mixer:
   {
     break;
   }
@@ -583,6 +582,7 @@ void SequencerEditor::decrementOctave()
     break;
   }
   case SequencerEditorMode::machineConfig:
+  case SequencerEditorMode::mixer:
   {
     break;
   }
@@ -649,28 +649,29 @@ void SequencerEditor::enterDataAtCursor(double inValue)
   if (editMode == SequencerEditorMode::configuringSequence)
   {
     Sequence* sequence = sequencer->getSequence(currentSequence);
-    if (currentSeqParam == Sequence::machineIdConfig){
+    if (currentSeqParam == Sequence::sendConfig){
       double machineId = fmod(inValue, kMachineStackCount);
       if (machineId < 0) machineId = 0;
       sequence->setMachineId(machineId);
+    }
+    else if (currentSeqParam == Sequence::headConfig){
+      currentConfigHead = static_cast<std::size_t>(juce::jlimit(0, static_cast<int>(sequence->getReadHeadCount() - 1), static_cast<int>(inValue)));
     }
     else if (currentSeqParam == Sequence::tpsConfig){
       int tps = static_cast<int>(inValue);
       if (tps < 1) tps = 1;
       if (tps > 16) tps = 16;
-      sequence->setTicksPerStep(static_cast<std::size_t>(tps));
-      sequence->onZeroSetTicksPerStep(static_cast<std::size_t>(tps));
+      auto head = sequence->getReadHeadConfig(currentConfigHead);
+      head.ticksPerStep = static_cast<std::size_t>(tps);
+      sequence->setReadHeadConfig(currentConfigHead, head);
     }
-    else if (currentSeqParam == Sequence::probConfig){
+    else if (currentSeqParam == Sequence::probabilityConfig){
       double prob = inValue;
       if (prob < 0) prob = 0;
       if (prob > 1) prob = 1;
-      sequence->setTriggerProbability(prob);
-    }
-    else if (isSeqConfigMixerRow(currentSeqParam) && machineHost != nullptr)
-    {
-      const std::size_t stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
-      machineHost->setStackGainDb(stackIndex, juce::jlimit(kSeqConfigMinGainDb, kSeqConfigMaxGainDb, static_cast<float>(inValue)));
+      auto head = sequence->getReadHeadConfig(currentConfigHead);
+      head.probability = prob;
+      sequence->setReadHeadConfig(currentConfigHead, head);
     }
   }
 }
@@ -684,13 +685,6 @@ void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note
   data[0][Step::velInd] = static_cast<double>(velocity);
   // data[0][Step::chanInd] = data[0][Step::chanInd];// keep the channel the seq already has
   data[0][Step::lengthInd] = 2.0; // shortish
-  if (std::abs(data[0][Step::probInd]) < std::numeric_limits<double>::epsilon())
-  {
-    data[0][Step::probInd] = 1.0; // keep the prob unless it is currently zero
-  }
-
-  data[0][Step::probInd] = 1.0; // keep the prob
-
   // align sequence machine id to the incoming channel if supplied
   if (channel >= 0)
   {
@@ -724,6 +718,7 @@ void SequencerEditor::moveCursorLeft()
   case SequencerEditorPage::step: moveCursorLeftOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorLeftOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorLeftOnMachinePage(); break;
+  case SequencerEditorPage::mixer: if (mixerStack > 0) --mixerStack; break;
   case SequencerEditorPage::resetConfirmation: moveCursorLeftOnResetConfirmationPage(); break;
   }
 }
@@ -737,6 +732,7 @@ void SequencerEditor::moveCursorRight()
   case SequencerEditorPage::step: moveCursorRightOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorRightOnMachinePage(); break;
+  case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerStack + 1 < machineHost->getMachineStackCount()) ++mixerStack; break;
   case SequencerEditorPage::resetConfirmation: moveCursorRightOnResetConfirmationPage(); break;
   }
 }
@@ -750,6 +746,7 @@ void SequencerEditor::moveCursorUp()
   case SequencerEditorPage::step: moveCursorUpOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorUpOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorUpOnMachinePage(); break;
+  case SequencerEditorPage::mixer: if (mixerRow > 0) --mixerRow; break;
   case SequencerEditorPage::resetConfirmation: moveCursorUpOnResetConfirmationPage(); break;
   }
 }
@@ -763,6 +760,7 @@ void SequencerEditor::moveCursorDown()
   case SequencerEditorPage::step: moveCursorDownOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorDownOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorDownOnMachinePage(); break;
+  case SequencerEditorPage::mixer: mixerRow = std::min<std::size_t>(10, mixerRow + 1); break;
   case SequencerEditorPage::resetConfirmation: moveCursorDownOnResetConfirmationPage(); break;
   }
 }
@@ -786,6 +784,8 @@ void SequencerEditor::addRow()
   case SequencerEditorPage::machine:
     addRowOnMachinePage();
     break;
+  case SequencerEditorPage::mixer:
+    break;
   case SequencerEditorPage::resetConfirmation:
     break;
   }
@@ -807,6 +807,8 @@ void SequencerEditor::removeRow()
     break;
   case SequencerEditorPage::machine:
     machineRemoveEntry();
+    break;
+  case SequencerEditorPage::mixer:
     break;
   case SequencerEditorPage::resetConfirmation:
     break;
@@ -833,6 +835,14 @@ void SequencerEditor::incrementAtCursor()
   case SequencerEditorPage::machine:
     incrementOnMachinePage();
     break;
+  case SequencerEditorPage::mixer:
+    if (machineHost != nullptr)
+    {
+      if (mixerRow == 1) machineHost->setStackMuted(mixerStack, true);
+      else if (mixerRow == 2) machineHost->setStackSolo(mixerStack, true);
+      else if (mixerRow >= 3) machineHost->setStackGainDb(mixerStack, machineHost->getStackGainDb(mixerStack) + 1.0f);
+    }
+    break;
   case SequencerEditorPage::resetConfirmation:
     break;
   }
@@ -856,6 +866,14 @@ void SequencerEditor::decrementAtCursor()
     break;
   case SequencerEditorPage::machine:
     decrementOnMachinePage();
+    break;
+  case SequencerEditorPage::mixer:
+    if (machineHost != nullptr)
+    {
+      if (mixerRow == 1) machineHost->setStackMuted(mixerStack, false);
+      else if (mixerRow == 2) machineHost->setStackSolo(mixerStack, false);
+      else if (mixerRow >= 3) machineHost->setStackGainDb(mixerStack, machineHost->getStackGainDb(mixerStack) - 1.0f);
+    }
     break;
   case SequencerEditorPage::resetConfirmation:
     break;
@@ -1545,17 +1563,28 @@ void SequencerEditor::incrementOnSequenceConfigPage()
 {
   if (currentSeqParam < sequencer->getSeqConfigSpecs().size())
   {
-    sequencer->incrementSeqParam(currentSequence, currentSeqParam);
-    return;
-  }
-
-  if (isSeqConfigMixerRow(currentSeqParam) && machineHost != nullptr)
-  {
-    if (auto* sequence = sequencer->getSequence(currentSequence))
+    if (currentSeqParam == Sequence::headConfig)
     {
-      const std::size_t stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
-      machineHost->setStackGainDb(stackIndex, machineHost->getStackGainDb(stackIndex) + getSeqConfigGainStepDb());
+      const auto count = sequencer->getSequence(currentSequence)->getReadHeadCount();
+      currentConfigHead = count == 0 ? 0 : (currentConfigHead + 1) % count;
     }
+    else
+    {
+      auto* sequence = sequencer->getSequence(currentSequence);
+      const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+      const bool structural = currentSeqParam == Sequence::sendConfig || currentSeqParam == Sequence::headCountConfig
+          || currentSeqParam == Sequence::tpsConfig || currentSeqParam == Sequence::modeConfig
+          || currentSeqParam == Sequence::rhythmConfig;
+      if (structural && machineHost != nullptr) machineHost->silenceStack(oldStack);
+      sequencer->incrementSeqParam(currentSequence, currentSeqParam, currentConfigHead);
+      currentConfigHead = std::min(currentConfigHead, sequencer->getSequence(currentSequence)->getReadHeadCount() - 1);
+      if (structural && machineHost != nullptr)
+      {
+        const auto newStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+        if (newStack != oldStack) machineHost->silenceStack(newStack);
+      }
+    }
+    return;
   }
 }
 
@@ -1588,17 +1617,28 @@ void SequencerEditor::decrementOnSequenceConfigPage()
 {
   if (currentSeqParam < sequencer->getSeqConfigSpecs().size())
   {
-    sequencer->decrementSeqParam(currentSequence, currentSeqParam);
-    return;
-  }
-
-  if (isSeqConfigMixerRow(currentSeqParam) && machineHost != nullptr)
-  {
-    if (auto* sequence = sequencer->getSequence(currentSequence))
+    if (currentSeqParam == Sequence::headConfig)
     {
-      const std::size_t stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
-      machineHost->setStackGainDb(stackIndex, machineHost->getStackGainDb(stackIndex) - getSeqConfigGainStepDb());
+      const auto count = sequencer->getSequence(currentSequence)->getReadHeadCount();
+      currentConfigHead = count == 0 ? 0 : (currentConfigHead + count - 1) % count;
     }
+    else
+    {
+      auto* sequence = sequencer->getSequence(currentSequence);
+      const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+      const bool structural = currentSeqParam == Sequence::sendConfig || currentSeqParam == Sequence::headCountConfig
+          || currentSeqParam == Sequence::tpsConfig || currentSeqParam == Sequence::modeConfig
+          || currentSeqParam == Sequence::rhythmConfig;
+      if (structural && machineHost != nullptr) machineHost->silenceStack(oldStack);
+      sequencer->decrementSeqParam(currentSequence, currentSeqParam, currentConfigHead);
+      currentConfigHead = std::min(currentConfigHead, sequencer->getSequence(currentSequence)->getReadHeadCount() - 1);
+      if (structural && machineHost != nullptr)
+      {
+        const auto newStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+        if (newStack != oldStack) machineHost->silenceStack(newStack);
+      }
+    }
+    return;
   }
 }
 
@@ -1712,8 +1752,6 @@ void SequencerEditor::previewEnteredNote(double midiNote)
     }
 
     data[safeRow][Step::noteInd] = midiNote;
-    data[safeRow][Step::probInd] = 1.0;
-    context.triggerProbability = 1.0;
     CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
   }
 }
@@ -1761,6 +1799,15 @@ void SequencerEditor::gotoMachineConfigPage()
   setEditMode(SequencerEditorMode::machineConfig);
   machineEditMode = false;
   machineStackDetailMode = false;
+}
+
+void SequencerEditor::gotoMixerPage()
+{
+  dismissMachineTransientUiIfNeeded();
+  setEditMode(SequencerEditorMode::mixer);
+  if (machineHost != nullptr && machineHost->getMachineStackCount() > 0)
+    mixerStack = std::min(mixerStack, machineHost->getMachineStackCount() - 1);
+  mixerRow = std::min<std::size_t>(10, mixerRow);
 }
 
 void SequencerEditor::gotoSequencePage()
@@ -1911,8 +1958,6 @@ bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
     baseRow[Step::velInd] = 64.0;
   if (std::abs(baseRow[Step::lengthInd]) < std::numeric_limits<double>::epsilon())
     baseRow[Step::lengthInd] = 1.0;
-  if (std::abs(baseRow[Step::probInd]) < std::numeric_limits<double>::epsilon())
-    baseRow[Step::probInd] = 1.0;
 
   std::vector<std::vector<double>> chordRows;
   chordRows.reserve(intervals.size());
@@ -1928,10 +1973,8 @@ bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
     if (Sequence* sequence = sequencer->getSequence(currentSequence))
     {
       auto context = sequence->getReadOnlyContext();
-      context.triggerProbability = 1.0;
       for (auto& row : chordRows)
       {
-        row[Step::probInd] = 1.0;
         CommandProcessor::executeCommand(row[Step::cmdInd], &row, &context);
       }
     }

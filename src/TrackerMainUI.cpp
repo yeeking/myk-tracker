@@ -41,8 +41,6 @@ std::string describeStackCursorAction(const std::string& cellText)
     if (cellText == "ON") return "enabled";
     if (cellText == "OFF") return "disabled";
     if (cellText == "SAMPLER") return "sampler";
-    if (cellText == "ARP") return "arpeggiator";
-    if (cellText == "POLYARP") return "poly arp";
     if (cellText == "WAVE") return "wavetable synth";
     if (cellText == "DIST") return "distortion";
     if (cellText == "DELAY") return "delay";
@@ -208,6 +206,7 @@ void TrackerMainUI::timerCallback ()
   else if (snapshotMode == "step") editMode = SequencerEditorMode::editingStep;
   else if (snapshotMode == "config") editMode = SequencerEditorMode::configuringSequence;
   else if (snapshotMode == "machine") editMode = SequencerEditorMode::machineConfig;
+  else if (snapshotMode == "mixer") editMode = SequencerEditorMode::mixer;
   else if (snapshotMode == "reset") editMode = SequencerEditorMode::resetConfirmation;
   switch(editMode){
 
@@ -235,6 +234,11 @@ void TrackerMainUI::timerCallback ()
       case SequencerEditorMode::machineConfig:
       {
           prepareMachineConfigView();
+          break;
+      }
+      case SequencerEditorMode::mixer:
+      {
+          prepareMixerView();
           break;
       }
       case SequencerEditorMode::resetConfirmation:
@@ -309,6 +313,8 @@ void TrackerMainUI::prepareSequenceView()
   uiComponent.setStyle(style);
   uiComponent.setCellSize(cellWidth, cellHeight);
   std::vector<std::pair<int, int>> playHeads;
+  struct HeadCell { int sequence; int step; int head; };
+  std::vector<HeadCell> headCells;
   std::vector<std::vector<std::string>> grid;
   size_t currentSequence = 0;
   size_t currentStep = 0;
@@ -323,14 +329,41 @@ void TrackerMainUI::prepareSequenceView()
   const auto snapshotPlayheads = ui.getProperty("playHeads", juce::var());
   if (snapshotPlayheads.isArray())
       for (const auto& item : *snapshotPlayheads.getArray())
-          playHeads.emplace_back(static_cast<int>(item.getProperty("sequence", 0)), static_cast<int>(item.getProperty("step", 0)));
+      {
+          const int sequence = static_cast<int>(item.getProperty("sequence", 0));
+          const int step = static_cast<int>(item.getProperty("step", 0));
+          playHeads.emplace_back(sequence, step);
+          headCells.push_back({ sequence, step, static_cast<int>(item.getProperty("head", 0)) });
+      }
+  const auto selection = ui.getProperty("sequenceSelection", juce::var());
+  if (selection.getDynamicObject() != nullptr
+      && static_cast<std::size_t>(static_cast<int>(selection.getProperty("sequence", -1))) == currentSequence)
+  {
+      const int start = juce::jmax(0, static_cast<int>(selection.getProperty("startStep", 0)));
+      const int end = juce::jmax(start, static_cast<int>(selection.getProperty("endStep", start)));
+      for (int step = start; step <= end; ++step)
+          playHeads.emplace_back(static_cast<int>(currentSequence), step);
+  }
   style.glowPulseEnabled = !isPlaying;
-  const auto boxes = buildBoxesFromGrid(grid,
+  auto boxes = buildBoxesFromGrid(grid,
                                         currentSequence,
                                         currentStep,
                                         playHeads,
                                         true,
                                         armedSequence);
+  const std::array<juce::Colour, 3> headColours { juce::Colours::red, juce::Colours::cyan, juce::Colours::magenta };
+  for (const auto& headCell : headCells)
+  {
+      if (headCell.sequence < 0 || headCell.step < 0
+          || static_cast<std::size_t>(headCell.sequence) >= boxes.size()
+          || static_cast<std::size_t>(headCell.step) >= boxes[static_cast<std::size_t>(headCell.sequence)].size())
+          continue;
+      auto& box = boxes[static_cast<std::size_t>(headCell.sequence)][static_cast<std::size_t>(headCell.step)];
+      auto colour = headColours[static_cast<std::size_t>(juce::jlimit(0, 2, headCell.head))];
+      if (box.useCustomFillColour) colour = juce::Colour(box.customFillArgb).interpolatedWith(colour, 0.5f);
+      box.useCustomFillColour = true;
+      box.customFillArgb = colour.getARGB();
+  }
   updateCellStates(boxes, rowsInUI - 1, 6);
 }
 void TrackerMainUI::prepareStepView()
@@ -391,84 +424,26 @@ void TrackerMainUI::prepareSeqConfigView()
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
     std::vector<std::vector<std::string>> grid;
-    std::vector<float> stackMeters;
-    std::vector<float> stackGains;
     size_t currentSequence = 0;
     size_t currentSeqParam = 0;
     audioProcessor.withAudioThreadExclusive([&]()
     {
         currentSequence = seqEditor->getCurrentSequence();
         currentSeqParam = seqEditor->getCurrentSeqParam();
-        grid = audioProcessor.getSequencer()->getSequenceConfigsAsGridOfStrings();
-        stackMeters.resize(grid.size(), 0.0f);
-        stackGains.resize(grid.size(), 0.0f);
-        for (std::size_t seqIndex = 0; seqIndex < grid.size(); ++seqIndex)
-        {
-            if (auto* sequence = audioProcessor.getSequencer()->getSequence(seqIndex))
-            {
-                const auto stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
-                stackMeters[seqIndex] = audioProcessor.getStackMeterLevel(stackIndex);
-                stackGains[seqIndex] = audioProcessor.getStackGainDb(stackIndex);
-            }
-        }
+        grid = audioProcessor.getSequencer()->getSequenceConfigsAsGridOfStrings(seqEditor->getCurrentConfigHead());
     });
 
-    constexpr std::size_t mixerRows = 8;
-    constexpr std::size_t baseRows = 3;
-    constexpr float minGainDb = -48.0f;
-    constexpr float maxGainDb = 6.0f;
-    const std::size_t totalRows = baseRows + mixerRows;
-    std::vector<std::vector<UIBox>> boxes(grid.size(), std::vector<UIBox>(totalRows));
-
-    auto meterFillColour = palette.gridPlayhead.withMultipliedAlpha(0.75f);
-    auto meterTextColour = palette.background.contrasting(0.9f);
-    auto handleFillColour = palette.gridNote.brighter(0.35f);
-    auto handleTextColour = palette.background;
+    std::vector<std::vector<UIBox>> boxes(grid.size(), std::vector<UIBox>(Sequence::configCount));
 
     for (std::size_t col = 0; col < grid.size(); ++col)
     {
-        for (std::size_t row = 0; row < std::min(baseRows, grid[col].size()); ++row)
+        for (std::size_t row = 0; row < std::min(Sequence::configCount, grid[col].size()); ++row)
         {
             boxes[col][row].kind = UIBox::Kind::TrackerCell;
             boxes[col][row].text = grid[col][row];
             boxes[col][row].hasNote = !grid[col][row].empty();
-        }
-
-        const int litCount = juce::jlimit(0, static_cast<int>(mixerRows),
-                                          static_cast<int>(std::ceil(stackMeters[col] * static_cast<float>(mixerRows))));
-        const float sliderNormalised = juce::jlimit(0.0f, 1.0f, (stackGains[col] - minGainDb) / (maxGainDb - minGainDb));
-        const int sliderFromBottom = juce::jlimit(0, static_cast<int>(mixerRows) - 1,
-                                                  static_cast<int>(std::lround(sliderNormalised * static_cast<float>(mixerRows - 1))));
-        const std::size_t sliderRow = baseRows + (mixerRows - 1u - static_cast<std::size_t>(sliderFromBottom));
-
-        for (std::size_t row = baseRows; row < totalRows; ++row)
-        {
-            auto& box = boxes[col][row];
-            box.kind = UIBox::Kind::TrackerCell;
-            const int rowFromBottom = static_cast<int>(totalRows - 1 - row);
-            const bool meterLit = rowFromBottom < litCount;
-            if (meterLit)
-            {
-                box.useCustomFillColour = true;
-                box.customFillArgb = meterFillColour.getARGB();
-                box.isHighlighted = true;
-            }
-
-            if (row == sliderRow)
-            {
-                box.text = "====";
-                box.useCustomFillColour = true;
-                box.customFillArgb = handleFillColour.getARGB();
-                box.useCustomTextColour = true;
-                box.customTextArgb = handleTextColour.getARGB();
-                box.isHighlighted = true;
-            }
-            else if (meterLit)
-            {
-                box.text = "";
-                box.useCustomTextColour = true;
-                box.customTextArgb = meterTextColour.getARGB();
-            }
+            if (row == Sequence::polyphonyConfig && grid[col][Sequence::modeConfig] != "RAND_CHORD")
+                boxes[col][row].isDisabled = true;
         }
     }
 
@@ -541,46 +516,6 @@ void TrackerMainUI::prepareMachineConfigView()
         overlayState.color = samplerPalette.textPrimary;
         overlayState.glowColor = samplerPalette.glowActive;
         overlayState.glowStrength = 0.35f;
-        return;
-    }
-    if (detailType.has_value() && detailType.value() == CommandType::Arpeggiator)
-    {
-        TrackerUIComponent::Style style;
-        style.background = palette.background;
-        style.lightColor = palette.lightColor;
-        style.defaultGlowColor = palette.gridPlayhead;
-        style.ambientStrength = palette.ambientStrength;
-        style.lightDirection = palette.lightDirection;
-        uiComponent.setStyle(style);
-        uiComponent.setCellSize(cellWidth, cellHeight);
-
-        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
-        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
-        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [arpeggiator]";
-        overlayState.color = palette.textPrimary;
-        overlayState.glowColor = palette.gridPlayhead;
-        overlayState.glowStrength = 0.25f;
-        return;
-    }
-    if (detailType.has_value() && detailType.value() == CommandType::PolyArpeggiator)
-    {
-        TrackerUIComponent::Style style;
-        style.background = palette.background;
-        style.lightColor = palette.lightColor;
-        style.defaultGlowColor = palette.gridPlayhead;
-        style.ambientStrength = palette.ambientStrength;
-        style.lightDirection = palette.lightDirection;
-        uiComponent.setStyle(style);
-        uiComponent.setCellSize(cellWidth, cellHeight);
-
-        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
-        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
-        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [poly arp]";
-        overlayState.color = palette.textPrimary;
-        overlayState.glowColor = palette.gridPlayhead;
-        overlayState.glowStrength = 0.25f;
         return;
     }
     if (detailType.has_value() && detailType.value() == CommandType::WavetableSynth)
@@ -729,6 +664,49 @@ void TrackerMainUI::prepareMachineConfigView()
     const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
     updateCellStates(machineBoxes, rows, cols);
     overlayState.text = "Stack [" + std::to_string(machineId) + "] [" + selectedStackAction + "]";
+}
+
+void TrackerMainUI::prepareMixerView()
+{
+    samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
+    samplerColumnWidths.clear();
+    constexpr std::size_t rows = 11;
+    const auto stackCount = audioProcessor.getMachineStackCount();
+    std::vector<bool> muted(stackCount), solo(stackCount);
+    std::vector<float> meters(stackCount), gains(stackCount);
+    audioProcessor.withAudioThreadExclusive([&]
+    {
+        for (std::size_t stack = 0; stack < stackCount; ++stack)
+        {
+            muted[stack] = audioProcessor.isStackMuted(stack);
+            solo[stack] = audioProcessor.isStackSolo(stack);
+            meters[stack] = audioProcessor.getStackMeterLevel(stack);
+            gains[stack] = audioProcessor.getStackGainDb(stack);
+        }
+    });
+    std::vector<std::vector<UIBox>> boxes(stackCount, std::vector<UIBox>(rows));
+    for (std::size_t stack = 0; stack < stackCount; ++stack)
+    {
+        boxes[stack][0].text = "STK:" + std::to_string(stack);
+        boxes[stack][1].text = muted[stack] ? "MUTE:ON" : "MUTE:OFF";
+        boxes[stack][2].text = solo[stack] ? "SOLO:ON" : "SOLO:OFF";
+        const float meter = meters[stack];
+        const float gain = gains[stack];
+        const int lit = juce::jlimit(0, 8, static_cast<int>(std::ceil(meter * 8.0f)));
+        const int handle = juce::jlimit(0, 7, static_cast<int>(std::lround((gain + 48.0f) / 54.0f * 7.0f)));
+        for (std::size_t row = 0; row < rows; ++row) boxes[stack][row].kind = UIBox::Kind::TrackerCell;
+        for (int band = 0; band < 8; ++band)
+        {
+            auto& cell = boxes[stack][3 + static_cast<std::size_t>(7 - band)];
+            if (band < lit) cell.isHighlighted = true;
+            if (band == handle) cell.text = "====";
+        }
+    }
+    const auto stack = seqEditor->getMixerStack();
+    const auto row = seqEditor->getMixerRow();
+    if (stack < boxes.size() && row < rows) boxes[stack][row].isSelected = true;
+    updateCellStates(boxes, rows, stackCount);
 }
 
 void TrackerMainUI::prepareControlPanelView()
@@ -1273,7 +1251,7 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         {
             handled = seqEditor->enterMachineDetailFromAnywhere();
         }
-        else if (keyCode >= '1' && keyCode <= '6')
+        else if (keyCode >= '1' && keyCode <= '7')
         {
             handled = seqEditor->selectPageShortcut(keyCode - '0');
         }

@@ -74,8 +74,6 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
     src/SuperSamplePlayer.cpp
 #    src/SuperSamplerEditor.cpp
     src/SuperSamplerProcessor.cpp
-    src/machines/ArpeggiatorMachine.cpp
-    src/machines/PolyArpeggiatorMachine.cpp
     src/machines/WavetableSynthMachine.cpp
     src/machines/WaveshaperDistortionMachine.cpp
     src/machines/DelayFxMachine.cpp
@@ -123,3 +121,21 @@ target_link_libraries(myk-tracker-plug
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+include(CTest)
+if (BUILD_TESTING)
+    juce_add_console_app(sequence-read-head-tests PRODUCT_NAME "Sequence Read Head Tests")
+    juce_generate_juce_header(sequence-read-head-tests)
+    target_sources(sequence-read-head-tests PRIVATE
+        tests/SequenceReadHeadTests.cpp
+        src/Sequencer.cpp
+        src/SequencerCommands.cpp)
+    target_include_directories(sequence-read-head-tests PRIVATE src)
+    target_compile_features(sequence-read-head-tests PRIVATE cxx_std_17)
+    target_compile_definitions(sequence-read-head-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(sequence-read-head-tests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME sequence-read-head-tests COMMAND sequence-read-head-tests)
+endif()

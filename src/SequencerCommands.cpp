@@ -3,7 +3,6 @@
 #include <stdexcept>
 #include <iostream>
 #include <assert.h>
-#include <random>
 #include "MachineUtilsAbs.h"
 #include "Sequencer.h"
 
@@ -18,30 +17,6 @@ Command::Command(const std::string& _name, const std::string& _shortName, const 
     : name(_name), shortName(_shortName), description(_description), parameters(_parameters), 
     noteEditGoesToParam{_noteEditGoesToParam}, numberEditGoesToParam{_numberEditGoesToParam}, lengthEditGoesToParam{_lengthEditGoesToParam}, execute(std::move(_execute)) {}
 
-
-/** handy wrapper for generating random numbers */
-// Simple RNG wrapper for sequencer command probability checks.
-class RandomNumberGenerator {
-private:
-    static std::mt19937 gen; // Mersenne Twister random number generator
-    static std::uniform_real_distribution<> dis; // Uniform real distribution between 0 and 1
-
-public:
-    // Static function to get a random number between 0 and 1
-    static double getRandomNumber() {
-        return dis(gen);
-    }
-
-    // Initialize the random number generator and the distribution
-    static void initialize() {
-        std::random_device rd; // Non-deterministic random device for seeding
-        gen = std::mt19937(rd()); // Seed the generator
-        dis = std::uniform_real_distribution<>(0.0, 1.0); // Define the range
-    }
-};
-// Definition of static members
-std::mt19937 RandomNumberGenerator::gen;
-std::uniform_real_distribution<> RandomNumberGenerator::dis;
 
 // namespaced global vars used in the command processing lambdas
 // for speed / avoiding passing around objects too much
@@ -90,15 +65,13 @@ void CommandProcessor::initialiseCommands() {
     assert(CommandData::masterClock != nullptr);
     assert(CommandData::machineUtils != nullptr);
     
-    RandomNumberGenerator::initialize();
     // get a MIDI link going
     Command midiNote{
             "MIDINote", "Midi", "Plays a MIDI note",
               // long, short, min, max, step,default
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
+              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
               
             Step::noteInd, // int noteEditGoesToParam;
             Step::velInd, // int numberEditGoesToParam;
@@ -107,25 +80,12 @@ void CommandProcessor::initialiseCommands() {
                 assert(stepData->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
                 assert(sequenceContext != nullptr);
                 if ((*stepData)[Step::noteInd] > 0) {// there is a valid note
-                    double triggerProbability = (*stepData)[Step::probInd];
-                    if (sequenceContext->triggerProbability > 0){
-                        triggerProbability = sequenceContext->triggerProbability;
-                    }
-                    double random_number = RandomNumberGenerator::getRandomNumber();
-                    if (random_number < triggerProbability){ 
-                        // double now = CommandData::masterClock->getCurrentTick();
-                        
-                        // std::cout << "command data " << (*stepData)[Step::noteInd] << std::endl;
-                        // DBG("in the midi command... ");
-                        CommandData::machineUtils->sendMessageToMachine(
-                            static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
-                            static_cast<unsigned short> (sequenceContext->machineId),
-                            static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
-                            static_cast<unsigned short> ((*stepData)[Step::velInd]), 
-                            // (long) ((*stepData)[Step::lengthInd]+now)
-                            static_cast<unsigned short> ((*stepData)[Step::lengthInd])
-                        );
-                    }
+                    CommandData::machineUtils->sendMessageToMachine(
+                        static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
+                        static_cast<unsigned short> (sequenceContext->machineId),
+                        static_cast<unsigned short> ((*stepData)[Step::noteInd]),
+                        static_cast<unsigned short> ((*stepData)[Step::velInd]),
+                        static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
                 }
                 
             }
@@ -134,143 +94,59 @@ void CommandProcessor::initialiseCommands() {
             "Log", "Log", "Prints step data to the console",
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
+              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
             [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
-                double triggerProbability = (*stepData)[Step::probInd];
-                if (sequenceContext->triggerProbability > 0){
-                    triggerProbability = sequenceContext->triggerProbability;
-                }
-                double random_number = RandomNumberGenerator::getRandomNumber();
-                if (random_number < triggerProbability){
-                    std::cout << "Log command: machineId=" << sequenceContext->machineId
-                              << " triggerProb=" << triggerProbability
-                              << " stepData=[";
-                    for (std::size_t i = 0; i < stepData->size(); ++i){
-                        std::cout << (*stepData)[i];
-                        if (i + 1 < stepData->size()){
-                            std::cout << ", ";
-                        }
+                std::cout << "Log command: machineId=" << sequenceContext->machineId << " stepData=[";
+                for (std::size_t i = 0; i < stepData->size(); ++i){
+                    std::cout << (*stepData)[i];
+                    if (i + 1 < stepData->size()){
+                        std::cout << ", ";
                     }
-                    std::cout << "]" << std::endl;
                 }
+                std::cout << "]" << std::endl;
             }
     };
     Command samplerCommand{
             "Sampler", "Samp", "Plays a sampler voice",
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
+              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
             [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
-                double triggerProbability = (*stepData)[Step::probInd];
-                if (sequenceContext->triggerProbability > 0){
-                    triggerProbability = sequenceContext->triggerProbability;
-                }
-                double random_number = RandomNumberGenerator::getRandomNumber();
-                if (random_number < triggerProbability){ 
-                    CommandData::machineUtils->sendMessageToMachine(
-                        static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
-                        static_cast<unsigned short> (sequenceContext->machineId),
-                        static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
-                        static_cast<unsigned short> ((*stepData)[Step::velInd]), 
-                        static_cast<unsigned short> ((*stepData)[Step::lengthInd])
-                    );
-                }
-            }
-    };
-    Command arpeggiatorCommand{
-            "Arpeggiator", "Arp", "Feeds notes into an arpeggiator buffer",
-            { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
-              Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
-            Step::noteInd,
-            Step::velInd,
-            Step::lengthInd,
-            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
-                assert(stepData->size() == Step::maxInd + 1);
-                assert(sequenceContext != nullptr);
-                double triggerProbability = (*stepData)[Step::probInd];
-                if (sequenceContext->triggerProbability > 0){
-                    triggerProbability = sequenceContext->triggerProbability;
-                }
-                double random_number = RandomNumberGenerator::getRandomNumber();
-                if (random_number < triggerProbability){ 
-                    CommandData::machineUtils->sendMessageToMachine(
-                        CommandType::Arpeggiator,
-                        static_cast<unsigned short> (sequenceContext->machineId),
-                        static_cast<unsigned short> ((*stepData)[Step::noteInd]), 
-                        static_cast<unsigned short> ((*stepData)[Step::velInd]), 
-                        static_cast<unsigned short> ((*stepData)[Step::lengthInd])
-                    );
-                }
+                CommandData::machineUtils->sendMessageToMachine(
+                    static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
+                    static_cast<unsigned short> (sequenceContext->machineId),
+                    static_cast<unsigned short> ((*stepData)[Step::noteInd]),
+                    static_cast<unsigned short> ((*stepData)[Step::velInd]),
+                    static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
             }
     };
     Command wavetableSynthCommand{
             "WavetableSynth", "Wave", "Plays the internal wavetable synth",
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd),
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd),
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
+              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
             [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
-                double triggerProbability = (*stepData)[Step::probInd];
-                if (sequenceContext->triggerProbability > 0){
-                    triggerProbability = sequenceContext->triggerProbability;
-                }
-                double random_number = RandomNumberGenerator::getRandomNumber();
-                if (random_number < triggerProbability){
-                    CommandData::machineUtils->sendMessageToMachine(
-                        CommandType::WavetableSynth,
-                        static_cast<unsigned short> (sequenceContext->machineId),
-                        static_cast<unsigned short> ((*stepData)[Step::noteInd]),
-                        static_cast<unsigned short> ((*stepData)[Step::velInd]),
-                        static_cast<unsigned short> ((*stepData)[Step::lengthInd])
-                    );
-                }
-            }
-    };
-    Command polyArpeggiatorCommand{
-            "PolyArpeggiator", "PArp", "Feeds notes into a polyphonic arpeggiator buffer",
-            { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd),
-              Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd),
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd),
-              Parameter("Prob", "%", 0, 1, 0.1, 1.0, Step::probInd, 2)},
-            Step::noteInd,
-            Step::velInd,
-            Step::lengthInd,
-            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
-                assert(stepData->size() == Step::maxInd + 1);
-                assert(sequenceContext != nullptr);
-                double triggerProbability = (*stepData)[Step::probInd];
-                if (sequenceContext->triggerProbability > 0){
-                    triggerProbability = sequenceContext->triggerProbability;
-                }
-                const double random_number = RandomNumberGenerator::getRandomNumber();
-                if (random_number < triggerProbability){
-                    CommandData::machineUtils->sendMessageToMachine(
-                        CommandType::PolyArpeggiator,
-                        static_cast<unsigned short> (sequenceContext->machineId),
-                        static_cast<unsigned short> ((*stepData)[Step::noteInd]),
-                        static_cast<unsigned short> ((*stepData)[Step::velInd]),
-                        static_cast<unsigned short> ((*stepData)[Step::lengthInd])
-                    );
-                }
+                CommandData::machineUtils->sendMessageToMachine(
+                    CommandType::WavetableSynth,
+                    static_cast<unsigned short> (sequenceContext->machineId),
+                    static_cast<unsigned short> ((*stepData)[Step::noteInd]),
+                    static_cast<unsigned short> ((*stepData)[Step::velInd]),
+                    static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
             }
     };
     // Command sample{
@@ -279,7 +155,6 @@ void CommandProcessor::initialiseCommands() {
     //           Parameter("Note", "N", 0, 127, 1, 0, Step::noteInd), 
     //           Parameter("Vel", "V", 0, 127, 1, 0, Step::velInd), 
     //           Parameter("Dur", "D", 0, 8, 1, 0, Step::lengthInd),
-    //           Parameter("Prob", "%", 0, 1, 0.1, 1, Step::probInd)},
 
     //         Step::noteInd, // int noteEditGoesToParam;
     //         Step::velInd, // int numberEditGoesToParam;
@@ -296,15 +171,11 @@ void CommandProcessor::initialiseCommands() {
     CommandData::commands[midiNote.shortName] = midiNote;
     CommandData::commands[logCommand.shortName] = logCommand;
     CommandData::commands[samplerCommand.shortName] = samplerCommand;
-    CommandData::commands[arpeggiatorCommand.shortName] = arpeggiatorCommand;
     CommandData::commands[wavetableSynthCommand.shortName] = wavetableSynthCommand;
-    CommandData::commands[polyArpeggiatorCommand.shortName] = polyArpeggiatorCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::MidiNote)] = midiNote;
     CommandData::commandsDouble[static_cast<double>(CommandType::Log)] = logCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::Sampler)] = samplerCommand;
-    CommandData::commandsDouble[static_cast<double>(CommandType::Arpeggiator)] = arpeggiatorCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::WavetableSynth)] = wavetableSynthCommand;
-    CommandData::commandsDouble[static_cast<double>(CommandType::PolyArpeggiator)] = polyArpeggiatorCommand;
     // CommandData::commands[sample.shortName] = sample;
     // CommandData::commandsDouble[2] = sample;
 }

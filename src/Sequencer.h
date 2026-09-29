@@ -17,6 +17,8 @@
 #include <shared_mutex>
 #include <memory>
 #include <unordered_map>
+#include <array>
+#include <random>
 
 
 #include "SequencerEditor.h"
@@ -41,9 +43,8 @@ class Step{
     const static std::size_t noteInd{1};
     const static std::size_t velInd{2};
     const static std::size_t lengthInd{3};
-    const static std::size_t probInd{4};
     /** when populating an empty step, use this */
-    const static std::size_t maxInd{4};
+    const static std::size_t maxInd{3};
 
     
     
@@ -116,14 +117,38 @@ class Sequencer;
  **/
 enum class SequenceType {midiNote, drumMidi, chordMidi, samplePlayer, transposer, lengthChanger, tickChanger};
 
+enum class SequenceReadMode { linear, random, randomChord };
+
+struct SequenceReadHeadConfig
+{
+  std::size_t ticksPerStep = 4;
+  SequenceReadMode mode = SequenceReadMode::linear;
+  std::size_t polyphony = 3;
+  std::string rhythm = "1";
+  double probability = 1.0;
+};
+
+struct SequenceReadHeadSnapshot
+{
+  SequenceReadHeadConfig config;
+  std::vector<std::size_t> positions;
+};
+
 // Sequencer track with steps, playback state, and machine config.
 class Sequence{
   public:
     /** param index for */
-    const static std::size_t machineIdConfig{0}; 
-    const static std::size_t tpsConfig{1};
-    const static std::size_t probConfig{2};
-    const static std::size_t machineTypeConfig{3};
+    static constexpr std::size_t sendConfig{0};
+    static constexpr std::size_t headCountConfig{1};
+    static constexpr std::size_t headConfig{2};
+    static constexpr std::size_t tpsConfig{3};
+    static constexpr std::size_t modeConfig{4};
+    static constexpr std::size_t polyphonyConfig{5};
+    static constexpr std::size_t rhythmConfig{6};
+    static constexpr std::size_t probabilityConfig{7};
+    static constexpr std::size_t configCount{8};
+    static constexpr std::size_t maxReadHeads{3};
+    static constexpr std::size_t maxChordPolyphony{5};
      
     
 
@@ -217,8 +242,15 @@ class Sequence{
     double getMachineType() const;
     void setMachineId(double machineId);
     double getMachineId() const;
-    void setTriggerProbability(double triggerProbability);
-    double getTriggerProbability() const;
+    std::size_t getReadHeadCount() const;
+    void setReadHeadCount(std::size_t count);
+    const SequenceReadHeadConfig& getReadHeadConfig(std::size_t head) const;
+    bool setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig& config);
+    std::vector<SequenceReadHeadSnapshot> getReadHeadSnapshots() const;
+    static const std::vector<std::string>& getRhythmPresets();
+    static const char* readModeName(SequenceReadMode mode);
+    static bool parseReadMode(const std::string& name, SequenceReadMode& mode);
+    void resetReadHeads(bool immediate);
     SequenceReadOnly getReadOnlyContext() const;
   /** add a transpose processor to this sequence. 
      * Normally, a transposer type sequence will call this on a midiNote type sequence
@@ -259,7 +291,6 @@ class Sequence{
     std::vector<Step> steps;
     SequenceType type;
     double machineType;
-    double triggerProbability;
     // temporary sequencer adjustment parameters that get reset at step 0
     double transpose; 
     signed int lengthAdjustment;
@@ -276,6 +307,21 @@ class Sequence{
     /** used to keep in sync with the '1'*/
     std::size_t tickOfFour;
     bool muted; 
+    struct ReadHeadState
+    {
+      SequenceReadHeadConfig config;
+      std::size_t ticksElapsed = 0;
+      std::size_t rhythmIndex = 0;
+      std::size_t linearStep = 0;
+      std::array<std::size_t, maxChordPolyphony> positions{};
+      std::size_t positionCount = 0;
+      std::mt19937 random { 0x4d594b31u };
+    };
+    std::vector<ReadHeadState> readHeads;
+
+    std::size_t eligibleRandomSteps(std::array<std::size_t, 128>& eligible) const;
+    void selectPositions(ReadHeadState& head);
+    void resetReadHeadRuntime(ReadHeadState& head, bool immediate);
     /** maps from linear midi scale to general midi drum notes*/
     std::map<int,int> midiScaleToDrum;
 
@@ -409,7 +455,7 @@ class Sequencer : public SequencerAbs {
        */
       std::vector<std::vector<std::string>>& getSequenceAsGridOfStrings();
       /** get a grid of strings representing configs for all sequences. This is generated on the fly*/
-      std::vector<std::vector<std::string>> getSequenceConfigsAsGridOfStrings();
+      std::vector<std::vector<std::string>> getSequenceConfigsAsGridOfStrings(std::size_t selectedHead = 0);
 
       /** vector of vector of string representation of a step. This is generated on the fly*/
       std::vector<std::vector<std::string>> getStepAsGridOfStrings(std::size_t seq, std::size_t step);
@@ -420,9 +466,9 @@ class Sequencer : public SequencerAbs {
       /** returns a vector of parameter 'spec' objects for the sequencer parameters. */
       std::vector<Parameter>& getSeqConfigSpecs() ;
       /** increment the parameter at the sent index. uses the param spec to dictate the step and range*/
-      void incrementSeqParam(std::size_t seq, std::size_t paramIndex);
+      void incrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex = 0);
       /** decrement the parameter at the sent index. uses param spec to dictate the step and range*/
-      void decrementSeqParam(std::size_t seq, std::size_t paramIndex);
+      void decrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex = 0);
       /** increment step data for seq, step,row,col. Checks param configs for command type 
        * to decide limits and step size 
       */

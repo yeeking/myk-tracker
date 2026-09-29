@@ -28,6 +28,10 @@ private:
 
     static constexpr double kStateVersion = 2.0;
     static constexpr std::size_t kMaxChannels = 2;
+    // A standalone device can begin with an underspecified block size before
+    // its first real callback.  Keep a useful preallocated minimum, then
+    // process any larger callback in chunks without allocating on audio thread.
+    static constexpr juce::uint32 kMinimumPreparedBlockSize = 2048;
 
     static constexpr float kMinSatDriveDb = 0.0f;
     static constexpr float kMaxSatDriveDb = 24.0f;

@@ -29,7 +29,7 @@ struct MachineNoteEvent
     unsigned short durationTicks = 0;
 };
 
-// Interface for sequencer-controlled machines (samplers, arpeggiators, etc).
+// Interface for stack instruments and audio processors.
 class MachineInterface
 {
 public:

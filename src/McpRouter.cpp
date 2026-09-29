@@ -88,11 +88,22 @@ juce::var schema(const juce::StringArray& operations = {}, bool revisions = true
             properties.getDynamicObject()->setProperty(name, revision);
         }
     }
-    // Shared command fields. Individual operation validation remains in the
-    // typed control service; declaring them here keeps strict MCP clients from
-    // rejecting legitimate tracker commands before dispatch.
-    for (const auto* name : { "scope", "setId", "sequenceId", "stepId", "row", "column", "command", "note", "velocity", "durationTicks", "probability", "bpm", "internalClock", "playMode", "length", "ticksPerStep", "triggerProbability", "machineStackId", "muted", "armed", "mode", "stackId", "slotId", "direction", "gainDb", "controlId", "value", "text", "filename", "path", "playerId", "startNote", "endNote", "loadId", "confirm" })
-        properties.getDynamicObject()->setProperty(name, object());
+    auto addTyped = [&properties](const char* name, const char* type)
+    {
+        auto property = object();
+        property.getDynamicObject()->setProperty("type", type);
+        properties.getDynamicObject()->setProperty(name, property);
+    };
+    for (const auto* name : { "scope", "command", "playMode", "mode", "rhythm", "slotId", "controlId", "text", "filename", "path", "loadId" })
+        addTyped(name, "string");
+    for (const auto* name : { "setId", "sequenceId", "stepId", "row", "column", "length", "headCount", "headIndex", "ticksPerStep", "polyphony", "machineStackId", "stackId", "direction", "playerId", "startNote", "endNote" })
+        addTyped(name, "integer");
+    for (const auto* name : { "note", "velocity", "durationTicks", "bpm", "headProbability", "gainDb" })
+        addTyped(name, "number");
+    for (const auto* name : { "internalClock", "muted", "solo", "armed", "enabled", "confirm" })
+        addTyped(name, "boolean");
+    for (const auto* name : { "notes", "lengths" }) addTyped(name, "array");
+    properties.getDynamicObject()->setProperty("value", object());
     value.getDynamicObject()->setProperty("properties", properties);
     return value;
 }
@@ -120,12 +131,16 @@ const std::vector<ToolDefinition>& tools()
 {
     static const std::vector<ToolDefinition> registry {
         { "tracker_get_state", "Read the tracker state or a named state scope.", TrackerControlService::CommandKind::getState, {}, true },
+        { "tracker_notes", "Read non-empty track notes as compact n:[[stepId,note,...],...].", TrackerControlService::CommandKind::getTrackNotes, {}, true },
+        { "tracker_step", "Read one step as compact v:[[command,note,velocity,duration],...].", TrackerControlService::CommandKind::getStepValues, {}, true },
+        { "tracker_notes_set", "Replace a track's notes from compact per-step notes/chords; grows a track up to 128 steps and uses one velocity and durationTicks for all notes.", TrackerControlService::CommandKind::setTrackNotes, {}, false },
+        { "tracker_lengths_set", "Set each step's note duration from a compact lengths array.", TrackerControlService::CommandKind::setTrackLengths, {}, false },
         { "tracker_transport", "Control transport, tempo, clock mode, and song mode.", TrackerControlService::CommandKind::transport, { "play", "stop", "toggle", "rewind", "set" } },
         { "tracker_set_step", "Create, patch, clear, or activate a tracker step.", TrackerControlService::CommandKind::setStep, { "set", "patch", "clear", "toggle_active" } },
-        { "tracker_edit_sequence", "Edit sequence configuration and focus the affected sequence.", TrackerControlService::CommandKind::editSequence, { "set" } },
+        { "tracker_edit_sequence", "Edit routing and sequence-owned read heads (count, selected head, TPS, mode, polyphony, rhythm, probability) and focus the affected sequence.", TrackerControlService::CommandKind::editSequence, { "set" } },
         { "tracker_edit_song", "Edit song rows or song playback mode.", TrackerControlService::CommandKind::editSong, { "add", "remove", "set_mode", "select" } },
-        { "tracker_edit_machine_stack", "Edit stack slots, routing, gain, and order.", TrackerControlService::CommandKind::editMachineStack, { "add", "remove", "move", "cycle_type", "toggle", "set_gain" } },
-        { "tracker_machine_control", "Invoke a machine control by stable control ID or current grid address.", TrackerControlService::CommandKind::machineControl, { "activate", "adjust", "insert", "preview", "text", "backspace" } },
+        { "tracker_edit_machine_stack", "Edit stack slots, routing, gain, mute, solo, order, and idempotent enablement.", TrackerControlService::CommandKind::editMachineStack, { "add", "remove", "move", "cycle_type", "toggle", "set_enabled", "set_gain", "set_send", "set_muted", "set_solo" } },
+        { "tracker_machine_control", "Invoke a machine control directly by stable stack/slot/control address; legacy grid addressing remains available for compatibility.", TrackerControlService::CommandKind::machineControl, { "activate", "adjust", "insert", "set", "preview", "reset", "text", "backspace" } },
         { "tracker_load_sample", "Load a local sample into a stack sampler and map it to an inclusive MIDI note range; poll completion with loadId.", TrackerControlService::CommandKind::loadSample, { "load", "status" } },
         { "tracker_ui_action", "Perform a GUI-equivalent navigation or edit action.", TrackerControlService::CommandKind::uiAction, { "up", "down", "left", "right", "activate", "increment", "decrement", "add_row", "remove_row", "reset", "next_step", "mute", "arm", "note", "page" } },
         { "tracker_application", "Reset, quit, or open standalone audio settings.", TrackerControlService::CommandKind::application, { "reset", "quit", "audio_settings" }, false, true }
@@ -166,7 +181,7 @@ juce::var legacyToolsListResult()
 
 juce::var controlToolResult(const TrackerControlService::Result& controlResult)
 {
-    auto structured = controlResult.data.isObject() ? controlResult.data : object();
+    auto structured = controlResult.data.getDynamicObject() != nullptr ? controlResult.data : object();
     if (!controlResult.ok)
     {
         structured = object();
@@ -357,7 +372,7 @@ McpRouter::Response McpRouter::route(const Request& request)
             if (hasProperty(arguments, "expectedViewRevision")) command.expectedViewRevision = static_cast<std::uint64_t>((juce::int64) arguments.getProperty("expectedViewRevision", 0));
             controlResult = control.execute(command);
         }
-        auto structured = controlResult.data.isObject() ? controlResult.data : object();
+        auto structured = controlResult.data.getDynamicObject() != nullptr ? controlResult.data : object();
         if (!controlResult.ok)
         {
             structured = object();

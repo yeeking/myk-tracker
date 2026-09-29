@@ -88,20 +88,7 @@ std::vector<std::vector<std::string>> Step::toStringGrid(const SequenceReadOnly*
         colData.push_back(cmd.shortName);
       }
       else
-      {
-        // decide how to display the step 
-        // based on column index
-        if (col == Step::probInd){
-          double probValue = data[row][col];
-          if (sequenceContext != nullptr && sequenceContext->triggerProbability > 0){
-            probValue = sequenceContext->triggerProbability;
-          }
-          colData.push_back(cmd.parameters[col - 1].shortName + Step::dblToString(probValue, 2));
-        }
-        else{
-          colData.push_back(cmd.parameters[col - 1].shortName + std::to_string((int)data[row][col]));
-        }
-      }
+        colData.push_back(cmd.parameters[col - 1].shortName + std::to_string((int)data[row][col]));
     }
     grid.push_back(colData);
   }
@@ -147,12 +134,11 @@ void Step::setDataAt(std::size_t row, std::size_t col, double value)
 
   // apply data constraints based on current command
   if (col == Step::cmdInd)
-  { // changing the command - only allowed a value 0->no. commands
-    const std::size_t maxCmds = static_cast<std::size_t>(CommandProcessor::countCommands());
-    if (value >= maxCmds)
-      value = maxCmds - 1;
-    if (value < 0)
-      value = 0;
+  {
+    const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, value)));
+    if (command != CommandType::MidiNote && command != CommandType::Log
+        && command != CommandType::Sampler && command != CommandType::WavetableSynth)
+      value = static_cast<double>(CommandType::MidiNote);
   }
   else if (col > Step::cmdInd)
   { // it is one of the parameter columns - use parameter spec constraints
@@ -232,7 +218,6 @@ Sequence::Sequence(Sequencer *_sequencer,
       machineId{static_cast<double>(_machineId)},
       type{SequenceType::midiNote},
       machineType{static_cast<double>(CommandType::MidiNote)},
-      triggerProbability{0.0},
       transpose{0},
       lengthAdjustment{0},
       ticksPerStep{4},
@@ -245,6 +230,7 @@ Sequence::Sequence(Sequencer *_sequencer,
       rw_mutex{std::make_unique<std::shared_mutex>()}
 // , midiScaleToDrum{MachineUtilsAbs::getScaleMidiToDrumMidi()}
 {
+  readHeads.emplace_back();
   for (std::size_t i = 0; i < seqLength; i++)
   {
     Step s;
@@ -260,60 +246,52 @@ Sequence::Sequence(Sequencer *_sequencer,
 /** go to the next step */
 void Sequence::tick(bool trigger)
 {
-  // write lock
-  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  ++ticksElapsed;
   tickOfFour = (tickOfFour + 1) % 4;
-  
-  // jump to the top 
-  if (rewindAtNextZeroTick && tickOfFour == 0){
-    tickOfFour = 0;
-    ticksElapsed = ticksPerStep;
-    currentStep = 0; 
-    rewindAtNextZeroTick = false; 
-  }
-  // std::cout << "elap " <<ticksElapsed << " t/4 " << tickOfFour << " tps " << ticksPerStep <<" next tps " << nextTicksPerStep << std::endl; 
-  if (nextTicksPerStep  > 0 && tickOfFour == 0){// update to this tps on next zero of tickOfFour
-      // std::cout << "changing tps " << nextTicksPerStep << std::endl;
-      this->originalTicksPerStep = this->nextTicksPerStep;
-      this->ticksElapsed = ticksPerStep;
-      currentStep = 0;
-      deactivateProcessors();
-
-      // can't call this as it asks for another lock which
-      // causes a crash
-      //setTicksPerStep(nextTicksPerStep);
-      nextTicksPerStep = 0;// don't trigger it again
-  }
-
-  if (ticksElapsed == ticksPerStep)
+  if (rewindAtNextZeroTick && tickOfFour == 0)
   {
-    ticksElapsed = 0;
-    if (trigger && !muted)
-    {
-      SequenceReadOnly context = getReadOnlyContext();
-      steps[currentStep].trigger(steps[currentStep].howManyDataRows(), &context);
-    }
-
-    const long long adjustedLength =
-        static_cast<long long>(currentLength) + static_cast<long long>(lengthAdjustment);
-    if (adjustedLength < 1)
-    {
-      currentStep = 0;
-    }
-    else
-    {
-      const std::size_t lengthSize = static_cast<std::size_t>(adjustedLength);
-      currentStep = (currentStep + 1) % lengthSize;
-    }
-    if (currentStep >= steps.size())
-      currentStep = 0;
-    assert(currentStep < steps.size());
-    // switch off any adjusters when we are at step 0
-    if (currentStep == 0)
-      deactivateProcessors();
+    resetReadHeads(true);
+    rewindAtNextZeroTick = false;
   }
 
+  if (nextTicksPerStep > 0 && tickOfFour == 0)
+  {
+    auto config = readHeads.front().config;
+    config.ticksPerStep = nextTicksPerStep;
+    setReadHeadConfig(0, config);
+    nextTicksPerStep = 0;
+  }
+
+  SequenceReadOnly context = getReadOnlyContext();
+  std::uniform_real_distribution<double> chance(0.0, 1.0);
+  for (auto& head : readHeads)
+  {
+    ++head.ticksElapsed;
+    if (head.ticksElapsed < head.config.ticksPerStep)
+      continue;
+    head.ticksElapsed = 0;
+
+    const bool rhythmTrigger = head.config.rhythm[head.rhythmIndex] == '1';
+    head.rhythmIndex = (head.rhythmIndex + 1) % head.config.rhythm.size();
+    if (!rhythmTrigger)
+      continue;
+
+    selectPositions(head);
+    if (head.positionCount == 0)
+      continue;
+    currentStep = head.positions[0];
+
+    // Probability is a head-level gate. Selection still advances on a miss.
+    if (!trigger || muted || chance(head.random) >= head.config.probability)
+      continue;
+    for (std::size_t position = 0; position < head.positionCount; ++position)
+    {
+      const auto stepIndex = head.positions[position];
+      if (stepIndex < steps.size() && steps[stepIndex].isActive())
+        steps[stepIndex].trigger(steps[stepIndex].howManyDataRows(), &context);
+    }
+  }
+
+  ticksElapsed = readHeads.empty() ? 0 : readHeads.front().ticksElapsed;
 }
 
 std::size_t Sequence::getTicksElapsed() const
@@ -336,8 +314,7 @@ void Sequence::deactivateProcessors()
 {
   transpose = 0;
   lengthAdjustment = 0;
-  ticksPerStep = originalTicksPerStep;
-  ticksElapsed = 0;
+  ticksPerStep = getTicksPerStep();
 }
 
 /** set this step, row values to zero */
@@ -358,9 +335,12 @@ void Sequence::setLengthAdjustment(std::size_t lenAdjust)
 
 void Sequence::setTicksPerStep(std::size_t tps)
 {
-  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  this->originalTicksPerStep = tps;
-  this->ticksElapsed = 0;
+  if (readHeads.empty()) readHeads.emplace_back();
+  auto config = readHeads.front().config;
+  config.ticksPerStep = std::max<std::size_t>(1, std::min<std::size_t>(16, tps));
+  setReadHeadConfig(0, config);
+  originalTicksPerStep = config.ticksPerStep;
+  ticksPerStep = config.ticksPerStep;
 }
 
 void Sequence::onZeroSetTicksPerStep(std::size_t _nextTicksPerStep)
@@ -373,13 +353,13 @@ void Sequence::setTicksPerStepAdjustment(std::size_t tps)
 {
   if (tps < 1 || tps > 16)
     return;
-  this->ticksPerStep = tps;
+  setTicksPerStep(tps);
 }
 
 std::size_t Sequence::getTicksPerStep() const
 {
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
-  return this->originalTicksPerStep;
+  return readHeads.empty() ? 4 : readHeads.front().config.ticksPerStep;
 }
 
 std::size_t Sequence::getNextTicksPerStep() const
@@ -458,6 +438,12 @@ void Sequence::setLength(std::size_t length)
     return;
 
   currentLength = length;
+  for (auto& head : readHeads)
+  {
+    head.linearStep %= currentLength;
+    for (std::size_t i = 0; i < head.positionCount; ++i)
+      head.positions[i] %= currentLength;
+  }
 }
 
 void Sequence::setStepData(std::size_t step, std::vector<std::vector<double>> data)
@@ -524,20 +510,11 @@ SequenceType Sequence::getType() const
 
 void Sequence::setMachineType(double newMachineType)
 {
-  int maxCommands = CommandProcessor::countCommands();
-  if (maxCommands > 0)
-  {
-    if (newMachineType < 0) newMachineType = 0;
-    if (newMachineType >= maxCommands) newMachineType = maxCommands - 1;
-  }
+  const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, newMachineType)));
+  if (command != CommandType::MidiNote && command != CommandType::Log
+      && command != CommandType::Sampler && command != CommandType::WavetableSynth)
+    newMachineType = static_cast<double>(CommandType::MidiNote);
   this->machineType = newMachineType;
-  for (std::size_t step = 0; step < steps.size(); ++step)
-  {
-    for (std::size_t row = 0; row < steps[step].howManyDataRows(); ++row)
-    {
-      steps[step].setDataAt(row, Step::cmdInd, newMachineType);
-    }
-  }
 }
 
 double Sequence::getMachineType() const
@@ -548,7 +525,7 @@ double Sequence::getMachineType() const
 void Sequence::setMachineId(double newMachineId)
 {
   if (newMachineId < 0) newMachineId = 0;
-  if (newMachineId > 31) newMachineId = 31;
+  if (newMachineId > 15) newMachineId = 15;
   this->machineId = newMachineId;
 }
 
@@ -557,21 +534,179 @@ double Sequence::getMachineId() const
   return this->machineId;
 }
 
-void Sequence::setTriggerProbability(double newTriggerProbability)
+std::size_t Sequence::getReadHeadCount() const
 {
-  if (newTriggerProbability < 0) newTriggerProbability = 0;
-  if (newTriggerProbability > 1) newTriggerProbability = 1;
-  this->triggerProbability = newTriggerProbability;
+  return readHeads.size();
 }
 
-double Sequence::getTriggerProbability() const
+void Sequence::setReadHeadCount(std::size_t count)
 {
-  return this->triggerProbability;
+  count = std::max<std::size_t>(1, std::min<std::size_t>(maxReadHeads, count));
+  if (count < readHeads.size())
+    readHeads.resize(count);
+  else
+    while (readHeads.size() < count)
+      readHeads.emplace_back();
+  resetReadHeads(false);
+}
+
+const SequenceReadHeadConfig& Sequence::getReadHeadConfig(std::size_t head) const
+{
+  assert(head < readHeads.size());
+  return readHeads[head].config;
+}
+
+bool Sequence::setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig& requested)
+{
+  if (head >= readHeads.size())
+    return false;
+  auto config = requested;
+  config.ticksPerStep = std::max<std::size_t>(1, std::min<std::size_t>(16, config.ticksPerStep));
+  config.polyphony = std::max<std::size_t>(1, std::min<std::size_t>(maxChordPolyphony, config.polyphony));
+  config.probability = std::max(0.0, std::min(1.0, config.probability));
+  const auto& presets = getRhythmPresets();
+  if (std::find(presets.begin(), presets.end(), config.rhythm) == presets.end())
+    return false;
+  const auto oldConfig = readHeads[head].config;
+  const bool resetPhase = oldConfig.ticksPerStep != config.ticksPerStep
+      || oldConfig.mode != config.mode || oldConfig.rhythm != config.rhythm;
+  readHeads[head].config = std::move(config);
+  if (resetPhase)
+  {
+    readHeads[head].random.seed(0x4d594b31u + static_cast<std::uint32_t>(head * 0x9e3779b9u));
+    resetReadHeadRuntime(readHeads[head], false);
+  }
+  if (head == 0)
+  {
+    ticksPerStep = readHeads[head].config.ticksPerStep;
+    originalTicksPerStep = ticksPerStep;
+  }
+  return true;
+}
+
+std::vector<SequenceReadHeadSnapshot> Sequence::getReadHeadSnapshots() const
+{
+  std::vector<SequenceReadHeadSnapshot> result;
+  result.reserve(readHeads.size());
+  for (const auto& head : readHeads)
+  {
+    SequenceReadHeadSnapshot snapshot;
+    snapshot.config = head.config;
+    snapshot.positions.assign(head.positions.begin(), head.positions.begin() + static_cast<long>(head.positionCount));
+    result.push_back(std::move(snapshot));
+  }
+  return result;
+}
+
+const std::vector<std::string>& Sequence::getRhythmPresets()
+{
+  static const std::vector<std::string> presets = []
+  {
+    std::vector<std::string> values;
+    for (int width = 1; width <= 4; ++width)
+      for (int bits = 1; bits < (1 << width); ++bits)
+      {
+        std::string value(static_cast<std::size_t>(width), '0');
+        for (int bit = 0; bit < width; ++bit)
+          if ((bits & (1 << (width - bit - 1))) != 0)
+            value[static_cast<std::size_t>(bit)] = '1';
+        values.push_back(std::move(value));
+      }
+    return values;
+  }();
+  return presets;
+}
+
+const char* Sequence::readModeName(SequenceReadMode mode)
+{
+  switch (mode)
+  {
+    case SequenceReadMode::linear: return "linear";
+    case SequenceReadMode::random: return "random";
+    case SequenceReadMode::randomChord: return "rand_chord";
+  }
+  return "linear";
+}
+
+bool Sequence::parseReadMode(const std::string& name, SequenceReadMode& mode)
+{
+  if (name == "linear") mode = SequenceReadMode::linear;
+  else if (name == "random") mode = SequenceReadMode::random;
+  else if (name == "rand_chord") mode = SequenceReadMode::randomChord;
+  else return false;
+  return true;
+}
+
+void Sequence::resetReadHeadRuntime(ReadHeadState& head, bool immediate)
+{
+  head.ticksElapsed = immediate ? head.config.ticksPerStep - 1 : 0;
+  head.rhythmIndex = 0;
+  head.linearStep = 0;
+  head.positionCount = 0;
+}
+
+void Sequence::resetReadHeads(bool immediate)
+{
+  currentStep = 0;
+  for (std::size_t index = 0; index < readHeads.size(); ++index)
+  {
+    readHeads[index].random.seed(0x4d594b31u + static_cast<std::uint32_t>(index * 0x9e3779b9u));
+    resetReadHeadRuntime(readHeads[index], immediate);
+  }
+  ticksElapsed = readHeads.empty() ? 0 : readHeads.front().ticksElapsed;
+}
+
+std::size_t Sequence::eligibleRandomSteps(std::array<std::size_t, 128>& eligible) const
+{
+  const auto length = std::min({currentLength, steps.size(), eligible.size()});
+  std::size_t count = 0;
+  for (std::size_t stepIndex = 0; stepIndex < length; ++stepIndex)
+  {
+    if (!steps[stepIndex].isActive())
+      continue;
+    const auto data = steps[stepIndex].getData();
+    const bool hasNote = std::any_of(data.begin(), data.end(), [](const auto& row)
+    {
+      if (row.size() <= Step::noteInd || row[Step::noteInd] <= 0.0) return false;
+      const auto command = static_cast<CommandType>(static_cast<std::size_t>(row[Step::cmdInd]));
+      return command == CommandType::MidiNote || command == CommandType::Log
+          || command == CommandType::Sampler || command == CommandType::WavetableSynth;
+    });
+    if (hasNote) eligible[count++] = stepIndex;
+  }
+  return count;
+}
+
+void Sequence::selectPositions(ReadHeadState& head)
+{
+  head.positionCount = 0;
+  const auto length = std::max<std::size_t>(1, std::min(currentLength, steps.size()));
+  if (head.config.mode == SequenceReadMode::linear)
+  {
+    head.positions[0] = head.linearStep % length;
+    head.positionCount = 1;
+    head.linearStep = (head.linearStep + 1) % length;
+    return;
+  }
+
+  std::array<std::size_t, 128> eligible{};
+  const auto eligibleCount = eligibleRandomSteps(eligible);
+  if (eligibleCount == 0)
+    return;
+  for (std::size_t index = eligibleCount; index > 1; --index)
+  {
+    std::uniform_int_distribution<std::size_t> distribution(0, index - 1);
+    std::swap(eligible[index - 1], eligible[distribution(head.random)]);
+  }
+  const auto requested = head.config.mode == SequenceReadMode::randomChord ? head.config.polyphony : 1u;
+  head.positionCount = std::min<std::size_t>(requested, eligibleCount);
+  for (std::size_t index = 0; index < head.positionCount; ++index)
+    head.positions[index] = eligible[index];
 }
 
 SequenceReadOnly Sequence::getReadOnlyContext() const
 {
-  return SequenceReadOnly{triggerProbability, machineType, machineId};
+  return SequenceReadOnly{machineType, machineId};
 }
 
 void Sequence::setTranspose(double _transpose)
@@ -627,21 +762,19 @@ void Sequence::rewindAtNextZero()
 void Sequence::primeForImmediateTrigger()
 {
   deactivateProcessors();
-  currentStep = 0;
+  resetReadHeads(true);
   rewindAtNextZeroTick = false;
   nextTicksPerStep = 0;
   tickOfFour = 3;
-  ticksElapsed = ticksPerStep > 0 ? ticksPerStep - 1 : 0;
 }
 
 void Sequence::resetForTransportStart()
 {
   deactivateProcessors();
-  currentStep = 0;
+  resetReadHeads(true);
   rewindAtNextZeroTick = false;
   nextTicksPerStep = 0;
   tickOfFour = 3;
-  ticksElapsed = ticksPerStep > 0 ? ticksPerStep - 1 : 0;
 }
 
 
@@ -691,7 +824,9 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
     this->sequences[seq].setType(otherSeq->sequences[seq].getType());
     this->sequences[seq].setMachineId(otherSeq->sequences[seq].getMachineId());
     this->sequences[seq].setMachineType(otherSeq->sequences[seq].getMachineType());
-    this->sequences[seq].setTriggerProbability(otherSeq->sequences[seq].getTriggerProbability());
+    this->sequences[seq].setReadHeadCount(otherSeq->sequences[seq].getReadHeadCount());
+    for (std::size_t head = 0; head < this->sequences[seq].getReadHeadCount(); ++head)
+      this->sequences[seq].setReadHeadConfig(head, otherSeq->sequences[seq].getReadHeadConfig(head));
   }
 }
 
@@ -962,7 +1097,7 @@ double Sequencer::getStepDataAt(std::size_t seq, std::size_t step, std::size_t r
   return sequences[seq].getStepDataAt(step, row, col);
 }
 
-std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrings()
+std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrings(std::size_t selectedHead)
 {
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
 
@@ -972,24 +1107,20 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
 // - set transpose maybe? 
   // each col is a sequence
   std::vector<std::vector<std::string>>confGrid;
-  std::vector<Parameter> params = getSeqConfigSpecs();
-
   for (std::size_t seq =0;seq<howManySequences();++seq){
     confGrid.push_back(std::vector<std::string>());
     Sequence* sequence = getSequence(seq);
-    for (std::size_t paramIndex = 0; paramIndex < params.size(); ++paramIndex){
-      Parameter& p = params[paramIndex];
-      const std::size_t decPlaces = p.decPlaces < 0 ? 0u : static_cast<std::size_t>(p.decPlaces);
-      if (paramIndex == Sequence::machineIdConfig){
-        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getMachineId(), decPlaces));
-      }
-      else if (paramIndex == Sequence::tpsConfig){
-        confGrid[seq].push_back(p.shortName + ":" + std::to_string(getSequencerNextTicksPerStep(seq)));    
-      }
-      else if (paramIndex == Sequence::probConfig){
-        confGrid[seq].push_back(p.shortName + ":" + Step::dblToString(sequence->getTriggerProbability(), decPlaces));
-      }
-    }
+    const auto headCount = sequence->getReadHeadCount();
+    const auto headIndex = std::min(selectedHead, headCount - 1);
+    const auto& head = sequence->getReadHeadConfig(headIndex);
+    confGrid[seq].push_back("SEND:" + std::to_string(static_cast<int>(sequence->getMachineId())));
+    confGrid[seq].push_back("HEADS:" + std::to_string(headCount));
+    confGrid[seq].push_back("HEAD:" + std::to_string(headIndex + 1) + "/" + std::to_string(headCount));
+    confGrid[seq].push_back("TPS:" + std::to_string(head.ticksPerStep));
+    confGrid[seq].push_back("MODE:" + std::string(Sequence::readModeName(head.mode)));
+    confGrid[seq].push_back("POLY:" + std::to_string(head.polyphony));
+    confGrid[seq].push_back("RHY:" + head.rhythm);
+    confGrid[seq].push_back("P:" + Step::dblToString(head.probability, 2));
   }    
   return confGrid;
 }
@@ -1007,91 +1138,75 @@ std::vector<Parameter>& Sequencer::getSeqConfigSpecs()
 }
 void Sequencer::setupSeqConfigSpecs()
 {
-  seqConfigSpecs.resize(3);
-  seqConfigSpecs[Sequence::machineIdConfig] = Parameter("Machine ID", "ID", 0, 31, 1, 1, -1);
-  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Quarter beats per step", "QBS", 1, 16, 1, 4, -1);
-  seqConfigSpecs[Sequence::probConfig] = Parameter("Trig Prob", "P", 0.0, 1.0, 0.1, 0.0, -1, 2);
-  // TODO
-  // seqParamSpecs.push_back(Parameter("Velocity variation plus/minus %", "velvary", 0.0, 1.0, 0.1, 0.0));
-  // seqParamSpecs.push_back(Parameter("Shuffle +/- ticks", "shuf", 0, 3, 1, 0.0));
-  
-  
+  seqConfigSpecs.resize(Sequence::configCount);
+  seqConfigSpecs[Sequence::sendConfig] = Parameter("Send", "SEND", 0, 15, 1, 0, -1);
+  seqConfigSpecs[Sequence::headCountConfig] = Parameter("Heads", "HEADS", 1, 3, 1, 1, -1);
+  seqConfigSpecs[Sequence::headConfig] = Parameter("Head", "HEAD", 0, 2, 1, 0, -1);
+  seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1);
+  seqConfigSpecs[Sequence::modeConfig] = Parameter("Mode", "MODE", 0, 2, 1, 0, -1);
+  seqConfigSpecs[Sequence::polyphonyConfig] = Parameter("Polyphony", "POLY", 1, 5, 1, 3, -1);
+  seqConfigSpecs[Sequence::rhythmConfig] = Parameter("Rhythm", "RHY", 0, 25, 1, 0, -1);
+  seqConfigSpecs[Sequence::probabilityConfig] = Parameter("Probability", "P", 0, 1, 0.1, 1, -1, 2);
 }
 
 
-void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex)
+void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex)
 {
-  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
-
   assert(paramIndex < getSeqConfigSpecs().size());
-  Parameter p = seqConfigSpecs[paramIndex];
   Sequence* sequence = getSequence(seq);
-  if (paramIndex == Sequence::machineIdConfig){
-    double val = sequence->getMachineId();
-    val += p.step;
-    if (val > p.max) val = p.max;
-    if (val < p.min) val = p.min;
-    sequence->setMachineId(val);
+  if (paramIndex == Sequence::sendConfig)
+  {
+    sequence->setMachineId(std::min(15.0, sequence->getMachineId() + 1.0));
+    return;
   }
-  if (paramIndex == Sequence::machineTypeConfig){
-    double val = sequence->getMachineType();
-    val += p.step;
-    if (val >= CommandProcessor::countCommands()) val = 0;
-    if (val < 0) val = CommandProcessor::countCommands() - 1;
-    sequence->setMachineType(val);
+  if (paramIndex == Sequence::headCountConfig)
+  {
+    sequence->setReadHeadCount(sequence->getReadHeadCount() + 1);
+    return;
   }
-  if (paramIndex == Sequence::probConfig){
-    double val = sequence->getTriggerProbability();
-    val += p.step;
-    if (val > p.max) val = p.max;
-    if (val < p.min) val = p.min;
-    sequence->setTriggerProbability(val);
+  if (paramIndex == Sequence::headConfig) return;
+  headIndex = std::min(headIndex, sequence->getReadHeadCount() - 1);
+  auto config = sequence->getReadHeadConfig(headIndex);
+  if (paramIndex == Sequence::tpsConfig) config.ticksPerStep = std::min<std::size_t>(16, config.ticksPerStep + 1);
+  else if (paramIndex == Sequence::modeConfig) config.mode = static_cast<SequenceReadMode>((static_cast<int>(config.mode) + 1) % 3);
+  else if (paramIndex == Sequence::rhythmConfig)
+  {
+    const auto& presets = Sequence::getRhythmPresets();
+    const auto it = std::find(presets.begin(), presets.end(), config.rhythm);
+    config.rhythm = presets[(static_cast<std::size_t>(std::distance(presets.begin(), it)) + 1) % presets.size()];
   }
-  if (paramIndex == Sequence::tpsConfig){
-    double tps = static_cast<double>(sequences[seq].getTicksPerStep());
-    tps += p.step;
-    if (tps > p.max) tps = p.max;
-    if (tps < p.min) tps = p.min;
-    sequences[seq].onZeroSetTicksPerStep(static_cast<std::size_t>(tps));
-  }
-
+  else if (paramIndex == Sequence::probabilityConfig) config.probability = std::min(1.0, config.probability + 0.1);
+  sequence->setReadHeadConfig(headIndex, config);
 }
-void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex)
+void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex)
 {
-  // std::unique_lock<std::shared_mutex> lock(*rw_mutex);// write lock - this function edits sequencer data
-
   assert(paramIndex < getSeqConfigSpecs().size());
-
-  Parameter p = seqConfigSpecs[paramIndex];
   Sequence* sequence = getSequence(seq);
-  if (paramIndex == Sequence::machineIdConfig){
-    double val = sequence->getMachineId();
-    val -= p.step;
-    if (val < p.min) val = p.min;
-    if (val > p.max) val = p.max;
-    sequence->setMachineId(val);
+  if (paramIndex == Sequence::sendConfig)
+  {
+    sequence->setMachineId(std::max(0.0, sequence->getMachineId() - 1.0));
+    return;
   }
-  if (paramIndex == Sequence::machineTypeConfig){
-    double val = sequence->getMachineType();
-    val -= p.step;
-    if (val < 0) val = CommandProcessor::countCommands() - 1;
-    if (val >= CommandProcessor::countCommands()) val = 0;
-    sequence->setMachineType(val);
+  if (paramIndex == Sequence::headCountConfig)
+  {
+    sequence->setReadHeadCount(sequence->getReadHeadCount() - 1);
+    return;
   }
-  if (paramIndex == Sequence::probConfig){
-    double val = sequence->getTriggerProbability();
-    val -= p.step;
-    if (val < p.min) val = p.min;
-    if (val > p.max) val = p.max;
-    sequence->setTriggerProbability(val);
+  if (paramIndex == Sequence::headConfig) return;
+  headIndex = std::min(headIndex, sequence->getReadHeadCount() - 1);
+  auto config = sequence->getReadHeadConfig(headIndex);
+  if (paramIndex == Sequence::tpsConfig) config.ticksPerStep = std::max<std::size_t>(1, config.ticksPerStep - 1);
+  else if (paramIndex == Sequence::modeConfig) config.mode = static_cast<SequenceReadMode>((static_cast<int>(config.mode) + 2) % 3);
+  else if (paramIndex == Sequence::polyphonyConfig) config.polyphony = std::max<std::size_t>(1, config.polyphony - 1);
+  else if (paramIndex == Sequence::rhythmConfig)
+  {
+    const auto& presets = Sequence::getRhythmPresets();
+    const auto it = std::find(presets.begin(), presets.end(), config.rhythm);
+    const auto index = static_cast<std::size_t>(std::distance(presets.begin(), it));
+    config.rhythm = presets[(index + presets.size() - 1) % presets.size()];
   }
-  if (paramIndex == Sequence::tpsConfig){
-    double tps = static_cast<double>(sequences[seq].getTicksPerStep());
-    tps -= p.step;
-    if (tps < p.min) tps = p.min;
-    if (tps > p.max) tps = p.max;
-    sequences[seq].onZeroSetTicksPerStep(static_cast<std::size_t>(tps));
-  }
+  else if (paramIndex == Sequence::probabilityConfig) config.probability = std::max(0.0, config.probability - 0.1);
+  sequence->setReadHeadConfig(headIndex, config);
 }
 
 
