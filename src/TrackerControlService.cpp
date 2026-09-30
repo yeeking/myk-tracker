@@ -185,12 +185,18 @@ TrackerControlService::Result TrackerControlService::getScreenshot()
 
 TrackerControlService::Result TrackerControlService::getState(const juce::String& scope)
 {
-    return onMessageThread([this, scope] { return getStateNow(scope); });
+    return onMessageThread([this, scope] { return getStateNow(scope, true); });
 }
 
-TrackerControlService::TrackerViewSnapshot TrackerControlService::getViewSnapshot()
+TrackerControlService::TrackerViewSnapshot TrackerControlService::getViewSnapshot(bool includeSerializedMachineCells)
 {
-    const auto result = getState("view");
+    const auto result = onMessageThread([this, includeSerializedMachineCells] { return getStateNow("view", includeSerializedMachineCells); });
+    return { result.contentRevision, result.viewRevision, result.data };
+}
+
+TrackerControlService::TrackerViewSnapshot TrackerControlService::getViewSnapshotForPage()
+{
+    const auto result = onMessageThread([this] { return getStateNow("view", false, true); });
     return { result.contentRevision, result.viewRevision, result.data };
 }
 
@@ -255,8 +261,17 @@ juce::var TrackerControlService::makeMachineCellsNow()
 {
     auto& editor = processor.seqEditor;
     editor.refreshMachineStateForCurrentSequence();
-    const auto ui = processor.getUiState();
-    const auto stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(ui.getProperty("machineId", 0))));
+
+    std::size_t stackIndex = 0;
+    if (auto* viewedSequencer = processor.getSequencer(); viewedSequencer != nullptr)
+    {
+        const auto sequenceIndex = editor.getCurrentSequence();
+        if (sequenceIndex < viewedSequencer->howManySequences())
+            stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(viewedSequencer->getSequence(sequenceIndex)->getMachineId())));
+    }
+    if (stackIndex >= processor.machineStacks.size())
+        stackIndex = 0;
+
     juce::String slotId = "stack-controls";
     if (const auto selectedSlot = editor.getFocusedMachineDetailSlot())
     {
@@ -306,13 +321,28 @@ juce::var TrackerControlService::makeUiNow()
     return ui;
 }
 
-juce::var TrackerControlService::makeViewNow()
+juce::var TrackerControlService::makeUiForPageNow()
+{
+    auto ui = processor.getUiStateForCurrentPage();
+    if (sequenceSelection.active && ui.getDynamicObject() != nullptr)
+    {
+        auto selection = makeObject();
+        selection.getDynamicObject()->setProperty("sequence", static_cast<int>(sequenceSelection.sequence));
+        selection.getDynamicObject()->setProperty("startStep", static_cast<int>(std::min(sequenceSelection.anchorStep, sequenceSelection.cursorStep)));
+        selection.getDynamicObject()->setProperty("endStep", static_cast<int>(std::max(sequenceSelection.anchorStep, sequenceSelection.cursorStep)));
+        ui.getDynamicObject()->setProperty("sequenceSelection", selection);
+    }
+    return ui;
+}
+
+juce::var TrackerControlService::makeViewNow(bool includeSerializedMachineCells, bool pageOnly)
 {
     auto view = makeObject();
     auto* object = view.getDynamicObject();
-    const auto ui = makeUiNow();
+    const auto ui = pageOnly ? makeUiForPageNow() : makeUiNow();
     object->setProperty("ui", ui);
-    object->setProperty("machineCells", makeMachineCellsNow());
+    if (includeSerializedMachineCells)
+        object->setProperty("machineCells", makeMachineCellsNow());
     object->setProperty("contentRevision", static_cast<juce::int64>(contentRevision));
     object->setProperty("viewRevision", static_cast<juce::int64>(viewRevision));
     processor.sendCurrentCellValueOverOscIfChanged();
@@ -352,12 +382,12 @@ juce::var TrackerControlService::makeStateNow()
     return state;
 }
 
-TrackerControlService::Result TrackerControlService::getStateNow(const juce::String& scope)
+TrackerControlService::Result TrackerControlService::getStateNow(const juce::String& scope, bool includeSerializedMachineCells, bool pageOnly)
 {
     synchroniseAsyncCompletions();
     return processor.withAudioThreadExclusive([&]() -> Result
     {
-        if (scope == "view") return success(makeViewNow());
+        if (scope == "view") return success(makeViewNow(includeSerializedMachineCells, pageOnly));
         if (scope == "machine_controls") return success(makeMachineControlsNow());
         if (scope == "capabilities") return success(capabilities());
         return success(makeStateNow());

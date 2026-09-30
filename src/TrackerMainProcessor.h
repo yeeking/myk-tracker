@@ -323,9 +323,14 @@ private:
   
     juce::var stringGridToVar(const std::vector<std::vector<std::string>>& grid);
     juce::var numberGridToVar(const std::vector<std::vector<double>>& grid);
-  
+    void fillCommonUiState(juce::DynamicObject::Ptr state);
+
     /** convert ui state into a var  */
     juce::var getUiState();
+    /** Converts only the grid needed by the active editor page into a var. */
+    juce::var getUiStateForCurrentPage();
+    /** Returns the editor mode string used by UI and persisted state. */
+    juce::String getUiModeString() const;
     /** convert state into 'storable' var */
     juce::var serializeSequencerState();
     /** retrieve state from var  */

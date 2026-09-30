@@ -357,6 +357,7 @@ void TrackerUIComponent::shutdownOpenGL()
     {
         openGLContext->extensions.glDeleteBuffers(1, &traceVertexBuffer);
         traceVertexBuffer = 0;
+        traceVertexCapacityBytes = 0;
     }
 }
 
@@ -393,6 +394,23 @@ void TrackerUIComponent::updateUIState(const CellGrid& cells,
                                        const std::vector<float>* newColumnWidths)
 {
     std::lock_guard<std::mutex> lock(stateMutex);
+
+    const size_t cols = cells.size();
+    const size_t rows = (cols > 0) ? cells[0].size() : 0;
+    const size_t previousCols = cellStates.size();
+    const size_t previousRows = (previousCols > 0) ? cellStates[0].size() : 0;
+    bool textChanged = overlay.text != overlayState.text || cols != previousCols || rows != previousRows;
+    for (size_t col = 0; col < cols && !textChanged; ++col)
+    {
+        const size_t colRows = (col < previousCols) ? cellStates[col].size() : 0;
+        for (size_t row = 0; row < rows; ++row)
+            if (row >= colRows || cellStates[col][row].text != cells[col][row].text)
+            {
+                textChanged = true;
+                break;
+            }
+    }
+
     overlayState = overlay;
     zoomState = zoom;
     dragState = drag;
@@ -401,8 +419,6 @@ void TrackerUIComponent::updateUIState(const CellGrid& cells,
     else
         columnWidths.clear();
 
-    const size_t cols = cells.size();
-    const size_t rows = (cols > 0) ? cells[0].size() : 0;
     cellStates.resize(cols);
     for (size_t col = 0; col < cols; ++col)
         cellStates[col].resize(rows);
@@ -411,7 +427,8 @@ void TrackerUIComponent::updateUIState(const CellGrid& cells,
         for (size_t row = 0; row < rows; ++row)
             cellStates[col][row] = cells[col][row];
 
-    textGeometryDirty = true;
+    if (textChanged)
+        textGeometryDirty = true;
 }
 
 void TrackerUIComponent::renderUI()
@@ -847,10 +864,22 @@ void TrackerUIComponent::renderTraces(const juce::Matrix3D<float>& projectionMat
             vertices.push_back(Vertex{ { x, y, trace.z }, { 0.0f, 0.0f, 1.0f } });
         }
 
-        openGLContext->extensions.glBufferData(GL_ARRAY_BUFFER,
-                                               static_cast<GLsizeiptr>(vertices.size() * sizeof(Vertex)),
-                                               vertices.data(),
-                                               GL_DYNAMIC_DRAW);
+        const std::size_t traceBytes = vertices.size() * sizeof(Vertex);
+        if (traceBytes > traceVertexCapacityBytes)
+        {
+            openGLContext->extensions.glBufferData(GL_ARRAY_BUFFER,
+                                                   static_cast<GLsizeiptr>(traceBytes),
+                                                   vertices.data(),
+                                                   GL_DYNAMIC_DRAW);
+            traceVertexCapacityBytes = traceBytes;
+        }
+        else
+        {
+            openGLContext->extensions.glBufferSubData(GL_ARRAY_BUFFER,
+                                                      0,
+                                                      static_cast<GLsizeiptr>(traceBytes),
+                                                      vertices.data());
+        }
 
         if (shaderUniforms->cellColor != nullptr)
             shaderUniforms->cellColor->set(trace.color.getFloatRed(),

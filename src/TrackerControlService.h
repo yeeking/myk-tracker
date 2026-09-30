@@ -60,14 +60,16 @@ public:
 
     Result execute(const Command& command);
     Result getState(const juce::String& scope = "state");
-    TrackerViewSnapshot getViewSnapshot();
+    TrackerViewSnapshot getViewSnapshot(bool includeSerializedMachineCells = true);
+    /** Returns the lightweight view snapshot consumed by the JUCE editor timer. */
+    TrackerViewSnapshot getViewSnapshotForPage();
     Result readResource(const juce::String& uri);
     juce::var capabilities() const;
 
 private:
     Result executeNow(const Command& command);
     Result getScreenshot();
-    Result getStateNow(const juce::String& scope);
+    Result getStateNow(const juce::String& scope, bool includeSerializedMachineCells = true, bool pageOnly = false);
     Result readResourceNow(const juce::String& uri);
     Result fail(const juce::String& code, const juce::String& message) const;
     Result success(juce::var data = {}) const;
@@ -75,8 +77,9 @@ private:
     void changed(bool content, bool view);
     void synchroniseAsyncCompletions();
     juce::var makeUiNow();
+    juce::var makeUiForPageNow();
     juce::var makeStateNow();
-    juce::var makeViewNow();
+    juce::var makeViewNow(bool includeSerializedMachineCells = true, bool pageOnly = false);
     juce::var makeMachineCellsNow();
     juce::var makeMachineControlsNow();
     juce::var serialiseMachineCells(std::size_t stackIndex, const juce::String& slotId,

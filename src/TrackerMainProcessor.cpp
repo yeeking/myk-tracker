@@ -1700,19 +1700,8 @@ juce::var TrackerMainProcessor::numberGridToVar(const std::vector<std::vector<do
     return cols;
 }
 
-juce::var TrackerMainProcessor::getUiState()
+juce::String TrackerMainProcessor::getUiModeString() const
 {
-    auto* viewedSequencer = getViewedSequencerInternal();
-    auto* playbackSequencer = getPlaybackSequencerInternal();
-    if (viewedSequencer == nullptr)
-        return {};
-
-    viewedSequencer->updateSeqStringGrid();
-
-    juce::DynamicObject::Ptr state = new juce::DynamicObject();
-    state->setProperty("bpm", getBPM());
-    state->setProperty("isPlaying", playbackSequencer != nullptr && playbackSequencer->isPlaying());
-
     juce::String modeStr = "sequence";
     switch (seqEditor.getEditMode())
     {
@@ -1738,7 +1727,16 @@ juce::var TrackerMainProcessor::getUiState()
             modeStr = "reset";
             break;
     }
-    state->setProperty("mode", modeStr);
+    return modeStr;
+}
+
+void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
+{
+    auto* viewedSequencer = getViewedSequencerInternal();
+    auto* playbackSequencer = getPlaybackSequencerInternal();
+    state->setProperty("bpm", getBPM());
+    state->setProperty("isPlaying", playbackSequencer != nullptr && playbackSequencer->isPlaying());
+    state->setProperty("mode", getUiModeString());
 
     state->setProperty("currentSequence", static_cast<int>(seqEditor.getCurrentSequence()));
     state->setProperty("currentStep", static_cast<int>(seqEditor.getCurrentStep()));
@@ -1748,28 +1746,40 @@ juce::var TrackerMainProcessor::getUiState()
     state->setProperty("currentSeqParam", static_cast<int>(seqEditor.getCurrentSeqParam()));
     state->setProperty("mixerStack", static_cast<int>(seqEditor.getMixerStack()));
     state->setProperty("mixerRow", static_cast<int>(seqEditor.getMixerRow()));
+    state->setProperty("selectedHead", static_cast<int>(seqEditor.getCurrentConfigHead()));
 
+    juce::Array<juce::var> playHeads;
+    if (viewedSequencer != nullptr)
+    {
+        for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
+        {
+            const auto heads = viewedSequencer->getSequence(col)->getReadHeadSnapshots();
+            for (std::size_t headIndex = 0; headIndex < heads.size(); ++headIndex)
+                for (const auto position : heads[headIndex].positions)
+                {
+                    juce::DynamicObject::Ptr ph = new juce::DynamicObject();
+                    ph->setProperty("sequence", static_cast<int>(col));
+                    ph->setProperty("head", static_cast<int>(headIndex));
+                    ph->setProperty("step", static_cast<int>(position));
+                    playHeads.add(juce::var(ph));
+                }
+        }
+    }
+    state->setProperty("playHeads", playHeads);
+}
+
+juce::var TrackerMainProcessor::getUiState()
+{
+    auto* viewedSequencer = getViewedSequencerInternal();
+    if (viewedSequencer == nullptr)
+        return {};
+
+    juce::DynamicObject::Ptr state = new juce::DynamicObject();
+    fillCommonUiState(state.get());
     state->setProperty("sequenceGrid", stringGridToVar(viewedSequencer->getSequenceAsGridOfStrings()));
     state->setProperty("stepGrid", stringGridToVar(viewedSequencer->getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
     state->setProperty("sequenceConfigs", stringGridToVar(viewedSequencer->getSequenceConfigsAsGridOfStrings(seqEditor.getCurrentConfigHead())));
-    state->setProperty("selectedHead", static_cast<int>(seqEditor.getCurrentConfigHead()));
     state->setProperty("stepData", numberGridToVar(viewedSequencer->getStepData(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
-
-    juce::Array<juce::var> playHeads;
-    for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
-    {
-        const auto heads = viewedSequencer->getSequence(col)->getReadHeadSnapshots();
-        for (std::size_t headIndex = 0; headIndex < heads.size(); ++headIndex)
-            for (const auto position : heads[headIndex].positions)
-            {
-                juce::DynamicObject::Ptr ph = new juce::DynamicObject();
-                ph->setProperty("sequence", static_cast<int>(col));
-                ph->setProperty("head", static_cast<int>(headIndex));
-                ph->setProperty("step", static_cast<int>(position));
-                playHeads.add(juce::var(ph));
-            }
-    }
-    state->setProperty("playHeads", playHeads);
 
     juce::Array<juce::var> seqLengths;
     for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
@@ -1795,6 +1805,31 @@ juce::var TrackerMainProcessor::getUiState()
     }
     state->setProperty("readHeads", readHeads);
 
+    return state.get();
+}
+
+juce::var TrackerMainProcessor::getUiStateForCurrentPage()
+{
+    auto* viewedSequencer = getViewedSequencerInternal();
+    if (viewedSequencer == nullptr)
+        return {};
+
+    juce::DynamicObject::Ptr state = new juce::DynamicObject();
+    fillCommonUiState(state.get());
+    switch (seqEditor.getEditMode())
+    {
+        case SequencerEditorMode::selectingSeqAndStep:
+            state->setProperty("sequenceGrid", stringGridToVar(viewedSequencer->getSequenceAsGridOfStrings()));
+            break;
+        case SequencerEditorMode::editingStep:
+            state->setProperty("stepGrid", stringGridToVar(viewedSequencer->getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
+            break;
+        case SequencerEditorMode::configuringSequence:
+            state->setProperty("sequenceConfigs", stringGridToVar(viewedSequencer->getSequenceConfigsAsGridOfStrings(seqEditor.getCurrentConfigHead())));
+            break;
+        default:
+            break;
+    }
     return state.get();
 }
 
@@ -2006,11 +2041,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     root->setProperty("currentSongRowCursor", static_cast<int>(seqEditor.getCurrentSongRow()));
     root->setProperty("currentSongColCursor", static_cast<int>(seqEditor.getCurrentSongCol()));
 
-    juce::String modeStr = "sequence";
-    const auto uiState = getUiState();
-    if (uiState.isObject())
-        modeStr = uiState.getProperty("mode", "sequence").toString();
-    root->setProperty("mode", modeStr);
+    root->setProperty("mode", getUiModeString());
 
     juce::Array<juce::var> songRowsVar;
     for (const auto& row : songRows)

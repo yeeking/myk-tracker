@@ -193,6 +193,7 @@ private:
     GLuint indexBuffer = 0;
     GLuint frontEdgeIndexBuffer = 0;
     GLuint traceVertexBuffer = 0;
+    std::size_t traceVertexCapacityBytes = 0;
 
     float cellWidth = 2.0f;
     float cellHeight = 1.0f;

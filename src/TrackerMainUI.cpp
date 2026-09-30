@@ -340,7 +340,7 @@ void TrackerMainUI::timerCallback ()
     ++framesDrawn;
 
     if (waitingForPaint) {return;}// already waiting for a repaint
-  currentView = audioProcessor.getControlService().getViewSnapshot();
+  currentView = audioProcessor.getControlService().getViewSnapshotForPage();
   for (const auto& zoomCommand : audioProcessor.consumePendingZoomCommands())
   {
       adjustZoomAroundPoint(zoomCommand.delta,
