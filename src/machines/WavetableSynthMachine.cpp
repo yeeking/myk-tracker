@@ -39,8 +39,35 @@ void WavetableSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce:
     if (numSamples <= 0 || numChannels <= 0)
         return;
 
+    const std::vector<MachineScheduledNote>* blockNotes = scheduledBlockNotes;
+    const int numScheduledNotes = (blockNotes != nullptr) ? static_cast<int>(blockNotes->size()) : 0;
+    int nextScheduledNote = 0;
+
     for (int sample = 0; sample < numSamples; ++sample)
     {
+        // Apply sequencer note events scheduled for this sample before rendering it,
+        // so triggered voices start exactly on their tick's sample.
+        while (nextScheduledNote < numScheduledNotes
+            && (*blockNotes)[static_cast<std::size_t>(nextScheduledNote)].sampleOffset <= sample)
+        {
+            const MachineScheduledNote& event = (*blockNotes)[static_cast<std::size_t>(nextScheduledNote)];
+            auto& voice = allocateVoice();
+            voice.midiNote = static_cast<int>(event.note);
+            voice.velocity = juce::jlimit(0.0f, 1.0f, static_cast<float>(event.velocity) / 127.0f);
+            voice.phase = 0.0;
+            voice.phaseDelta = juce::MidiMessage::getMidiNoteInHertz(static_cast<int>(event.note)) / currentSampleRate;
+            voice.ageSamples = 0;
+            voice.noteDurationSamples = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate
+                * currentSecondsPerTick
+                * static_cast<double>(juce::jmax(1, static_cast<int>(event.durationTicks))))));
+            voice.samplesUntilRelease = voice.noteDurationSamples;
+            voice.releaseStarted = false;
+            voice.active = true;
+            voice.envelope.reset();
+            voice.envelope.noteOn();
+            ++nextScheduledNote;
+        }
+
         float outputSample = 0.0f;
 
         for (auto& voice : voices)
@@ -168,24 +195,18 @@ bool WavetableSynthMachine::handleIncomingNote(unsigned short note,
                                                unsigned short durationTicks,
                                                MachineNoteEvent& outEvent)
 {
-    juce::ignoreUnused(outEvent);
-    const std::lock_guard<std::mutex> lock(stateMutex);
-
-    auto& voice = allocateVoice();
-    voice.midiNote = static_cast<int>(note);
-    voice.velocity = juce::jlimit(0.0f, 1.0f, static_cast<float>(velocity) / 127.0f);
-    voice.phase = 0.0;
-    voice.phaseDelta = juce::MidiMessage::getMidiNoteInHertz(static_cast<int>(note)) / currentSampleRate;
-    voice.ageSamples = 0;
-    voice.noteDurationSamples = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate
-        * currentSecondsPerTick
-        * static_cast<double>(juce::jmax(1, static_cast<int>(durationTicks))))));
-    voice.samplesUntilRelease = voice.noteDurationSamples;
-    voice.releaseStarted = false;
-    voice.active = true;
-    voice.envelope.reset();
-    voice.envelope.noteOn();
+    // Sequencer notes now arrive via scheduleBlockNotes and are applied
+    // sample-accurately inside processBlock; this direct path is unused.
+    juce::ignoreUnused(note, velocity, durationTicks, outEvent);
     return false;
+}
+
+void WavetableSynthMachine::scheduleBlockNotes(const std::vector<MachineScheduledNote>& notes)
+{
+    // Called on the audio thread immediately before processBlock; the referenced
+    // vector is processor-owned per-stack storage that stays valid until the
+    // next block's distribution.
+    scheduledBlockNotes = &notes;
 }
 
 void WavetableSynthMachine::setSecondsPerTick(double secondsPerTick)

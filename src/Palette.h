@@ -65,6 +65,18 @@ struct TrackerPalette
     juce::Colour statusOk { 0xFF19FF6A };
     /** outer border accent for UI panels */
     juce::Colour borderNeon { 0xFF0F5F4B };
+    /** sequence-config row tint for routing cells */
+    juce::Colour seqConfigRouting { 0xFF202B33 };
+    /** sequence-config row tint for read-head topology cells */
+    juce::Colour seqConfigTopology { 0xFF23262C };
+    /** sequence-config row tint for timing cells */
+    juce::Colour seqConfigTiming { 0xFF1F2D30 };
+    /** sequence-config row tint for variation/probability cells */
+    juce::Colour seqConfigVariation { 0xFF272330 };
+    /** sequence-config text colour for inactive row/column cells */
+    juce::Colour seqConfigTextMuted { 0xFF2FA78F };
+    /** sequence-config text colour for disabled cells */
+    juce::Colour seqConfigTextDisabled { 0xFF1E5A4E };
     /** key light colour for 3D cell shading */
     juce::Colour lightColor { 0xFFDDF6E8 };
     /** per-frame decay factor for playhead glow */

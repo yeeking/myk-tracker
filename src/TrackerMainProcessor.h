@@ -216,10 +216,21 @@ private:
     std::unique_ptr<TrackerControlService> controlService;
     /** temporary place where we store midi as we generate it. it is later filtered to 'send in this block' and 'send in the future' events */
     juce::MidiBuffer midiToSend; 
+    /** persistent scratch buffer for 'send in the future' events, reused every block so the
+     * audio path does not allocate; audio-thread only, always empty between processBlock calls */
+    juce::MidiBuffer futureMidi;
     struct ScheduledSamplerEvent
     {
         std::size_t stackIndex = 0;
         juce::MidiMessage message;
+        int samplePosition = 0;
+    };
+    struct ScheduledWavetableNote
+    {
+        std::size_t stackIndex = 0;
+        unsigned short note = 0;
+        unsigned short velocity = 0;
+        unsigned short durationTicks = 0;
         int samplePosition = 0;
     };
     struct MachineStack
@@ -243,6 +254,8 @@ private:
         juce::AudioBuffer<float> renderBuffer;
         juce::AudioBuffer<float> delayTailBuffer;
         juce::MidiBuffer samplerMidiBuffer;
+        /** Wavetable notes distributed into the current block, sorted by sample offset. */
+        std::vector<MachineScheduledNote> wavetableBlockNotes;
         bool audioProcessingActive = false;
         bool samplerProcessingActive = false;
         bool wavetableProcessingActive = false;
@@ -260,6 +273,8 @@ private:
     };
     std::vector<ScheduledSamplerEvent> samplerEventsToSend;
     std::vector<ScheduledSamplerEvent> scratchFutureSamplerEvents;
+    std::vector<ScheduledWavetableNote> wavetableEventsToSend;
+    std::vector<ScheduledWavetableNote> scratchFutureWavetableNotes;
     std::vector<MachineStack> machineStacks;
     SharedAuxBus auxBus1;
     SharedAuxBus auxBus2;
@@ -342,7 +357,7 @@ private:
     void configureClockListeners();
     void removeClockListeners();
     void updateClockedMachineActivity();
-    void emitQuarterBeatTickIfNeeded();
+    bool emitQuarterBeatTickIfNeeded();
     void emitClockedMachineEvent(std::size_t stackIndex, CommandType machineType, const MachineNoteEvent& event);
     void processPlaybackTickBoundary();
     void enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
@@ -354,6 +369,10 @@ private:
                                  unsigned short outNote,
                                  unsigned short outVelocity,
                                  unsigned short outDurTicks);
+    void enqueueStackWavetableNote(std::size_t stackIndex,
+                                   unsigned short note,
+                                   unsigned short velocity,
+                                   unsigned short durInTicks);
     bool isStackAssigned(std::size_t stackIndex);
     bool stackContainsType(std::size_t stackIndex, CommandType machineType) const;
     std::optional<std::size_t> findMachineInStack(std::size_t stackIndex, CommandType type) const;

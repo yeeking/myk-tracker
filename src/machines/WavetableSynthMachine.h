@@ -27,6 +27,8 @@ public:
                             unsigned short velocity,
                             unsigned short durationTicks,
                             MachineNoteEvent& outEvent) override;
+    /** Stores sequencer note events scheduled for the current block. */
+    void scheduleBlockNotes(const std::vector<MachineScheduledNote>& notes) override;
     /** Updates tick duration for note-length scheduling. */
     void setSecondsPerTick(double secondsPerTick) override;
     /** Silences all active voices immediately. */
@@ -102,6 +104,10 @@ private:
     int nextVoiceIndex = 0;
     /** Number of active wavetable steps. */
     int waveStepCount = 2;
+    /** In-block note events for the current block; set on the audio thread by the
+        processor immediately before processBlock and read only there. Points at
+        processor-owned per-stack storage, stable until the next block. */
+    const std::vector<MachineScheduledNote>* scheduledBlockNotes = nullptr;
 
     /** ADSR attack time in seconds. */
     float attackSeconds = 0.05f;

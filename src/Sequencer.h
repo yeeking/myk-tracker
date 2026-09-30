@@ -16,6 +16,7 @@
 #include <mutex> 
 #include <shared_mutex>
 #include <memory>
+#include <atomic>
 #include <unordered_map>
 #include <array>
 #include <random>
@@ -163,7 +164,7 @@ class Sequence{
 
 
     /** go to the next step. If trigger is false, just move along without triggering. */
-    void tick(bool trigger = true);
+    void tick(bool trigger = true, bool isQuarterNoteBoundary = false);
     /** trigger a step's callback right now */
     void triggerStep(std::size_t step, std::size_t row);
     /** which step are you on? */
@@ -245,12 +246,15 @@ class Sequence{
     std::size_t getReadHeadCount() const;
     void setReadHeadCount(std::size_t count);
     const SequenceReadHeadConfig& getReadHeadConfig(std::size_t head) const;
-    bool setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig& config);
+    bool setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig& config, bool requestResync = true);
     std::vector<SequenceReadHeadSnapshot> getReadHeadSnapshots() const;
     static const std::vector<std::string>& getRhythmPresets();
     static const char* readModeName(SequenceReadMode mode);
     static bool parseReadMode(const std::string& name, SequenceReadMode& mode);
     void resetReadHeads(bool immediate);
+    void requestQuarterBeatResyncIfPlaying();
+    void cancelQuarterBeatResync();
+    bool isWaitingForQuarterBeatResync() const;
     SequenceReadOnly getReadOnlyContext() const;
   /** add a transpose processor to this sequence. 
      * Normally, a transposer type sequence will call this on a midiNote type sequence
@@ -318,6 +322,7 @@ class Sequence{
       std::mt19937 random { 0x4d594b31u };
     };
     std::vector<ReadHeadState> readHeads;
+    std::unique_ptr<std::atomic<bool>> pendingQuarterBeatResync;
 
     std::size_t eligibleRandomSteps(std::array<std::size_t, 128>& eligible) const;
     void selectPositions(ReadHeadState& head);
@@ -386,7 +391,7 @@ class Sequencer : public SequencerAbs {
       /** go to the next step. if disableAllTriggers has been called, will send false trigger to 
        * sequence objects, meaning they step without firing. 
       */
-      void tick();
+      void tick(bool isQuarterNoteBoundary = false);
       /** trigger a step's callback right now */
       void triggerStep(std::size_t seq, std::size_t step, std::size_t row);
       /** return a pointer to the sequence with sent id*/
@@ -450,9 +455,9 @@ class Sequencer : public SequencerAbs {
       /** wipe the data from the sent sequence*/
       void resetSequence(std::size_t sequence);
 
-      /** get a vector of vector of strings representing the sequence. this is cached - call
-       * updateSeqStringGrid after making edits to the sequence as it will not automatically update
-       */
+      /** get a vector of vector of strings representing the sequence. this is cached and rebuilt
+        * on demand if requestStrUpdate was called since the last read/update
+        */
       std::vector<std::vector<std::string>>& getSequenceAsGridOfStrings();
       /** get a grid of strings representing configs for all sequences. This is generated on the fly*/
       std::vector<std::vector<std::string>> getSequenceConfigsAsGridOfStrings(std::size_t selectedHead = 0);
@@ -479,7 +484,7 @@ class Sequencer : public SequencerAbs {
       void decrementStepDataAt(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col);
       /** reads default value for this step data col from commands and sets it to that */
       void setStepDataToDefault(std::size_t sequence, std::size_t step, std::size_t row, std::size_t col);
-      /** request that the sequence updates its string on next tick  */
+      /** request that the sequence string grid is rebuilt the next time it is read or updated */
       void requestStrUpdate();
       /** Configures the sequence with tracks->channels 1,1,2,2,3,3 */
       void setDefaultMIDIChannels();
@@ -487,6 +492,8 @@ class Sequencer : public SequencerAbs {
     private:
 
       void setupSeqConfigSpecs();
+      /** rebuilds the sequence string grid. caller must hold the rw_mutex write lock */
+      void updateSeqStringGridLocked();
      
       bool assertSeqAndStep(std::size_t sequence, std::size_t step) const;
         

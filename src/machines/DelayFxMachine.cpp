@@ -126,9 +126,10 @@ void DelayFxMachine::allNotesOff()
     clearDelayBuffer();
 }
 
-void DelayFxMachine::tick(int quarterBeat)
+void DelayFxMachine::tick(int quarterBeat, bool isQuarterNoteBoundary)
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
+    juce::ignoreUnused(isQuarterNoteBoundary);
     currentQuarterBeat = juce::jlimit(0, 16, quarterBeat);
 }
 

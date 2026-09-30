@@ -316,17 +316,17 @@ void PolyArpeggiatorMachine::allNotesOff()
     resetReadHeads();
 }
 
-void PolyArpeggiatorMachine::tick(int quarterBeat)
+void PolyArpeggiatorMachine::tick(int quarterBeat, bool isQuarterNoteBoundary)
 {
     std::function<void(const MachineNoteEvent&)> callbackCopy;
     std::vector<MachineNoteEvent> outEvents;
+    juce::ignoreUnused(isQuarterNoteBoundary);
 
     {
         const std::lock_guard<std::mutex> lock(stateMutex);
         clampState();
         if (!clockActive || length <= 0 || countActiveSlots() == 0)
             return;
-        juce::ignoreUnused(quarterBeat);
 
         callbackCopy = clockEventCallback;
         if (callbackCopy == nullptr)

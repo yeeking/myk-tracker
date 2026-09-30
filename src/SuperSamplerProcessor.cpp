@@ -693,22 +693,24 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
     if (numSamples <= 0)
         return;
 
-    struct NoteOnEvent
-    {
-        int note = 0;
-        int velocity = 127;
-    };
-    std::vector<std::vector<NoteOnEvent>> noteOns ((size_t) numSamples);
-
+    // Audio-thread only; cleared each block so its capacity is reused.
+    pendingNoteOns.clear();
     for (const auto meta : midi)
     {
         const auto msg = meta.getMessage();
         if (msg.isNoteOn())
         {
-            auto pos = juce::jlimit (0, numSamples - 1, meta.samplePosition);
-            noteOns[(size_t) pos].push_back ({ msg.getNoteNumber(), msg.getVelocity() });
+            const auto pos = juce::jlimit (0, numSamples - 1, meta.samplePosition);
+            pendingNoteOns.push_back ({ pos, msg.getNoteNumber(), msg.getVelocity() });
         }
     }
+    // MidiBuffer is already sorted by sample position; the stable sort is
+    // defensive and preserves within-sample event order.
+    std::stable_sort (pendingNoteOns.begin(), pendingNoteOns.end(),
+                      [](const NoteOnEvent& a, const NoteOnEvent& b)
+                      {
+                          return a.samplePosition < b.samplePosition;
+                      });
     const std::lock_guard<std::mutex> lock (playerMutex);
 
     for (auto& player : players)
@@ -716,42 +718,37 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
     if (previewPlayer != nullptr)
         previewPlayer->beginBlock();
 
-    int renderedUpToSample = 0;
-    for (int sample = 0; sample < numSamples; ++sample)
+    const auto renderRange = [&] (int startSample, int length)
     {
-        const auto& eventsAtSample = noteOns[(size_t) sample];
-        if (eventsAtSample.empty())
-            continue;
+        if (length <= 0)
+            return;
+        for (auto& player : players)
+            player->renderToBuffer (buffer, startSample, length);
+        if (previewPlayer != nullptr)
+            previewPlayer->renderToBuffer (buffer, startSample, length);
+    };
 
-        const int segmentLength = sample - renderedUpToSample;
-        if (segmentLength > 0)
-        {
-            for (auto& player : players)
-                player->renderToBuffer (buffer, renderedUpToSample, segmentLength);
-            if (previewPlayer != nullptr)
-                previewPlayer->renderToBuffer (buffer, renderedUpToSample, segmentLength);
-        }
+    int renderedUpToSample = 0;
+    std::size_t cursor = 0;
+    while (cursor < pendingNoteOns.size())
+    {
+        const int pos = pendingNoteOns[cursor].samplePosition;
+        renderRange (renderedUpToSample, pos - renderedUpToSample);
 
-        for (const auto& event : eventsAtSample)
+        while (cursor < pendingNoteOns.size() && pendingNoteOns[cursor].samplePosition == pos)
         {
+            const NoteOnEvent event = pendingNoteOns[cursor];
             for (auto& player : players)
             {
                 if (player->acceptsNote (event.note))
                     player->triggerNote (event.note, event.velocity);
             }
+            ++cursor;
         }
 
-        renderedUpToSample = sample;
+        renderedUpToSample = pos;
     }
-
-    if (renderedUpToSample < numSamples)
-    {
-        const int segmentLength = numSamples - renderedUpToSample;
-        for (auto& player : players)
-            player->renderToBuffer (buffer, renderedUpToSample, segmentLength);
-        if (previewPlayer != nullptr)
-            previewPlayer->renderToBuffer (buffer, renderedUpToSample, segmentLength);
-    }
+    renderRange (renderedUpToSample, numSamples - renderedUpToSample);
 
     for (auto& player : players)
         player->endBlock();

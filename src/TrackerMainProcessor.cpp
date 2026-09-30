@@ -479,6 +479,14 @@ void TrackerMainProcessor::enqueueStackSamplerMidi(std::size_t stackIndex,
     samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOff(1, static_cast<int>(outNote), static_cast<uint8>(outVelocity)), offSample });
 }
 
+void TrackerMainProcessor::enqueueStackWavetableNote(std::size_t stackIndex,
+                                                     unsigned short note,
+                                                     unsigned short velocity,
+                                                     unsigned short durInTicks)
+{
+    wavetableEventsToSend.push_back({ stackIndex, note, velocity, durInTicks, elapsedSamples });
+}
+
 void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                                                     unsigned short note,
                                                     unsigned short velocity,
@@ -525,11 +533,8 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                 anyTerminalTriggered = true;
                 break;
             case CommandType::WavetableSynth:
-                if (stack->wavetableSynth != nullptr)
-                {
-                    MachineNoteEvent ignoredEvent;
-                    stack->wavetableSynth->handleIncomingNote(note, velocity, durInTicks, ignoredEvent);
-                }
+                // Notes are queued and applied sample-accurately in the synth's processBlock.
+                enqueueStackWavetableNote(stackIndex, note, velocity, durInTicks);
                 anyTerminalTriggered = true;
                 break;
             case CommandType::DistortionFx:
@@ -578,12 +583,13 @@ void TrackerMainProcessor::updateClockedMachineActivity()
     // Sequence-owned read heads require no machine clock listeners.
 }
 
-void TrackerMainProcessor::emitQuarterBeatTickIfNeeded()
+bool TrackerMainProcessor::emitQuarterBeatTickIfNeeded()
 {
     const int nextQuarterBeat = getCurrentQuarterBeat() <= 0
         ? 1
         : ((getCurrentQuarterBeat() % 16) + 1);
     const bool isBeatStart = ((nextQuarterBeat - 1) % 4) == 0;
+    const bool isQuarterNoteStart = ((nextQuarterBeat - 1) % 8) == 0;
     const bool shouldResetOnThisBoundary = pendingTransportQuarterBeatReset && isBeatStart;
 
     setCurrentQuarterBeat(nextQuarterBeat);
@@ -609,7 +615,8 @@ void TrackerMainProcessor::emitQuarterBeatTickIfNeeded()
     }
 
     updateClockedMachineActivity();
-    notifyClockTick(getCurrentQuarterBeat());
+    notifyClockTick(getCurrentQuarterBeat(), isQuarterNoteStart);
+    return isQuarterNoteStart;
 }
 
 void TrackerMainProcessor::emitClockedMachineEvent(std::size_t stackIndex, CommandType machineType, const MachineNoteEvent& event)
@@ -628,10 +635,10 @@ void TrackerMainProcessor::emitClockedMachineEvent(std::size_t stackIndex, Comma
 void TrackerMainProcessor::processPlaybackTickBoundary()
 {
     advanceClockTick();
-    emitQuarterBeatTickIfNeeded();
+    const bool isQuarterNoteBoundary = emitQuarterBeatTickIfNeeded();
 
     if (auto* playbackSequencer = getPlaybackSequencerInternal())
-        playbackSequencer->tick();
+        playbackSequencer->tick(isQuarterNoteBoundary);
 }
 
 //==============================================================================
@@ -790,6 +797,7 @@ void TrackerMainProcessor::initialiseMachines()
         // enabled internal synth instead of a silent external-MIDI route.
         stack.slots = { makeDefaultSlotState(CommandType::WavetableSynth) };
         stack.samplerMidiBuffer.clear();
+        stack.wavetableBlockNotes.clear();
         stack.midiOutputChannel = 1;
         stack.audioProcessingActive = false;
         stack.samplerProcessingActive = false;
@@ -801,6 +809,8 @@ void TrackerMainProcessor::initialiseMachines()
     }
     samplerEventsToSend.clear();
     scratchFutureSamplerEvents.clear();
+    wavetableEventsToSend.clear();
+    scratchFutureWavetableNotes.clear();
 
     const double secondsPerTick = getSecondsPerTickFromBpm(getBPM());
     for (auto& stack : machineStacks)
@@ -1066,6 +1076,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         stack.delayTailBuffer.setSize(getTotalNumOutputChannels(), preparedBlockSize);
         stack.delayTailBuffer.clear();
         stack.samplerMidiBuffer.clear();
+        stack.wavetableBlockNotes.clear();
         if (stack.sampler != nullptr)
             stack.sampler->prepareToPlay(sampleRate, samplesPerBlock);
         if (stack.wavetableSynth != nullptr)
@@ -1084,6 +1095,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
             stack.channelStripFx->prepareToPlay(sampleRate, samplesPerBlock);
     }
     scratchFutureSamplerEvents.clear();
+    scratchFutureWavetableNotes.clear();
     emptyMidiBuffer.clear();
     updateClockedMachineActivity();
 }
@@ -1103,6 +1115,7 @@ void TrackerMainProcessor::releaseResources()
         stack.renderBuffer.setSize(0, 0);
         stack.delayTailBuffer.setSize(0, 0);
         stack.samplerMidiBuffer.clear();
+        stack.wavetableBlockNotes.clear();
         if (stack.sampler != nullptr)
             stack.sampler->releaseResources();
         if (stack.wavetableSynth != nullptr)
@@ -1115,6 +1128,7 @@ void TrackerMainProcessor::releaseResources()
             stack.channelStripFx->releaseResources();
     }
     scratchFutureSamplerEvents.clear();
+    scratchFutureWavetableNotes.clear();
     emptyMidiBuffer.clear();
 }
 
@@ -1278,9 +1292,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     // to the outgoing midibuffer 
     // midiMessages , but with an offset value within this block
     
-    juce::MidiBuffer futureMidi;    // store messages from midiToSend from the future here. 
-    juce::MidiMessage message;
-    // int samplePosition;
+    futureMidi.clear();    // store messages from midiToSend from the future here.
     for (const MidiMessageMetadata metadata : midiToSend){
         if (blockEndSample < blockStartSample){// we wrapped block end back around 
             // DBG("processBlock wrapped events");
@@ -1315,8 +1327,12 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
         }
     }
+    // copy the future events back into midiToSend (keeping its stable capacity)
+    // rather than swapping, so neither buffer is freed and reallocated each block
     midiToSend.clear();
-    midiToSend.swapWith(futureMidi);
+    if (!futureMidi.isEmpty())
+        midiToSend.addEvents(futureMidi, 0, -1, 0);
+    futureMidi.clear();
 
     // now set up the midi messages that 
     // we want to send to the internal sampler engines
@@ -1324,7 +1340,10 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     if (scratchFutureSamplerEvents.capacity() < samplerEventsToSend.size())
         scratchFutureSamplerEvents.reserve(samplerEventsToSend.size());
     for (auto& stack : machineStacks)
+    {
         stack.samplerMidiBuffer.clear();
+        stack.wavetableBlockNotes.clear();
+    }
 
     for (const auto& event : samplerEventsToSend)
     {
@@ -1355,6 +1374,50 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     }
     samplerEventsToSend.swap(scratchFutureSamplerEvents);
+
+    // now distribute the sequencer notes destined for the wavetable synths,
+    // keeping only the ones that fall within this block (with in-block offsets)
+    scratchFutureWavetableNotes.clear();
+    if (scratchFutureWavetableNotes.capacity() < wavetableEventsToSend.size())
+        scratchFutureWavetableNotes.reserve(wavetableEventsToSend.size());
+    for (const auto& event : wavetableEventsToSend)
+    {
+        bool inThisBlock = false;
+        int sampleOffset = 0;
+        if (blockEndSample < blockStartSample)
+        {
+            if (event.samplePosition >= blockStartSample || event.samplePosition < blockEndSample)
+            {
+                inThisBlock = true;
+                sampleOffset = event.samplePosition - blockStartSample;
+            }
+        }
+        else if (event.samplePosition >= blockStartSample && event.samplePosition < blockEndSample)
+        {
+            inThisBlock = true;
+            sampleOffset = event.samplePosition - blockStartSample;
+        }
+
+        if (inThisBlock)
+        {
+            const std::size_t safeStackIndex = event.stackIndex < machineStacks.size() ? event.stackIndex : 0u;
+            machineStacks[safeStackIndex].wavetableBlockNotes.push_back(
+                { sampleOffset, event.note, event.velocity, event.durationTicks });
+        }
+        else
+        {
+            scratchFutureWavetableNotes.push_back(event);
+        }
+    }
+    wavetableEventsToSend.swap(scratchFutureWavetableNotes);
+
+    // the machines walk these with a cursor, so keep them sorted by sample offset
+    for (auto& stack : machineStacks)
+        std::stable_sort(stack.wavetableBlockNotes.begin(), stack.wavetableBlockNotes.end(),
+                         [](const MachineScheduledNote& a, const MachineScheduledNote& b)
+                         {
+                             return a.sampleOffset < b.sampleOffset;
+                         });
 
     if (auxBus1.inputBuffer.getNumChannels() != 2 || auxBus1.inputBuffer.getNumSamples() != buffer.getNumSamples())
         auxBus1.inputBuffer.setSize(2, buffer.getNumSamples(), false, false, true);
@@ -1390,7 +1453,10 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             if (stack->samplerProcessingActive && stack->sampler != nullptr)
                 stack->sampler->processBlock(stackBuffer, stack->samplerMidiBuffer);
             if (stack->wavetableProcessingActive && stack->wavetableSynth != nullptr)
+            {
+                stack->wavetableSynth->scheduleBlockNotes(stack->wavetableBlockNotes);
                 stack->wavetableSynth->processBlock(stackBuffer, emptyMidiBuffer);
+            }
 
             for (const auto& slot : stack->slots)
             {
@@ -2778,6 +2844,7 @@ void TrackerMainProcessor::allNotesOff()
         midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
     samplerEventsToSend.clear();
+    wavetableEventsToSend.clear();
     for (std::size_t i = 0; i < machineStacks.size(); ++i)
         allNotesOffForStack(i);
 }
@@ -2882,6 +2949,7 @@ void TrackerMainProcessor::clearPendingEvents()
 {
     midiToSend.clear();
     samplerEventsToSend.clear();
+    wavetableEventsToSend.clear();
 }
 
 TrackerMainProcessor::MachineStack* TrackerMainProcessor::getMachineStack(std::size_t stackIndex)

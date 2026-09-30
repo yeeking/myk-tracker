@@ -304,19 +304,22 @@ void ChannelStripMachine::updateEQCoefficients(const ParameterSnapshot& paramete
     if (trebleShelf.state == nullptr)
         trebleShelf.state = juce::dsp::IIR::Coefficients<float>::makeHighShelf(currentSampleRate, trebleFreqHz, shelfQ, 1.0f);
 
-    *bassShelf.state = *juce::dsp::IIR::Coefficients<float>::makeLowShelf(
+    // ArrayCoefficients factories return a stack-allocated std::array, so this
+    // stays allocation-free on the audio thread (Coefficients::make* would
+    // allocate a ref-counted object per parameter change)
+    *bassShelf.state = juce::dsp::IIR::ArrayCoefficients<float>::makeLowShelf(
         currentSampleRate,
         bassFreqHz,
         shelfQ,
         juce::Decibels::decibelsToGain(parameters.bassDb));
 
-    *midPeak.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter(
+    *midPeak.state = juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter(
         currentSampleRate,
         parameters.midFreqHz,
         midQ,
         juce::Decibels::decibelsToGain(parameters.midDb));
 
-    *trebleShelf.state = *juce::dsp::IIR::Coefficients<float>::makeHighShelf(
+    *trebleShelf.state = juce::dsp::IIR::ArrayCoefficients<float>::makeHighShelf(
         currentSampleRate,
         trebleFreqHz,
         shelfQ,

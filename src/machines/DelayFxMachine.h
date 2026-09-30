@@ -28,7 +28,7 @@ public:
     /** Clears buffered delay audio when transport or notes are stopped. */
     void allNotesOff() override;
     /** Tracks quarter-beat bar position for synced transport state. */
-    void tick(int quarterBeat) override;
+    void tick(int quarterBeat, bool isQuarterNoteBoundary) override;
     /** Clears delay state on transport resets. */
     void reset() override;
     /** Serialises the delay settings. */

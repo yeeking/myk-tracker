@@ -42,7 +42,7 @@ public:
     /** Clears the playhead state and any currently sounding playback. */
     void resetPlayback();
     /** Receives the global quarter-beat clock. */
-    void tick(int quarterBeat) override;
+    void tick(int quarterBeat, bool isQuarterNoteBoundary) override;
     /** Resets playback counters to the start of the bar. */
     void reset() override;
     /** Sets the callback used to emit clocked arp notes. */

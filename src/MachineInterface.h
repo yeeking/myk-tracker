@@ -29,6 +29,19 @@ struct MachineNoteEvent
     unsigned short durationTicks = 0;
 };
 
+/** A sequencer-scheduled note delivered for the current block. */
+struct MachineScheduledNote
+{
+    /** Offset in samples from the start of the current block. */
+    int sampleOffset = 0;
+    /** MIDI note number to trigger. */
+    unsigned short note = 0;
+    /** MIDI velocity to trigger with. */
+    unsigned short velocity = 0;
+    /** Note duration in tracker ticks. */
+    unsigned short durationTicks = 0;
+};
+
 // Interface for stack instruments and audio processors.
 class MachineInterface
 {
@@ -67,6 +80,8 @@ public:
         return true;
     }
 
+    /** Delivers sequencer note events scheduled within the current block. */
+    virtual void scheduleBlockNotes(const std::vector<MachineScheduledNote>& notes) { (void)notes; }
     /** Updates the duration of a tracker tick in seconds. */
     virtual void setSecondsPerTick(double secondsPerTick) { (void)secondsPerTick; }
     /** Silences any currently playing notes or tails. */

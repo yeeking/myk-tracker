@@ -226,8 +226,9 @@ Sequence::Sequence(Sequencer *_sequencer,
       rewindAtNextZeroTick{false},
       ticksElapsed{0},
       tickOfFour{0},
-      muted{false},
-      rw_mutex{std::make_unique<std::shared_mutex>()}
+       muted{false},
+       pendingQuarterBeatResync{std::make_unique<std::atomic<bool>>(false)},
+       rw_mutex{std::make_unique<std::shared_mutex>()}
 // , midiScaleToDrum{MachineUtilsAbs::getScaleMidiToDrumMidi()}
 {
   readHeads.emplace_back();
@@ -244,8 +245,20 @@ Sequence::Sequence(Sequencer *_sequencer,
 }
 
 /** go to the next step */
-void Sequence::tick(bool trigger)
+void Sequence::tick(bool trigger, bool isQuarterNoteBoundary)
 {
+  if (pendingQuarterBeatResync != nullptr && pendingQuarterBeatResync->load(std::memory_order_acquire))
+  {
+    if (!isQuarterNoteBoundary)
+      return;
+
+    pendingQuarterBeatResync->store(false, std::memory_order_release);
+    resetReadHeads(true);
+    rewindAtNextZeroTick = false;
+    nextTicksPerStep = 0;
+    tickOfFour = 3;
+  }
+
   tickOfFour = (tickOfFour + 1) % 4;
   if (rewindAtNextZeroTick && tickOfFour == 0)
   {
@@ -257,7 +270,7 @@ void Sequence::tick(bool trigger)
   {
     auto config = readHeads.front().config;
     config.ticksPerStep = nextTicksPerStep;
-    setReadHeadConfig(0, config);
+    setReadHeadConfig(0, config, false);
     nextTicksPerStep = 0;
   }
 
@@ -329,8 +342,12 @@ void Sequence::setLengthAdjustment(std::size_t lenAdjust)
   // make sure we have enough steps
   this->ensureEnoughStepsForLength(currentLength + lenAdjust);
   const auto clamped = std::min<std::size_t>(lenAdjust,
-                                             static_cast<std::size_t>(std::numeric_limits<int>::max()));
-  this->lengthAdjustment = static_cast<int>(clamped);
+                                              static_cast<std::size_t>(std::numeric_limits<int>::max()));
+  const int newValue = static_cast<int>(clamped);
+  const bool changed = newValue != lengthAdjustment;
+  this->lengthAdjustment = newValue;
+  if (changed)
+    requestQuarterBeatResyncIfPlaying();
 }
 
 void Sequence::setTicksPerStep(std::size_t tps)
@@ -437,6 +454,7 @@ void Sequence::setLength(std::size_t length)
   if (length > steps.size())
     return;
 
+  const bool changed = length != currentLength;
   currentLength = length;
   for (auto& head : readHeads)
   {
@@ -444,6 +462,8 @@ void Sequence::setLength(std::size_t length)
     for (std::size_t i = 0; i < head.positionCount; ++i)
       head.positions[i] %= currentLength;
   }
+  if (changed)
+    requestQuarterBeatResyncIfPlaying();
 }
 
 void Sequence::setStepData(std::size_t step, std::vector<std::vector<double>> data)
@@ -542,12 +562,15 @@ std::size_t Sequence::getReadHeadCount() const
 void Sequence::setReadHeadCount(std::size_t count)
 {
   count = std::max<std::size_t>(1, std::min<std::size_t>(maxReadHeads, count));
+  const bool changed = count != readHeads.size();
   if (count < readHeads.size())
     readHeads.resize(count);
   else
     while (readHeads.size() < count)
       readHeads.emplace_back();
   resetReadHeads(false);
+  if (changed)
+    requestQuarterBeatResyncIfPlaying();
 }
 
 const SequenceReadHeadConfig& Sequence::getReadHeadConfig(std::size_t head) const
@@ -556,7 +579,7 @@ const SequenceReadHeadConfig& Sequence::getReadHeadConfig(std::size_t head) cons
   return readHeads[head].config;
 }
 
-bool Sequence::setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig& requested)
+bool Sequence::setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig& requested, bool requestResync)
 {
   if (head >= readHeads.size())
     return false;
@@ -575,6 +598,8 @@ bool Sequence::setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig&
   {
     readHeads[head].random.seed(0x4d594b31u + static_cast<std::uint32_t>(head * 0x9e3779b9u));
     resetReadHeadRuntime(readHeads[head], false);
+    if (requestResync)
+      requestQuarterBeatResyncIfPlaying();
   }
   if (head == 0)
   {
@@ -654,6 +679,24 @@ void Sequence::resetReadHeads(bool immediate)
     resetReadHeadRuntime(readHeads[index], immediate);
   }
   ticksElapsed = readHeads.empty() ? 0 : readHeads.front().ticksElapsed;
+}
+
+void Sequence::requestQuarterBeatResyncIfPlaying()
+{
+  if (pendingQuarterBeatResync == nullptr)
+    pendingQuarterBeatResync = std::make_unique<std::atomic<bool>>(false);
+  pendingQuarterBeatResync->store(sequencer != nullptr && sequencer->isPlaying(), std::memory_order_release);
+}
+
+void Sequence::cancelQuarterBeatResync()
+{
+  if (pendingQuarterBeatResync != nullptr)
+    pendingQuarterBeatResync->store(false, std::memory_order_release);
+}
+
+bool Sequence::isWaitingForQuarterBeatResync() const
+{
+  return pendingQuarterBeatResync != nullptr && pendingQuarterBeatResync->load(std::memory_order_acquire);
 }
 
 std::size_t Sequence::eligibleRandomSteps(std::array<std::size_t, 128>& eligible) const
@@ -766,6 +809,7 @@ void Sequence::primeForImmediateTrigger()
   rewindAtNextZeroTick = false;
   nextTicksPerStep = 0;
   tickOfFour = 3;
+  cancelQuarterBeatResync();
 }
 
 void Sequence::resetForTransportStart()
@@ -775,6 +819,7 @@ void Sequence::resetForTransportStart()
   rewindAtNextZeroTick = false;
   nextTicksPerStep = 0;
   tickOfFour = 3;
+  cancelQuarterBeatResync();
 }
 
 
@@ -864,24 +909,18 @@ std::size_t Sequencer::getSequencerNextTicksPerStep(std::size_t sequence) const
 
 
 /** move the sequencer along by one tick */
-void Sequencer::tick()
+void Sequencer::tick(bool isQuarterNoteBoundary)
 {
-  bool updateStrings = false;
+  // The string grid is a UI/MCP display cache, so it is rebuilt lazily by the
+  // reader instead of here - building it on the audio thread allocated per edit
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (playing)
   {
-    std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-
-    updateStrings = stringUpdateRequested;
-    stringUpdateRequested = false;
-    if (playing)
+    for (auto& seq : sequences)
     {
-      for (auto& seq : sequences)
-      {
-        seq.tick(triggerOnTick);
-      }
+      seq.tick(triggerOnTick, isQuarterNoteBoundary);
     }
   }
-  if (updateStrings)
-    updateSeqStringGrid();
 }
 
 void Sequencer::triggerStep(std::size_t seq, std::size_t step, std::size_t row)
@@ -1037,7 +1076,11 @@ bool Sequencer::assertSequence(std::size_t sequence) const
 void Sequencer::updateSeqStringGrid()
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  updateSeqStringGridLocked();
+}
 
+void Sequencer::updateSeqStringGridLocked()
+{
   std::vector<std::vector<std::string>> gridView;
   // need to get the data in the sequences, convert it to strings and
   // store it into the sent grid view
@@ -1078,11 +1121,16 @@ void Sequencer::updateSeqStringGrid()
     }
   }
   seqAsStringGrid = gridView;
+  stringUpdateRequested = false;
 }
 
 std::vector<std::vector<std::string>> &Sequencer::getSequenceAsGridOfStrings()
 {
-  std::shared_lock<std::shared_mutex> lock(*rw_mutex);// read lock
+  // rebuild lazily if an edit requested it; readers run on the message thread,
+  // so this keeps the string construction off the audio path
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (stringUpdateRequested)
+    updateSeqStringGridLocked();
   return seqAsStringGrid;
 }
 std::vector<std::vector<std::string>> Sequencer::getStepAsGridOfStrings(std::size_t seq, std::size_t step)
@@ -1169,6 +1217,7 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex, std::
   auto config = sequence->getReadHeadConfig(headIndex);
   if (paramIndex == Sequence::tpsConfig) config.ticksPerStep = std::min<std::size_t>(16, config.ticksPerStep + 1);
   else if (paramIndex == Sequence::modeConfig) config.mode = static_cast<SequenceReadMode>((static_cast<int>(config.mode) + 1) % 3);
+  else if (paramIndex == Sequence::polyphonyConfig) config.polyphony = std::min(Sequence::maxChordPolyphony, config.polyphony + 1);
   else if (paramIndex == Sequence::rhythmConfig)
   {
     const auto& presets = Sequence::getRhythmPresets();
@@ -1270,6 +1319,8 @@ void Sequencer::enableAllTriggers()
 /** stop playing*/
 void Sequencer::stop()
 {
+  for (auto& seq : sequences)
+    seq.cancelQuarterBeatResync();
   playing = false; 
 }
 /** start playing */

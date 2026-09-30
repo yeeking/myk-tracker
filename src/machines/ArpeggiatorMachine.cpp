@@ -292,8 +292,9 @@ void ArpeggiatorMachine::resetPlayback()
     resetPlaybackState();
 }
 
-void ArpeggiatorMachine::tick(int quarterBeat)
+void ArpeggiatorMachine::tick(int quarterBeat, bool isQuarterNoteBoundary)
 {
+    juce::ignoreUnused(isQuarterNoteBoundary);
     std::function<void(const MachineNoteEvent&)> callbackCopy;
     MachineNoteEvent outEvent;
     bool shouldEmit = false;

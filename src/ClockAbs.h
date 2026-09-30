@@ -9,7 +9,7 @@ class ClockListener
 {
 public:
     virtual ~ClockListener() = default;
-    virtual void tick(int quarterBeat) = 0;
+    virtual void tick(int quarterBeat, bool isQuarterNoteBoundary) = 0;
     virtual void reset() = 0;
 };
 
@@ -57,13 +57,13 @@ protected:
     /** Sets the current published quarter-beat. */
     void setCurrentQuarterBeat(int quarterBeat) noexcept { currentQuarterBeat = quarterBeat; }
     /** Broadcasts a quarter-beat tick to listeners. */
-    void notifyClockTick(int quarterBeat)
+    void notifyClockTick(int quarterBeat, bool isQuarterNoteBoundary = false)
     {
         setCurrentQuarterBeat(quarterBeat);
         const juce::ScopedLock lock(listenerLock);
         for (auto* listener : listeners)
             if (listener != nullptr)
-                listener->tick(quarterBeat);
+                listener->tick(quarterBeat, isQuarterNoteBoundary);
     }
     /** Broadcasts a clock reset to listeners. */
     void notifyClockReset()

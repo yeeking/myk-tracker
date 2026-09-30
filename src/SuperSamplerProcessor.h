@@ -211,6 +211,19 @@ private:
     std::unique_ptr<SuperSamplePlayer> previewPlayer;
     /** Protects player state shared between UI and audio threads. */
     mutable std::mutex playerMutex;
+    /** A MIDI note-on together with its position within the rendered block. */
+    struct NoteOnEvent
+    {
+        /** Offset in samples from the start of the block. */
+        int samplePosition = 0;
+        /** MIDI note number. */
+        int note = 0;
+        /** MIDI velocity. */
+        int velocity = 127;
+    };
+    /** Note-on events for the current block; audio-thread only, cleared each
+        block so its capacity is reused without realtime allocation. */
+    std::vector<NoteOnEvent> pendingNoteOns;
     /** Next player id to allocate. */
     int nextId { 1 };
     /** Audio format manager used for sample decoding. */

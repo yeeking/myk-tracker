@@ -79,6 +79,77 @@ std::vector<std::vector<std::string>> gridFromSnapshot(const juce::var& value)
     }
     return grid;
 }
+
+juce::Colour getSeqConfigRowColour(std::size_t row, const TrackerPalette& p)
+{
+    switch (row)
+    {
+        case Sequence::sendConfig:
+            return p.seqConfigRouting;
+        case Sequence::headCountConfig:
+        case Sequence::headConfig:
+            return p.seqConfigTopology;
+        case Sequence::tpsConfig:
+        case Sequence::modeConfig:
+        case Sequence::rhythmConfig:
+            return p.seqConfigTiming;
+        case Sequence::polyphonyConfig:
+        case Sequence::probabilityConfig:
+        default:
+            return p.seqConfigVariation;
+    }
+}
+
+juce::Colour getSeqConfigCellFill(std::size_t row,
+                                  std::size_t col,
+                                  std::size_t cursorRow,
+                                  std::size_t cursorCol,
+                                  bool disabled,
+                                  const TrackerPalette& p)
+{
+    juce::Colour fill = getSeqConfigRowColour(row, p);
+    if (row == cursorRow)
+        fill = fill.interpolatedWith(p.gridNote, 0.16f);
+    if (col == cursorCol)
+        fill = fill.interpolatedWith(juce::Colour(0xFF2990FF), 0.14f);
+    if (disabled)
+        fill = fill.darker(0.45f);
+    return fill;
+}
+
+juce::Colour getSeqConfigCellText(std::size_t row,
+                                  std::size_t col,
+                                  std::size_t cursorRow,
+                                  std::size_t cursorCol,
+                                  bool disabled,
+                                  const TrackerPalette& p)
+{
+    if (disabled)
+        return p.seqConfigTextDisabled;
+    if (row == cursorRow || col == cursorCol)
+        return p.gridNote;
+    return p.seqConfigTextMuted;
+}
+
+std::string makeSequenceConfigTitle(std::size_t sequenceIndex,
+                                    std::size_t paramIndex,
+                                    std::size_t configHead,
+                                    std::size_t headCount,
+                                    const std::vector<Parameter>& seqConfigSpecs,
+                                    std::size_t startCol,
+                                    std::size_t visibleCols,
+                                    std::size_t totalSequences)
+{
+    const auto param = paramIndex < seqConfigSpecs.size()
+        ? seqConfigSpecs[paramIndex].shortName
+        : "?";
+    const auto viewEnd = std::min(totalSequences, startCol + visibleCols);
+    return "Sequence Config [" + std::to_string(sequenceIndex + 1) + "] "
+        + param
+        + " HEAD " + std::to_string(configHead + 1) + "/" + std::to_string(headCount)
+        + " VIEW " + std::to_string(startCol + 1) + "-" + std::to_string(viewEnd)
+        + "/" + std::to_string(totalSequences);
+}
 }
 
 //==============================================================================
@@ -263,7 +334,19 @@ void TrackerMainUI::timerCallback ()
           else if (editMode == SequencerEditorMode::editingStep)
               hudTitle = makeStepTitle(sequenceIndex, stepIndex, stepCount);
           else if (editMode == SequencerEditorMode::configuringSequence)
-              hudTitle = "Sequence Config";
+          {
+              auto* sequencer = audioProcessor.getSequencer();
+              auto* sequence = sequencer->getSequence(sequenceIndex);
+              const auto headCount = sequence != nullptr ? sequence->getReadHeadCount() : 1u;
+              hudTitle = makeSequenceConfigTitle(sequenceIndex,
+                                                 seqEditor->getCurrentSeqParam(),
+                                                 seqEditor->getCurrentConfigHead(),
+                                                 headCount,
+                                                 sequencer->getSeqConfigSpecs(),
+                                                 startCol,
+                                                 visibleCols,
+                                                 sequencer->howManySequences());
+          }
       });
 
       if (overlayState.text != hudTitle)
@@ -439,11 +522,29 @@ void TrackerMainUI::prepareSeqConfigView()
     {
         for (std::size_t row = 0; row < std::min(Sequence::configCount, grid[col].size()); ++row)
         {
-            boxes[col][row].kind = UIBox::Kind::TrackerCell;
-            boxes[col][row].text = grid[col][row];
-            boxes[col][row].hasNote = !grid[col][row].empty();
-            if (row == Sequence::polyphonyConfig && grid[col][Sequence::modeConfig] != "RAND_CHORD")
-                boxes[col][row].isDisabled = true;
+            auto& box = boxes[col][row];
+            box.kind = UIBox::Kind::TrackerCell;
+            box.text = grid[col][row];
+            // Config cells are form fields, not note cells: keep them flat and
+            // outline-free while using row/column tints for orientation.
+            box.hasNote = false;
+            if (row == Sequence::polyphonyConfig && grid[col][Sequence::modeConfig] != "MODE:" + std::string(Sequence::readModeName(SequenceReadMode::randomChord)))
+                box.isDisabled = true;
+
+            box.useCustomFillColour = true;
+            box.customFillArgb = getSeqConfigCellFill(row,
+                                                      col,
+                                                      currentSeqParam,
+                                                      currentSequence,
+                                                      box.isDisabled,
+                                                      palette).getARGB();
+            box.useCustomTextColour = true;
+            box.customTextArgb = getSeqConfigCellText(row,
+                                                      col,
+                                                      currentSeqParam,
+                                                      currentSequence,
+                                                      box.isDisabled,
+                                                      palette).getARGB();
         }
     }
 

@@ -45,7 +45,7 @@ public:
     /** Clears active playback state across all heads. */
     void allNotesOff() override;
     /** Receives the global quarter-beat clock. */
-    void tick(int quarterBeat) override;
+    void tick(int quarterBeat, bool isQuarterNoteBoundary) override;
     /** Resets read heads to the start of the bar. */
     void reset() override;
     /** Sets the callback used to emit clocked arp notes. */
