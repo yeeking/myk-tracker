@@ -75,6 +75,25 @@ std::string formatStackLevelDb(float value)
   return juce::String(value, 0).toStdString();
 }
 
+// Stack send/return levels live in -60..+12 dB; map that onto [0,1] for the
+// horizontal parameter fill bar.
+float normalizeStackLevelDb(float db)
+{
+  constexpr float kMinDb = -60.0f;
+  constexpr float kMaxDb = 12.0f;
+  return juce::jlimit(0.0f, 1.0f, (db - kMinDb) / (kMaxDb - kMinDb));
+}
+
+// A machine cell is a cursor "stop" only when it is visible, enabled and has
+// at least one interaction (adjust/insert/activate). Label, disabled and
+// empty cells are passed over by cursor movement.
+bool isMachineCellLandable(const UIBox& cell)
+{
+  return cell.kind != UIBox::Kind::None
+      && !cell.isDisabled
+      && (cell.onAdjust != nullptr || cell.onInsert != nullptr || cell.onActivate != nullptr);
+}
+
 std::size_t getSequenceConfigRowCount()
 {
   return kSeqConfigBaseRows;
@@ -1270,8 +1289,13 @@ void SequencerEditor::moveCursorLeftOnMachinePage()
 
   if (machineCursorCol > 0)
   {
+    const std::size_t rowBefore = machineCursorRow;
+    const std::size_t colBefore = machineCursorCol;
     moveMachineCursor(0, -1);
-    return;
+    if (machineCursorRow != rowBefore || machineCursorCol != colBefore)
+      return;
+    // No landable cell to the left; fall through so left can still drive
+    // transient UI such as the sampler file browser.
   }
 
   if (machineStackDetailMode)
@@ -2123,6 +2147,8 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
         if (machineHost != nullptr)
           machineHost->adjustMachineSendLevelDbInStack(stackIndex, slotIndex, direction);
       };
+      sendCell.hasValueScale = true;
+      sendCell.valueNorm = normalizeStackLevelDb(machineHost->getMachineSendLevelDbInStack(stackIndex, slotIndex));
     }
     boxes[2].push_back(std::move(sendCell));
 
@@ -2138,6 +2164,8 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
         if (machineHost != nullptr)
           machineHost->adjustMachineReturnLevelDbInStack(stackIndex, slotIndex, direction);
       };
+      returnCell.hasValueScale = true;
+      returnCell.valueNorm = normalizeStackLevelDb(machineHost->getMachineReturnLevelDbInStack(stackIndex, slotIndex));
     }
     boxes[3].push_back(std::move(returnCell));
 
@@ -2178,6 +2206,24 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
         machineHost->removeMachineFromStack(stackIndex, slotIndex);
     };
     boxes[6].push_back(std::move(deleteCell));
+  }
+
+  // Scope band: two dark rows reserved for the live oscilloscope trace that
+  // the UI renders over the grid. Disabled (and callback-free) so the editor
+  // cursor can never land on them (see isMachineCellLandable).
+  for (int scopeRow = 0; scopeRow < 2; ++scopeRow)
+  {
+    for (std::size_t col = 0; col < boxes.size(); ++col)
+    {
+      UIBox scopeCell;
+      scopeCell.kind = UIBox::Kind::TrackerCell;
+      scopeCell.isDisabled = true;
+      scopeCell.useCustomFillColour = true;
+      scopeCell.customFillArgb = 0xFF0A0F14;
+      if (col == 0 && scopeRow == 0)
+        scopeCell.text = "OUT";
+      boxes[col].push_back(std::move(scopeCell));
+    }
   }
 
   return boxes;
@@ -2221,8 +2267,14 @@ void SequencerEditor::leaveMachineDetail()
 void SequencerEditor::refreshMachineStateForCurrentSequence()
 {
   const std::size_t previousRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
-  const bool cursorWasOnControlRow = previousRows > 0 && machineCursorRow == previousRows - 1;
-  const bool editWasOnControlRow = previousRows > 0 && machineEditRow == previousRows - 1;
+  // In the stack table the last two rows are the scope band, so the row the
+  // cursor follows when rows are added is the last slot row (or the ADD row
+  // when the stack has no slots yet).
+  const std::size_t previousControlRow = (!machineStackDetailMode && previousRows >= 3)
+    ? previousRows - 3
+    : (previousRows > 0 ? previousRows - 1 : 0);
+  const bool cursorWasOnControlRow = previousRows > 0 && machineCursorRow == previousControlRow;
+  const bool editWasOnControlRow = previousRows > 0 && machineEditRow == previousControlRow;
 
   if (!isMachineUiForCurrentSequence() || machineHost == nullptr)
   {
@@ -2624,9 +2676,11 @@ void SequencerEditor::rebuildMachineCells()
   machineEditRow = std::min(machineEditRow, rows - 1);
   machineEditCol = std::min(machineEditCol, cols - 1);
 
+  snapMachineCursorToLandable();
+
   for (std::size_t col = 0; col < cols; ++col)
   {
-    for (std::size_t row = 0; row < rows; ++row)
+    for (std::size_t row = 0; row < machineCells[col].size(); ++row)
     {
       auto& cell = machineCells[col][row];
       cell.isSelected = (row == machineCursorRow && col == machineCursorCol);
@@ -2637,19 +2691,97 @@ void SequencerEditor::rebuildMachineCells()
   }
 }
 
+void SequencerEditor::snapMachineCursorToLandable()
+{
+  if (machineCells.empty() || machineCells[0].empty())
+    return;
+  const std::size_t cols = machineCells.size();
+  if (machineCursorCol >= cols || machineCursorRow >= machineCells[machineCursorCol].size())
+    return;
+  if (isMachineCellLandable(machineCells[machineCursorCol][machineCursorRow]))
+    return;
+
+  // Pick the nearest cell (by row distance, then column distance) that the
+  // cursor is allowed to rest on.
+  std::size_t bestRow = machineCursorRow;
+  std::size_t bestCol = machineCursorCol;
+  bool bestFound = false;
+  for (std::size_t col = 0; col < cols; ++col)
+  {
+    for (std::size_t row = 0; row < machineCells[col].size(); ++row)
+    {
+      if (!isMachineCellLandable(machineCells[col][row]))
+        continue;
+      if (bestFound)
+      {
+        const std::size_t rowDiff = row > machineCursorRow ? row - machineCursorRow : machineCursorRow - row;
+        const std::size_t colDiff = col > machineCursorCol ? col - machineCursorCol : machineCursorCol - col;
+        const std::size_t bestRowDiff = bestRow > machineCursorRow ? bestRow - machineCursorRow : machineCursorRow - bestRow;
+        const std::size_t bestColDiff = bestCol > machineCursorCol ? bestCol - machineCursorCol : machineCursorCol - bestCol;
+        if (rowDiff > bestRowDiff || (rowDiff == bestRowDiff && colDiff >= bestColDiff))
+          continue;
+      }
+      bestRow = row;
+      bestCol = col;
+      bestFound = true;
+    }
+  }
+
+  if (bestFound && (bestRow != machineCursorRow || bestCol != machineCursorCol))
+  {
+    machineCursorRow = bestRow;
+    machineCursorCol = bestCol;
+    machineEditRow = bestRow;
+    machineEditCol = bestCol;
+  }
+}
+
 void SequencerEditor::moveMachineCursor(int deltaRow, int deltaCol)
 {
   if (machineCells.empty() || machineCells[0].empty())
     return;
 
-  const int maxRow = static_cast<int>(machineCells[0].size()) - 1;
   const int maxCol = static_cast<int>(machineCells.size()) - 1;
 
-  const int nextRow = juce::jlimit(0, maxRow, static_cast<int>(machineCursorRow) + deltaRow);
-  const int nextCol = juce::jlimit(0, maxCol, static_cast<int>(machineCursorCol) + deltaCol);
+  std::size_t nextRow = machineCursorRow;
+  std::size_t nextCol = machineCursorCol;
 
-  machineCursorRow = static_cast<std::size_t>(nextRow);
-  machineCursorCol = static_cast<std::size_t>(nextCol);
+  if (deltaRow != 0)
+  {
+    // Step through rows in the requested direction, skipping cells the
+    // cursor is not allowed to rest on.
+    const std::size_t colRows = machineCursorCol < machineCells.size()
+        ? machineCells[machineCursorCol].size()
+        : 0;
+    for (int row = static_cast<int>(machineCursorRow) + deltaRow;
+         row >= 0 && static_cast<std::size_t>(row) < colRows;
+         row += deltaRow)
+    {
+      if (isMachineCellLandable(machineCells[machineCursorCol][static_cast<std::size_t>(row)]))
+      {
+        nextRow = static_cast<std::size_t>(row);
+        break;
+      }
+    }
+  }
+  else if (deltaCol != 0)
+  {
+    for (int col = static_cast<int>(machineCursorCol) + deltaCol;
+         col >= 0 && col <= maxCol;
+         col += deltaCol)
+    {
+      if (machineCursorRow >= machineCells[col].size())
+        continue;
+      if (isMachineCellLandable(machineCells[col][machineCursorRow]))
+      {
+        nextCol = static_cast<std::size_t>(col);
+        break;
+      }
+    }
+  }
+
+  machineCursorRow = nextRow;
+  machineCursorCol = nextCol;
   rebuildMachineCells();
 
   if (machineStackDetailMode)

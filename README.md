@@ -11,9 +11,9 @@ external MIDI routing.
 - `Song` page: arrange sequence sets into a song and choose how many beats each row runs before switching.
 - `Sequence` page: browse sequences and steps, mute/arm tracks, and move around the current pattern.
 - `Step` page: edit the command rows inside a single step: command, note, velocity, and duration.
-- `Machine` page: inspect and configure the machine stack for the current track, including instruments and effects.
-- `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing.
-- `Sequence Config` page: edit `SEND`, read-head count/selection, TPS, traversal mode, chord polyphony, rhythm, and head probability. Up to three independently timed heads may read the same sequence.
+- `Machine` page: inspect and configure the machine stack for the current track, including instruments and effects. SEND/RETURN levels render as horizontal fill bars scaled to their level, and the scope band under the grid shows the stack output with an auto-calibrating vertical scale.
+- `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing. Scaled parameters render as horizontal fill bars showing their normalized position.
+- `Sequence Config` page: edit `SEND`, read-head count/selection, TPS, traversal mode, chord polyphony, rhythm, and head probability. Up to three independently timed heads may read the same sequence. A faint column flash briefly marks a sequence when its read head triggers active steps during playback.
 - `Mixer` page: edit the 16 machine stacks' mute, solo, gain, and post-mute meters. Multiple soloed stacks remain audible together.
 - `Reset / Quit` confirmation page: confirm tracker reset and, in standalone builds, quit.
 
@@ -103,9 +103,16 @@ server; resources remain a modern-MCP feature.
 Useful resources include `myktracker://state`, `myktracker://view`,
 `myktracker://song`, and `myktracker://capabilities`. The server exposes tools
 for transport, steps, sequences, song rows, machine stacks, machine cells,
-local sample loading, GUI-equivalent actions, and confirmed application actions.
-`tracker_application` requires `confirm: true` for reset and quit. Sample loads
-return a `loadId`; call `tracker_load_sample` with `action: "status"` to poll.
+local sample loading, GUI-equivalent actions, UI screenshots, and confirmed
+application actions. `tracker_application` requires `confirm: true` for reset
+and quit. Sample loads return a `loadId`; call `tracker_load_sample` with
+`action: "status"` to poll.
+
+`tracker_screenshot` captures the active tracker editor as a PNG MCP image
+content block for vision models. It requires a visible standalone editor and
+returns `ui_unavailable` when no editor is active. The base64 PNG is in
+`content[0].data`; `structuredContent` reports `width`, `height`, and `bytes`
+without duplicating the image payload.
 
 Every RPC request needs the modern MCP headers and a per-request protocol
 envelope in `params._meta`. For example:

@@ -22,6 +22,10 @@ public:
         float glow = 0.0f;
         float depthScale = 1.0f;
         bool drawOutline = false;
+        /** Horizontal parameter fill bar; -1 = no bar, otherwise [0,1]. */
+        float fillFraction = -1.0f;
+        /** Colour of the horizontal parameter fill bar (0xAARRGGBB). */
+        juce::Colour barColour { 0x595929E0 };
     };
 
     using CellGrid = std::vector<std::vector<CellState>>;
@@ -32,6 +36,27 @@ public:
         juce::Colour color { PaletteDefaults::overlayText };
         juce::Colour glowColor { PaletteDefaults::overlayGlow };
         float glowStrength = 0.35f;
+    };
+
+    /** A polyline drawn in the cell grid's own coordinate space.
+
+        Region edges are expressed as (fractional) column/row indices into the
+        currently displayed grid: colStart/colEnd are left/right column edges
+        and rowTop/rowBottom are top/bottom row edges (row 0 is the top row,
+        rowBottom is exclusive). Samples are -1..1, left to right, mapped onto
+        the region's vertical centre line. */
+    struct Trace
+    {
+        float colStart = 0.0f;
+        float colEnd = 1.0f;
+        float rowTop = 0.0f;
+        float rowBottom = 1.0f;
+        std::vector<float> samples;
+        juce::Colour color { juce::Colours::cyan };
+        // Above every cell face (max cellDepth 0.6 * depthScale 1.8 = 1.08)
+        // so traces overlay the grid instead of hiding behind cell faces.
+        float z = 1.15f;
+        float lineWidth = 2.0f;
     };
 
     struct ZoomState
@@ -70,6 +95,7 @@ public:
     void setViewportBounds(const juce::Rectangle<int>& bounds, int componentHeight, float renderingScale);
     void setStyle(const Style& style);
     void setCellSize(float width, float height);
+    void setTraces(const std::vector<Trace>& traces);
 
 private:
     struct ShaderAttributes
@@ -124,6 +150,8 @@ private:
     void renderGrid(const juce::Matrix3D<float>& projectionMatrix,
                     const juce::Matrix3D<float>& viewMatrix,
                     float glowPulse);
+    void renderTraces(const juce::Matrix3D<float>& projectionMatrix,
+                      const juce::Matrix3D<float>& viewMatrix);
     void renderCellText(const juce::Matrix3D<float>& projectionMatrix,
                         const juce::Matrix3D<float>& viewMatrix,
                         float glowPulse);
@@ -148,6 +176,7 @@ private:
 
     std::mutex stateMutex;
     CellGrid cellStates;
+    std::vector<Trace> traceStates;
     std::vector<float> columnWidths;
     bool textGeometryDirty = false;
 
@@ -163,6 +192,7 @@ private:
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
     GLuint frontEdgeIndexBuffer = 0;
+    GLuint traceVertexBuffer = 0;
 
     float cellWidth = 2.0f;
     float cellHeight = 1.0f;

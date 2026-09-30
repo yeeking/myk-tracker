@@ -1052,6 +1052,48 @@ std::vector<TrackerMainProcessor::PendingZoomCommand> TrackerMainProcessor::cons
     return commands;
 }
 
+juce::String TrackerMainProcessor::requestUiScreenshot(std::shared_ptr<UiScreenshotRequest> request)
+{
+    if (request == nullptr || request->completed == nullptr || request->image == nullptr || request->error == nullptr)
+    {
+        if (request != nullptr)
+        {
+            if (request->error != nullptr) *request->error = "screenshot_failed";
+            if (request->completed != nullptr) request->completed->signal();
+        }
+        return "screenshot_failed";
+    }
+
+    auto* editor = getActiveEditor();
+    auto* ui = dynamic_cast<TrackerMainUI*>(editor);
+    if (ui == nullptr)
+    {
+        *request->error = "ui_unavailable";
+        request->completed->signal();
+        return "ui_unavailable";
+    }
+
+    return ui->requestScreenshot(std::move(request));
+}
+
+void TrackerMainProcessor::copyStackScope(std::size_t stackIndex, std::vector<float>& out)
+{
+    withAudioThreadExclusive([this, &out, stackIndex]()
+    {
+        const auto* stack = getMachineStack(stackIndex);
+        if (stack == nullptr || stack->scopeRing.empty())
+        {
+            std::fill(out.begin(), out.end(), 0.0f);
+            return;
+        }
+        const std::size_t ringSize = stack->scopeRing.size();
+        out.resize(ringSize);
+        // scopeHead points at the oldest sample, so read forward for time order.
+        for (std::size_t i = 0; i < ringSize; ++i)
+            out[i] = stack->scopeRing[(stack->scopeHead + i) % ringSize];
+    });
+}
+
 //==============================================================================
 void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
@@ -1077,6 +1119,13 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         stack.delayTailBuffer.clear();
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
+        // Fixed-size scope ring for the UI oscilloscope; independent of the block
+        // size so it is allocated once and reused across sample-rate changes.
+        if (stack.scopeRing.empty())
+        {
+            stack.scopeRing.assign(1024, 0.0f);
+            stack.scopeHead = 0;
+        }
         if (stack.sampler != nullptr)
             stack.sampler->prepareToPlay(sampleRate, samplesPerBlock);
         if (stack.wavetableSynth != nullptr)
@@ -1516,6 +1565,30 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
             const float stackGainLinear = gainDbToLinear(stack->gainDb);
             stackBuffer.applyGain(stackGainLinear);
+
+            // Record the final per-stack mono output for the UI oscilloscope.
+            // Audio-thread only; the ring is pre-allocated in prepareToPlay, so
+            // this performs no allocation on the audio path.
+            if (!stack->scopeRing.empty())
+            {
+                const int numSamples = stackBuffer.getNumSamples();
+                const int numChannels = stackBuffer.getNumChannels();
+                auto& scopeRing = stack->scopeRing;
+                const std::size_t ringSize = scopeRing.size();
+                // Keep the most recent ringSize samples of this block.
+                const int startInBlock = (numSamples > static_cast<int>(ringSize))
+                    ? (numSamples - static_cast<int>(ringSize)) : 0;
+                const int samplesToWrite = numSamples - startInBlock;
+                for (int s = 0; s < samplesToWrite; ++s)
+                {
+                    const int idx = startInBlock + s;
+                    const float mono = (numChannels > 1)
+                        ? 0.5f * (stackBuffer.getSample(0, idx) + stackBuffer.getSample(1, idx))
+                        : stackBuffer.getSample(0, idx);
+                    scopeRing[stack->scopeHead] = mono;
+                    stack->scopeHead = (stack->scopeHead + 1) % ringSize;
+                }
+            }
 
             const float meterTarget = linearToMeterNormalised(measureBufferRms(stackBuffer));
             const float attack = 0.65f;

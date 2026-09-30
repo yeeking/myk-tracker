@@ -143,6 +143,7 @@ const std::vector<ToolDefinition>& tools()
         { "tracker_machine_control", "Invoke a machine control directly by stable stack/slot/control address; legacy grid addressing remains available for compatibility.", TrackerControlService::CommandKind::machineControl, { "activate", "adjust", "insert", "set", "preview", "reset", "text", "backspace" } },
         { "tracker_load_sample", "Load a local sample into a stack sampler and map it to an inclusive MIDI note range; poll completion with loadId.", TrackerControlService::CommandKind::loadSample, { "load", "status" } },
         { "tracker_ui_action", "Perform a GUI-equivalent navigation or edit action.", TrackerControlService::CommandKind::uiAction, { "up", "down", "left", "right", "activate", "increment", "decrement", "add_row", "remove_row", "reset", "next_step", "mute", "arm", "note", "page" } },
+        { "tracker_screenshot", "Capture the current tracker UI as a PNG MCP image content block.", TrackerControlService::CommandKind::getScreenshot, {}, true },
         { "tracker_application", "Reset, quit, or open standalone audio settings.", TrackerControlService::CommandKind::application, { "reset", "quit", "audio_settings" }, false, true }
     };
     return registry;
@@ -181,6 +182,33 @@ juce::var legacyToolsListResult()
 
 juce::var controlToolResult(const TrackerControlService::Result& controlResult)
 {
+    auto result = object();
+    if (controlResult.ok
+        && controlResult.data.isObject()
+        && controlResult.data.getProperty("mimeType", {}).toString() == "image/png"
+        && controlResult.data.getDynamicObject()->hasProperty("data"))
+    {
+        auto image = object();
+        image.getDynamicObject()->setProperty("type", "image");
+        image.getDynamicObject()->setProperty("data", controlResult.data.getProperty("data", juce::var()));
+        image.getDynamicObject()->setProperty("mimeType", "image/png");
+        juce::Array<juce::var> content;
+        content.add(image);
+        result.getDynamicObject()->setProperty("content", content);
+
+        auto structured = object();
+        structured.getDynamicObject()->setProperty("format", controlResult.data.getProperty("format", "png"));
+        structured.getDynamicObject()->setProperty("mimeType", "image/png");
+        structured.getDynamicObject()->setProperty("width", controlResult.data.getProperty("width", 0));
+        structured.getDynamicObject()->setProperty("height", controlResult.data.getProperty("height", 0));
+        structured.getDynamicObject()->setProperty("bytes", controlResult.data.getProperty("bytes", 0));
+        structured.getDynamicObject()->setProperty("contentRevision", static_cast<juce::int64>(controlResult.contentRevision));
+        structured.getDynamicObject()->setProperty("viewRevision", static_cast<juce::int64>(controlResult.viewRevision));
+        result.getDynamicObject()->setProperty("structuredContent", structured);
+        result.getDynamicObject()->setProperty("isError", false);
+        return result;
+    }
+
     auto structured = controlResult.data.getDynamicObject() != nullptr ? controlResult.data : object();
     if (!controlResult.ok)
     {
@@ -194,7 +222,6 @@ juce::var controlToolResult(const TrackerControlService::Result& controlResult)
     text.getDynamicObject()->setProperty("type", "text");
     text.getDynamicObject()->setProperty("text", juce::JSON::toString(structured, false));
     juce::Array<juce::var> content; content.add(text);
-    auto result = object();
     result.getDynamicObject()->setProperty("content", content);
     // Older clients may ignore this field; the text block is always complete.
     result.getDynamicObject()->setProperty("structuredContent", structured);
@@ -372,23 +399,7 @@ McpRouter::Response McpRouter::route(const Request& request)
             if (hasProperty(arguments, "expectedViewRevision")) command.expectedViewRevision = static_cast<std::uint64_t>((juce::int64) arguments.getProperty("expectedViewRevision", 0));
             controlResult = control.execute(command);
         }
-        auto structured = controlResult.data.getDynamicObject() != nullptr ? controlResult.data : object();
-        if (!controlResult.ok)
-        {
-            structured = object();
-            structured.getDynamicObject()->setProperty("code", controlResult.code);
-            structured.getDynamicObject()->setProperty("message", controlResult.message);
-        }
-        structured.getDynamicObject()->setProperty("contentRevision", static_cast<juce::int64>(controlResult.contentRevision));
-        structured.getDynamicObject()->setProperty("viewRevision", static_cast<juce::int64>(controlResult.viewRevision));
-        auto text = object();
-        text.getDynamicObject()->setProperty("type", "text");
-        text.getDynamicObject()->setProperty("text", juce::JSON::toString(structured, false));
-        juce::Array<juce::var> content; content.add(text);
-        result = object();
-        result.getDynamicObject()->setProperty("content", content);
-        result.getDynamicObject()->setProperty("structuredContent", structured);
-        result.getDynamicObject()->setProperty("isError", !controlResult.ok);
+        result = controlToolResult(controlResult);
     }
     else if (method == "resources/list")
     {

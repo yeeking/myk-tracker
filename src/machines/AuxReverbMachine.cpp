@@ -141,12 +141,15 @@ UIBox AuxReverbMachine::makeValueCell(std::atomic<float>& target, float step, in
 {
     UIBox cell;
     cell.kind = UIBox::Kind::TrackerCell;
-    cell.text = formatFloat(target.load(std::memory_order_relaxed), decimals);
+    const float value = target.load(std::memory_order_relaxed);
+    cell.text = formatFloat(value, decimals);
     cell.onAdjust = [this, targetPtr = &target, step](int direction)
     {
         const float next = clampUnit(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
         targetPtr->store(next, std::memory_order_relaxed);
         dspDirty.store(true, std::memory_order_release);
     };
+    cell.hasValueScale = true;
+    cell.valueNorm = clampUnit(value);
     return cell;
 }

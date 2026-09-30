@@ -389,15 +389,20 @@ UIBox ChannelStripMachine::makeValueCell(std::atomic<float>& target, float step,
 {
     UIBox cell;
     cell.kind = UIBox::Kind::TrackerCell;
-    cell.text = formatFloat(target.load(std::memory_order_relaxed), decimals);
+    const float value = target.load(std::memory_order_relaxed);
+    cell.text = formatFloat(value, decimals);
     cell.onAdjust = [this, targetPtr = &target, step, minValue, maxValue](int direction)
     {
         const auto next = clampParameter(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)),
-                                         minValue,
-                                         maxValue);
+                                          minValue,
+                                          maxValue);
         targetPtr->store(next, std::memory_order_relaxed);
         dspDirty.store(true, std::memory_order_release);
     };
+    cell.hasValueScale = true;
+    cell.valueNorm = maxValue > minValue
+        ? juce::jlimit(0.0f, 1.0f, (value - minValue) / (maxValue - minValue))
+        : 0.0f;
     return cell;
 }
 
@@ -412,14 +417,22 @@ UIBox ChannelStripMachine::makeFrequencyCell(std::atomic<float>& target, float s
 {
     UIBox cell;
     cell.kind = UIBox::Kind::TrackerCell;
-    cell.text = formatHz(target.load(std::memory_order_relaxed));
+    const float value = target.load(std::memory_order_relaxed);
+    cell.text = formatHz(value);
     cell.onAdjust = [this, targetPtr = &target, step, minValue, maxValue](int direction)
     {
         const auto next = clampParameter(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)),
-                                         minValue,
-                                         maxValue);
+                                          minValue,
+                                          maxValue);
         targetPtr->store(next, std::memory_order_relaxed);
         dspDirty.store(true, std::memory_order_release);
     };
+    // Frequency is perceptually logarithmic, so normalise on a log scale so the
+    // heat gradient tracks the audible sweep rather than a near-zero linear map.
+    cell.hasValueScale = true;
+    const float logSpan = std::log(maxValue) - std::log(minValue);
+    cell.valueNorm = logSpan > 0.0f
+        ? juce::jlimit(0.0f, 1.0f, (std::log(value) - std::log(minValue)) / logSpan)
+        : 0.0f;
     return cell;
 }

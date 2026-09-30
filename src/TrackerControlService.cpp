@@ -137,7 +137,50 @@ bool TrackerControlService::revisionsMatch(const Command& command, Result& failu
 
 TrackerControlService::Result TrackerControlService::execute(const Command& command)
 {
+    if (command.kind == CommandKind::getScreenshot)
+        return getScreenshot();
     return onMessageThread([this, command] { return executeNow(command); });
+}
+
+TrackerControlService::Result TrackerControlService::getScreenshot()
+{
+    auto request = std::make_shared<TrackerMainProcessor::UiScreenshotRequest>();
+    request->completed = std::make_shared<juce::WaitableEvent>();
+    request->image = std::make_shared<juce::Image>();
+    request->error = std::make_shared<juce::String>();
+
+    auto* manager = juce::MessageManager::getInstanceWithoutCreating();
+    if (manager == nullptr)
+        return fail("message_thread_unavailable", "The tracker message thread is unavailable");
+
+    auto requestError = std::make_shared<juce::String>();
+    const bool queued = manager->callAsync([this, request, requestError]
+    {
+        *requestError = processor.requestUiScreenshot(std::move(request));
+    });
+    if (!queued)
+        return fail("message_thread_unavailable", "The tracker did not accept the screenshot request");
+    if (!request->completed->wait(3000))
+        return fail("screenshot_timeout", "The tracker UI did not render a screenshot in time");
+    if (!request->error->isEmpty())
+        return fail(*request->error, "The tracker UI screenshot failed");
+    if (!request->image->isValid())
+        return fail("screenshot_empty", "The tracker UI screenshot contained no image data");
+
+    juce::MemoryBlock pngData;
+    juce::MemoryOutputStream pngStream(pngData, false);
+    if (!juce::PNGImageFormat().writeImageToStream(*request->image, pngStream))
+        return fail("screenshot_failed", "The tracker UI screenshot could not be encoded as PNG");
+
+    auto detail = makeObject();
+    auto* object = detail.getDynamicObject();
+    object->setProperty("format", "png");
+    object->setProperty("mimeType", "image/png");
+    object->setProperty("width", request->image->getWidth());
+    object->setProperty("height", request->image->getHeight());
+    object->setProperty("bytes", static_cast<juce::int64>(pngData.getSize()));
+    object->setProperty("data", juce::Base64::toBase64(pngData.getData(), pngData.getSize()));
+    return success(detail);
 }
 
 TrackerControlService::Result TrackerControlService::getState(const juce::String& scope)
@@ -1174,6 +1217,8 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 else return fail("invalid_argument", "Unknown application action");
                 break;
             }
+            case CommandKind::getScreenshot:
+                return fail("unsupported", "Screenshots must use the dedicated capture path");
             default: return fail("unsupported", "Unsupported command");
         }
         changed(contentChanged, viewChanged);
@@ -1186,7 +1231,7 @@ juce::var TrackerControlService::capabilities() const
     auto result = makeObject();
     auto* object = result.getDynamicObject();
     object->setProperty("protocolVersion", "2026-07-28");
-    object->setProperty("commandKinds", "get_track_notes,get_step_values,set_track_notes,set_track_lengths,transport,set_step,edit_sequence,edit_song,edit_machine_stack,machine_control,load_sample,ui_action,application");
+    object->setProperty("commandKinds", "get_track_notes,get_step_values,set_track_notes,set_track_lengths,transport,set_step,edit_sequence,edit_song,edit_machine_stack,machine_control,load_sample,ui_action,application,get_screenshot");
     object->setProperty("resources", "state,view,song,capabilities,sequence-set,machine-stack");
     return result;
 }

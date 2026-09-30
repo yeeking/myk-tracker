@@ -203,6 +203,15 @@ TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
 TrackerMainUI::~TrackerMainUI()
 {
   stopTimer();
+  {
+    const juce::ScopedLock lock(screenshotLock);
+    if (pendingScreenshot != nullptr)
+    {
+      *pendingScreenshot->error = "ui_unavailable";
+      pendingScreenshot->completed->signal();
+      pendingScreenshot.reset();
+    }
+  }
   openGLContext.detach();
 }
 
@@ -218,6 +227,76 @@ void TrackerMainUI::renderOpenGL()
                                   static_cast<float>(openGLContext.getRenderingScale()));
     uiComponent.renderUI();
     waitingForPaint = false;
+
+    std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> request;
+    {
+        const juce::ScopedLock lock(screenshotLock);
+        request = pendingScreenshot;
+        pendingScreenshot.reset();
+    }
+    if (request != nullptr)
+        captureScreenshotFrame(request);
+}
+
+juce::String TrackerMainUI::requestScreenshot(std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> request)
+{
+    {
+        const juce::ScopedLock lock(screenshotLock);
+        if (pendingScreenshot != nullptr)
+        {
+            *request->error = "screenshot_busy";
+            request->completed->signal();
+            return "screenshot_busy";
+        }
+        pendingScreenshot = std::move(request);
+    }
+    openGLContext.triggerRepaint();
+    return {};
+}
+
+void TrackerMainUI::captureScreenshotFrame(const std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest>& request)
+{
+    const auto fail = [request](const juce::String& code)
+    {
+        *request->error = code;
+        request->completed->signal();
+    };
+
+    int viewport[4] { 0, 0, 0, 0 };
+    juce::gl::glGetIntegerv(juce::gl::GL_VIEWPORT, viewport);
+    const int width = viewport[2];
+    const int height = viewport[3];
+    if (width <= 0 || height <= 0)
+    {
+        fail("screenshot_empty");
+        return;
+    }
+
+    std::vector<unsigned char> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
+    juce::gl::glReadPixels(0, 0, width, height, juce::gl::GL_RGBA, juce::gl::GL_UNSIGNED_BYTE, pixels.data());
+    if (juce::gl::glGetError() != juce::gl::GL_NO_ERROR)
+    {
+        fail("screenshot_failed");
+        return;
+    }
+
+    juce::Image image(juce::Image::ARGB, width, height, true);
+    for (int y = 0; y < height; ++y)
+    {
+        const auto* sourceRow = pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) * 4u);
+        for (int x = 0; x < width; ++x)
+        {
+            const auto* pixel = sourceRow + (static_cast<std::size_t>(x) * 4u);
+            image.setPixelAt(x, height - 1 - y,
+                             juce::Colour::fromRGBA(static_cast<juce::uint8>(pixel[0]),
+                                                    static_cast<juce::uint8>(pixel[1]),
+                                                    static_cast<juce::uint8>(pixel[2]),
+                                                    static_cast<juce::uint8>(pixel[3])));
+        }
+    }
+
+    *request->image = image;
+    request->completed->signal();
 }
 
 void TrackerMainUI::openGLContextClosing()
@@ -279,6 +358,15 @@ void TrackerMainUI::timerCallback ()
   else if (snapshotMode == "machine") editMode = SequencerEditorMode::machineConfig;
   else if (snapshotMode == "mixer") editMode = SequencerEditorMode::mixer;
   else if (snapshotMode == "reset") editMode = SequencerEditorMode::resetConfirmation;
+  if (editMode != SequencerEditorMode::configuringSequence)
+  {
+      seqConfigTriggerCounts.clear();
+      seqConfigTriggerFlash.clear();
+      seqConfigTriggerBaselineValid = false;
+      seqConfigTriggerSetIndex = std::size_t(-1);
+  }
+  // Only the machine stack table (re)populates traces each frame.
+  currentTraces.clear();
   switch(editMode){
 
       case SequencerEditorMode::arrangingSong:
@@ -363,6 +451,7 @@ void TrackerMainUI::timerCallback ()
   TrackerUIComponent::DragState dragState;
   dragState.panX = panOffsetX;
   dragState.panY = panOffsetY;
+  uiComponent.setTraces(currentTraces);
   uiComponent.updateUIState(cellStates,
                             overlayState,
                             zoomState,
@@ -507,19 +596,55 @@ void TrackerMainUI::prepareSeqConfigView()
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
     std::vector<std::vector<std::string>> grid;
+    std::vector<std::uint64_t> triggerCounts;
     size_t currentSequence = 0;
     size_t currentSeqParam = 0;
+    std::size_t sequenceSetIndex = 0;
     audioProcessor.withAudioThreadExclusive([&]()
     {
         currentSequence = seqEditor->getCurrentSequence();
         currentSeqParam = seqEditor->getCurrentSeqParam();
-        grid = audioProcessor.getSequencer()->getSequenceConfigsAsGridOfStrings(seqEditor->getCurrentConfigHead());
+        sequenceSetIndex = audioProcessor.getViewedSequenceSetIndex();
+        auto* sequencer = audioProcessor.getSequencer();
+        grid = sequencer->getSequenceConfigsAsGridOfStrings(seqEditor->getCurrentConfigHead());
+        triggerCounts.resize(grid.size());
+        for (std::size_t col = 0; col < grid.size(); ++col)
+            triggerCounts[col] = sequencer->getSequence(col)->getTriggerEventCount();
     });
+
+    const auto previousTriggerCounts = seqConfigTriggerCounts;
+    const bool establishTriggerBaseline = !seqConfigTriggerBaselineValid
+        || seqConfigTriggerSetIndex != sequenceSetIndex
+        || previousTriggerCounts.size() != grid.size();
+    if (establishTriggerBaseline)
+    {
+        seqConfigTriggerFlash.assign(grid.size(), 0.0f);
+        seqConfigTriggerCounts = triggerCounts;
+        seqConfigTriggerBaselineValid = true;
+        seqConfigTriggerSetIndex = sequenceSetIndex;
+    }
+    else
+    {
+        if (seqConfigTriggerFlash.size() != grid.size())
+            seqConfigTriggerFlash.assign(grid.size(), 0.0f);
+        for (std::size_t col = 0; col < grid.size(); ++col)
+        {
+            seqConfigTriggerFlash[col] *= 0.80f;
+            // Only an increase represents new trigger events; resets, stop, and
+            // sequence-set switches must not produce a visual flash.
+            if (triggerCounts[col] > previousTriggerCounts[col])
+                seqConfigTriggerFlash[col] = 1.0f;
+            seqConfigTriggerCounts[col] = triggerCounts[col];
+        }
+    }
 
     std::vector<std::vector<UIBox>> boxes(grid.size(), std::vector<UIBox>(Sequence::configCount));
 
     for (std::size_t col = 0; col < grid.size(); ++col)
     {
+        const float triggerFlash = col < seqConfigTriggerFlash.size()
+            ? seqConfigTriggerFlash[col]
+            : 0.0f;
         for (std::size_t row = 0; row < std::min(Sequence::configCount, grid[col].size()); ++row)
         {
             auto& box = boxes[col][row];
@@ -531,13 +656,16 @@ void TrackerMainUI::prepareSeqConfigView()
             if (row == Sequence::polyphonyConfig && grid[col][Sequence::modeConfig] != "MODE:" + std::string(Sequence::readModeName(SequenceReadMode::randomChord)))
                 box.isDisabled = true;
 
-            box.useCustomFillColour = true;
-            box.customFillArgb = getSeqConfigCellFill(row,
+            juce::Colour fill = getSeqConfigCellFill(row,
                                                       col,
                                                       currentSeqParam,
                                                       currentSequence,
                                                       box.isDisabled,
-                                                      palette).getARGB();
+                                                      palette);
+            if (triggerFlash > 0.005f)
+                fill = fill.interpolatedWith(juce::Colours::white, triggerFlash * 0.10f);
+            box.useCustomFillColour = true;
+            box.customFillArgb = fill.getARGB();
             box.useCustomTextColour = true;
             box.customTextArgb = getSeqConfigCellText(row,
                                                       col,
@@ -564,6 +692,7 @@ void TrackerMainUI::prepareMachineConfigView()
     std::vector<std::vector<UIBox>> machineBoxes;
     std::optional<CommandType> detailType;
     std::string selectedStackAction;
+    std::size_t scopeStackIndex = 0;
     audioProcessor.withAudioThreadExclusive([&]()
     {
         auto* seq = audioProcessor.getSequencer();
@@ -571,6 +700,7 @@ void TrackerMainUI::prepareMachineConfigView()
         {
             machineId = static_cast<int>(sequence->getMachineId());
         }
+        scopeStackIndex = seqEditor->getActiveMachineIndex(CommandType::Sampler);
         seqEditor->refreshMachineStateForCurrentSequence();
         machineBoxes = seqEditor->getMachineCells();
         detailType = seqEditor->getFocusedMachineDetailType();
@@ -579,6 +709,9 @@ void TrackerMainUI::prepareMachineConfigView()
                 if (cell.isSelected)
                     selectedStackAction = describeStackCursorAction(cell.text);
     });
+    // copyStackScope takes the audio lock itself, so snapshot outside the block above.
+    std::vector<float> scopeSamples;
+    audioProcessor.copyStackScope(scopeStackIndex, scopeSamples);
 
     if (detailType.has_value() && detailType.value() == CommandType::Sampler)
     {
@@ -643,6 +776,73 @@ void TrackerMainUI::prepareMachineConfigView()
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         updateCellStates(machineBoxes, rows, cols);
+
+        // WAVE previews: each source row shows one cycle of its base waveform,
+        // and the ENV columns carry the ADSR outline.
+        if (auto* synth = dynamic_cast<WavetableSynthMachine*>(
+                audioProcessor.getMachine(CommandType::WavetableSynth, static_cast<std::size_t>(machineId))))
+        {
+            constexpr int kGlyphSamples = 32;
+            const int stepCount = synth->getWaveStepCount();
+            for (int step = 0; step < stepCount; ++step)
+            {
+                const float rowTop = static_cast<float>(step + 2);
+                if (rowTop + 1.0f > static_cast<float>(rows))
+                    break;
+                TrackerUIComponent::Trace glyph;
+                glyph.colStart = 0.0f;
+                glyph.colEnd = 1.0f;
+                glyph.rowTop = rowTop;
+                glyph.rowBottom = rowTop + 1.0f;
+                glyph.samples.resize(static_cast<std::size_t>(kGlyphSamples));
+                const int waveformIndex = synth->getWaveStepWaveform(step);
+                for (int i = 0; i < kGlyphSamples; ++i)
+                    glyph.samples[static_cast<std::size_t>(i)] =
+                        synth->sampleWaveformForUi(waveformIndex,
+                                                    static_cast<double>(i) / static_cast<double>(kGlyphSamples - 1));
+                glyph.color = juce::Colour(0xFF29E0FF);
+                glyph.z = 1.15f;
+                glyph.lineWidth = 2.0f;
+                currentTraces.push_back(std::move(glyph));
+            }
+
+            float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f;
+            float maxAttack = 2.0f, maxDecay = 2.0f, maxRelease = 3.0f;
+            synth->getEnvelopeSettings(attack, decay, sustain, release, maxAttack, maxDecay, maxRelease);
+            const float attackSpan = maxAttack > 0.0f ? attack / maxAttack : 0.0f;
+            const float decaySpan = maxDecay > 0.0f ? decay / maxDecay : 0.0f;
+            const float releaseSpan = maxRelease > 0.0f ? release / maxRelease : 0.0f;
+            constexpr float kSustainSpan = 0.35f;
+            const float totalSpan = juce::jmax(0.001f, attackSpan + decaySpan + kSustainSpan + releaseSpan);
+
+            TrackerUIComponent::Trace envelope;
+            envelope.colStart = 2.0f;
+            envelope.colEnd = 4.0f;
+            envelope.rowTop = 1.0f;
+            envelope.rowBottom = 5.0f;
+            constexpr int kEnvSamples = 48;
+            envelope.samples.resize(static_cast<std::size_t>(kEnvSamples));
+            for (int i = 0; i < kEnvSamples; ++i)
+            {
+                const float x = (static_cast<float>(i) / static_cast<float>(kEnvSamples - 1)) * totalSpan;
+                float value;
+                if (x <= attackSpan)
+                    value = attackSpan > 0.0f ? x / attackSpan : 1.0f;
+                else if (x <= attackSpan + decaySpan)
+                    value = 1.0f - (1.0f - sustain) * (decaySpan > 0.0f ? (x - attackSpan) / decaySpan : 1.0f);
+                else if (x <= attackSpan + decaySpan + kSustainSpan)
+                    value = sustain;
+                else
+                    value = sustain * (1.0f - (releaseSpan > 0.0f ? (x - attackSpan - decaySpan - kSustainSpan) / releaseSpan : 1.0f));
+                // Trace samples are -1..1; map the 0..1 envelope onto that range.
+                envelope.samples[static_cast<std::size_t>(i)] = value * 2.0f - 1.0f;
+            }
+            envelope.color = juce::Colour(0xFFFFD21E);
+            envelope.z = 1.15f;
+            envelope.lineWidth = 2.0f;
+            currentTraces.push_back(std::move(envelope));
+        }
+
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [wavetable synth]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
@@ -764,7 +964,70 @@ void TrackerMainUI::prepareMachineConfigView()
     const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
     const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
     updateCellStates(machineBoxes, rows, cols);
+
+    // Draw the live oscilloscope over the scope band (last two grid rows).
+    currentTraces.clear();
+    if (rows >= 4 && cols >= 1 && !scopeSamples.empty())
+    {
+        // Auto-calibrate the zoom from the snapshot peak, then apply it; the
+        // renderer clamps samples to -1..1, so overdriven input flattens.
+        updateScopeCalibration(machineId, scopeStackIndex, scopeSamples);
+        for (float& sample : scopeSamples)
+            sample *= scopeCalScale;
+
+        TrackerUIComponent::Trace scope;
+        scope.colStart = 0.0f;
+        scope.colEnd = static_cast<float>(cols);
+        scope.rowTop = static_cast<float>(rows - 2);
+        scope.rowBottom = static_cast<float>(rows);
+        scope.samples = std::move(scopeSamples);
+        scope.color = juce::Colour(0xFF29E0FF);
+        scope.z = 1.15f;
+        scope.lineWidth = 2.0f;
+        currentTraces.push_back(std::move(scope));
+    }
+
     overlayState.text = "Stack [" + std::to_string(machineId) + "] [" + selectedStackAction + "]";
+}
+
+void TrackerMainUI::updateScopeCalibration(int machineId, std::size_t stackIndex,
+                                           const std::vector<float>& samples)
+{
+    // A different stack/machine means a different signal level: start from
+    // unity so the first second of the new view is not over- or under-zoomed.
+    if (scopeCalMachineId != machineId || scopeCalStackIndex != stackIndex)
+    {
+        scopeCalMachineId = machineId;
+        scopeCalStackIndex = stackIndex;
+        scopeCalScale = 1.0f;
+        scopeCalTarget = 1.0f;
+        scopeCalLastRecalMs = 0;
+        scopeCalLastFrameMs = 0;
+    }
+
+    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+    // Clamp dt so a long stall (e.g. debugger) cannot jump the scale.
+    const float dtSeconds = juce::jlimit(0.0f, 0.25f,
+                                         static_cast<float>((nowMs - scopeCalLastFrameMs) / 1000.0));
+    scopeCalLastFrameMs = nowMs;
+
+    float peak = 0.0f;
+    for (const float sample : samples)
+        peak = std::max(peak, std::abs(sample));
+
+    // Recalibrate at most once per second and only while there is signal;
+    // silence holds the last zoom instead of zooming in on noise.
+    if (scopeCalLastRecalMs == 0 || nowMs - scopeCalLastRecalMs >= 1000)
+    {
+        if (peak >= 0.01f)
+        {
+            scopeCalTarget = juce::jlimit(1.0f, 100.0f, 1.0f / peak);
+            scopeCalLastRecalMs = nowMs;
+        }
+    }
+
+    // Exponential ease toward the target (~0.3 s time constant).
+    scopeCalScale += (scopeCalTarget - scopeCalScale) * (1.0f - std::exp(-dtSeconds / 0.3f));
 }
 
 void TrackerMainUI::prepareMixerView()
@@ -984,6 +1247,7 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
     {
         cellStates.assign(colsToDisplay, std::vector<TrackerUIComponent::CellState>(rowsToDisplay, makeDefaultCell()));
         playheadGlow.assign(colsToDisplay, std::vector<float>(rowsToDisplay, 0.0f));
+        lastValueNorm.assign(colsToDisplay, std::vector<float>(rowsToDisplay, -1.0f));
         visibleCols = colsToDisplay;
         visibleRows = rowsToDisplay;
         startCol = 0;
@@ -1035,10 +1299,12 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
 
     cellStates.resize(colsToDisplay);
     playheadGlow.resize(colsToDisplay);
+    lastValueNorm.resize(colsToDisplay);
     for (size_t col = 0; col < colsToDisplay; ++col)
     {
         cellStates[col].resize(rowsToDisplay, makeDefaultCell());
         playheadGlow[col].resize(rowsToDisplay, 0.0f);
+        lastValueNorm[col].resize(rowsToDisplay, -1.0f);
     }
     // const float glowDecayStep = 0.1f;
     // const float glowDecayScalar = 0.8f;
@@ -1062,9 +1328,23 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
             const float glowDecayScalar = samplerViewActive
                 ? samplerPalette.glowDecayScalar
                 : palette.glowDecayScalar;
-            const float glowValue = samplerViewActive
+            const float baseGlow = samplerViewActive
                 ? box.glow
                 : (box.isHighlighted ? 1.0f : std::max(0.0f, previousGlow * glowDecayScalar));
+
+            // Flash the cell when its normalised parameter value changed
+            // since the last frame so adjustments are visible at a glance.
+            float valuePulse = 0.0f;
+            if (!samplerViewActive && box.hasValueScale && !box.isDisabled)
+            {
+                const float previousNorm = (reuseGlow && lastValueNorm.size() > displayCol
+                    && lastValueNorm[displayCol].size() > displayRow)
+                    ? lastValueNorm[displayCol][displayRow]
+                    : box.valueNorm;
+                if (std::abs(box.valueNorm - previousNorm) > 0.0001f)
+                    valuePulse = 1.0f;
+            }
+            const float glowValue = std::max(baseGlow, valuePulse);
 
             auto cell = makeDefaultCell();
             cell.text = box.text;
@@ -1076,8 +1356,14 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
             cell.drawOutline = samplerViewActive ? box.isSelected : box.hasNote;
             cell.outlineColor = palette.gridNote;
 
+            cell.fillFraction = (!samplerViewActive && box.hasValueScale && !box.isDisabled)
+                ? box.valueNorm
+                : -1.0f;
+            cell.barColour = palette.paramBarFill;
+
             cellStates[displayCol][displayRow] = cell;
             playheadGlow[displayCol][displayRow] = glowValue;
+            lastValueNorm[displayCol][displayRow] = box.hasValueScale ? box.valueNorm : -1.0f;
         }
     }
 
@@ -1103,6 +1389,9 @@ TrackerUIComponent::CellState TrackerMainUI::makeDefaultCell() const
 /** select colour based on cell state  */
 juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
 {
+    // Parameter strength is shown by the horizontal fill bar (see
+    // updateCellStates), not by the cell fill, so parameter cells keep the
+    // normal selected/empty fills.
     if (cell.isSelected)
         return PaletteDefaults::cursor.fill;
     if (cell.useCustomFillColour)

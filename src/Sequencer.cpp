@@ -200,6 +200,20 @@ bool Step::isActive() const
   return active;
 }
 
+bool Step::hasTriggerableEvent() const
+{
+  for (const auto& row : data)
+  {
+    if (row.size() <= Step::noteInd || row[Step::noteInd] <= 0.0)
+      continue;
+    const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, row[Step::cmdInd])));
+    if (command == CommandType::MidiNote || command == CommandType::Log
+        || command == CommandType::Sampler || command == CommandType::WavetableSynth)
+      return true;
+  }
+  return false;
+}
+
 std::string Step::dblToString(double val, std::size_t dps)
 {
   // quite verbose C++ way to make a string of a double with 2sf
@@ -227,8 +241,9 @@ Sequence::Sequence(Sequencer *_sequencer,
       ticksElapsed{0},
       tickOfFour{0},
        muted{false},
-       pendingQuarterBeatResync{std::make_unique<std::atomic<bool>>(false)},
-       rw_mutex{std::make_unique<std::shared_mutex>()}
+        pendingQuarterBeatResync{std::make_unique<std::atomic<bool>>(false)},
+        triggerEventCount{std::make_unique<std::atomic<std::uint64_t>>(0)},
+        rw_mutex{std::make_unique<std::shared_mutex>()}
 // , midiScaleToDrum{MachineUtilsAbs::getScaleMidiToDrumMidi()}
 {
   readHeads.emplace_back();
@@ -276,6 +291,7 @@ void Sequence::tick(bool trigger, bool isQuarterNoteBoundary)
 
   SequenceReadOnly context = getReadOnlyContext();
   std::uniform_real_distribution<double> chance(0.0, 1.0);
+  bool anyStepTriggered = false;
   for (auto& head : readHeads)
   {
     ++head.ticksElapsed;
@@ -299,10 +315,18 @@ void Sequence::tick(bool trigger, bool isQuarterNoteBoundary)
     for (std::size_t position = 0; position < head.positionCount; ++position)
     {
       const auto stepIndex = head.positions[position];
-      if (stepIndex < steps.size() && steps[stepIndex].isActive())
+      if (stepIndex < steps.size() && steps[stepIndex].isActive()
+          && steps[stepIndex].hasTriggerableEvent())
+      {
         steps[stepIndex].trigger(steps[stepIndex].howManyDataRows(), &context);
+        anyStepTriggered = true;
+      }
     }
   }
+
+  // The UI polls this relaxed counter to render a brief trigger flash.
+  if (anyStepTriggered && triggerEventCount != nullptr)
+    triggerEventCount->fetch_add(1, std::memory_order_relaxed);
 
   ticksElapsed = readHeads.empty() ? 0 : readHeads.front().ticksElapsed;
 }
@@ -621,6 +645,13 @@ std::vector<SequenceReadHeadSnapshot> Sequence::getReadHeadSnapshots() const
     result.push_back(std::move(snapshot));
   }
   return result;
+}
+
+std::uint64_t Sequence::getTriggerEventCount() const noexcept
+{
+  return triggerEventCount != nullptr
+      ? triggerEventCount->load(std::memory_order_relaxed)
+      : 0;
 }
 
 const std::vector<std::string>& Sequence::getRhythmPresets()

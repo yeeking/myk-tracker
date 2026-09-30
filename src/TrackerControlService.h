@@ -35,7 +35,7 @@ public:
     {
         getState, getTrackNotes, getStepValues, setTrackNotes, setTrackLengths,
         transport, setStep, editSequence, editSong, editMachineStack,
-        machineControl, loadSample, uiAction, application
+        machineControl, loadSample, uiAction, application, getScreenshot
     };
 
     struct Command
@@ -66,6 +66,7 @@ public:
 
 private:
     Result executeNow(const Command& command);
+    Result getScreenshot();
     Result getStateNow(const juce::String& scope);
     Result readResourceNow(const juce::String& uri);
     Result fail(const juce::String& code, const juce::String& message) const;

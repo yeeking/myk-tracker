@@ -304,9 +304,15 @@ void TrackerUIComponent::initOpenGL(int width, int height)
     openGLContext->extensions.glGenBuffers(1, &frontEdgeIndexBuffer);
     openGLContext->extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, frontEdgeIndexBuffer);
     openGLContext->extensions.glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                                          sizeof(frontFaceEdgeIndices),
-                                          frontFaceEdgeIndices,
-                                          GL_STATIC_DRAW);
+                                           sizeof(frontFaceEdgeIndices),
+                                           frontFaceEdgeIndices,
+                                           GL_STATIC_DRAW);
+
+    // Polyline buffer for grid-space traces (oscilloscope / waveform previews).
+    // Data is uploaded each frame in renderTraces; the handle is created here so
+    // OpenGL resource lifetime stays inside the renderer callbacks.
+    openGLContext->extensions.glGenBuffers(1, &traceVertexBuffer);
+    openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
@@ -346,6 +352,12 @@ void TrackerUIComponent::shutdownOpenGL()
         openGLContext->extensions.glDeleteBuffers(1, &frontEdgeIndexBuffer);
         frontEdgeIndexBuffer = 0;
     }
+
+    if (traceVertexBuffer != 0)
+    {
+        openGLContext->extensions.glDeleteBuffers(1, &traceVertexBuffer);
+        traceVertexBuffer = 0;
+    }
 }
 
 void TrackerUIComponent::setViewportBounds(const juce::Rectangle<int>& bounds,
@@ -366,6 +378,12 @@ void TrackerUIComponent::setCellSize(float width, float height)
 {
     cellWidth = width;
     cellHeight = height;
+}
+
+void TrackerUIComponent::setTraces(const std::vector<Trace>& traces)
+{
+    std::lock_guard<std::mutex> lock(stateMutex);
+    traceStates = traces;
 }
 
 void TrackerUIComponent::updateUIState(const CellGrid& cells,
@@ -427,6 +445,7 @@ void TrackerUIComponent::renderUI()
 
     openGLContext->extensions.glUseProgram(shaderProgram->getProgramID());
     renderGrid(projectionMatrix, viewMatrix, glowPulse);
+    renderTraces(projectionMatrix, viewMatrix);
 
     if (textShaderProgram != nullptr)
     {
@@ -604,6 +623,37 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
 
             glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
 
+            // Horizontal parameter fill bar: unlit slab anchored to the cell's
+            // left edge, in front of the cell face but behind the text
+            // (text renders at depth + 0.02).
+            if (cell.fillFraction > 0.005f)
+            {
+                const float barWidth = width * 0.8f * juce::jlimit(0.0f, 1.0f, cell.fillFraction);
+                const float barHeight = cellHeight * 0.7f;
+                const float barX = (centerX - width * 0.5f) + width * 0.1f + barWidth * 0.5f;
+                const auto barPosition = juce::Vector3D<float>(barX,
+                                                               startY - static_cast<float>(row) * stepY,
+                                                               depth + 0.008f);
+                const auto barMatrix = getModelMatrix(barPosition,
+                                                      juce::Vector3D<float>(barWidth, barHeight, 0.01f));
+                if (shaderUniforms->modelMatrix != nullptr)
+                    shaderUniforms->modelMatrix->setMatrix4(barMatrix.mat, 1, GL_FALSE);
+                if (shaderUniforms->cellColor != nullptr)
+                    shaderUniforms->cellColor->set(cell.barColour.getFloatRed(),
+                                                   cell.barColour.getFloatGreen(),
+                                                   cell.barColour.getFloatBlue(),
+                                                   cell.barColour.getFloatAlpha());
+                if (shaderUniforms->glowColor != nullptr)
+                    shaderUniforms->glowColor->set(0.0f, 0.0f, 0.0f);
+                if (shaderUniforms->cellGlow != nullptr)
+                    shaderUniforms->cellGlow->set(0.0f);
+                if (shaderUniforms->lightColor != nullptr)
+                    shaderUniforms->lightColor->set(0.0f, 0.0f, 0.0f);
+                if (shaderUniforms->ambientStrength != nullptr)
+                    shaderUniforms->ambientStrength->set(1.0f);
+                glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
+            }
+
             if (cell.drawOutline)
                 outlines.push_back(OutlineEntry{ modelMatrix, cell.outlineColor });
         }
@@ -652,6 +702,171 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
         glDisable(GL_POLYGON_OFFSET_LINE);
         glDepthMask(GL_TRUE);
     }
+}
+
+void TrackerUIComponent::renderTraces(const juce::Matrix3D<float>& projectionMatrix,
+                                      const juce::Matrix3D<float>& viewMatrix)
+{
+    if (shaderUniforms == nullptr || shaderAttributes == nullptr)
+        return;
+
+    std::vector<Trace> tracesCopy;
+    CellGrid cellsCopy;
+    std::vector<float> columnWidthsCopy;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex);
+        tracesCopy = traceStates;
+        cellsCopy = cellStates;
+        columnWidthsCopy = columnWidths;
+    }
+
+    if (tracesCopy.empty() || cellsCopy.empty())
+        return;
+
+    const size_t visibleCols = cellsCopy.size();
+    const size_t visibleRows = cellsCopy[0].size();
+    if (visibleCols == 0 || visibleRows == 0)
+        return;
+
+    // Recompute the same grid layout as renderGrid so traces share its space.
+    const float stepY = cellHeight + cellGap;
+    std::vector<float> widthScales(visibleCols, 1.0f);
+    if (!columnWidthsCopy.empty())
+    {
+        for (size_t col = 0; col < visibleCols; ++col)
+        {
+            if (col < columnWidthsCopy.size() && columnWidthsCopy[col] > 0.0f)
+                widthScales[col] = columnWidthsCopy[col];
+        }
+    }
+    float gridWidth = 0.0f;
+    for (size_t col = 0; col < visibleCols; ++col)
+    {
+        gridWidth += cellWidth * widthScales[col];
+        if (col + 1 < visibleCols)
+            gridWidth += cellGap;
+    }
+    const float gridHeight = stepY * static_cast<float>(visibleRows);
+    const float startX = -gridWidth * 0.5f;
+    const float startY = gridHeight * 0.5f - stepY * 0.5f;
+
+    // Left world-space edge of each column.
+    std::vector<float> colLeft(visibleCols + 1);
+    colLeft[0] = startX;
+    float cursorX = startX;
+    for (size_t col = 0; col < visibleCols; ++col)
+    {
+        const float width = cellWidth * widthScales[col];
+        colLeft[col + 1] = cursorX + width;
+        cursorX += width + cellGap;
+    }
+
+    const auto colToX = [&](float colFrac) -> float
+    {
+        if (colFrac <= 0.0f)
+            return colLeft[0];
+        if (colFrac >= static_cast<float>(visibleCols))
+            return colLeft[visibleCols];
+        const size_t idx = static_cast<size_t>(colFrac);
+        const float frac = colFrac - static_cast<float>(idx);
+        return colLeft[idx] + (colLeft[idx + 1] - colLeft[idx]) * frac;
+    };
+
+    if (shaderUniforms->projectionMatrix != nullptr)
+        shaderUniforms->projectionMatrix->setMatrix4(projectionMatrix.mat, 1, GL_FALSE);
+    if (shaderUniforms->viewMatrix != nullptr)
+        shaderUniforms->viewMatrix->setMatrix4(viewMatrix.mat, 1, GL_FALSE);
+
+    // Identity model: trace vertices are baked into grid/world space, so zoom/pan
+    // (applied in the view matrix) is inherited for free.
+    const juce::Matrix3D<float> identity = juce::Matrix3D<float>{};
+    if (shaderUniforms->modelMatrix != nullptr)
+        shaderUniforms->modelMatrix->setMatrix4(identity.mat, 1, GL_FALSE);
+
+    // Unlit: ambient only, no light, no glow -> fragment outputs cellColor verbatim.
+    if (shaderUniforms->lightColor != nullptr)
+        shaderUniforms->lightColor->set(0.0f, 0.0f, 0.0f);
+    if (shaderUniforms->ambientStrength != nullptr)
+        shaderUniforms->ambientStrength->set(1.0f);
+    if (shaderUniforms->cellGlow != nullptr)
+        shaderUniforms->cellGlow->set(0.0f);
+
+    openGLContext->extensions.glUseProgram(shaderProgram->getProgramID());
+    openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, traceVertexBuffer);
+    openGLContext->extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    const GLsizei stride = sizeof(Vertex);
+    if (shaderAttributes->position != nullptr)
+    {
+        openGLContext->extensions.glVertexAttribPointer(shaderAttributes->position->attributeID,
+                                                        3,
+                                                        GL_FLOAT,
+                                                        GL_FALSE,
+                                                        stride,
+                                                        reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, position)));
+        openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->position->attributeID);
+    }
+    if (shaderAttributes->normal != nullptr)
+    {
+        openGLContext->extensions.glVertexAttribPointer(shaderAttributes->normal->attributeID,
+                                                        3,
+                                                        GL_FLOAT,
+                                                        GL_FALSE,
+                                                        stride,
+                                                        reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, normal)));
+        openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->normal->attributeID);
+    }
+
+    // Keep the line slightly inside the region so it does not touch cell edges.
+    const float verticalPadding = 0.9f;
+    glDepthMask(GL_FALSE);
+
+    for (const auto& trace : tracesCopy)
+    {
+        const size_t n = trace.samples.size();
+        if (n < 2)
+            continue;
+
+        const float x0 = colToX(trace.colStart);
+        const float x1 = colToX(trace.colEnd);
+        const float bandTopY = startY - trace.rowTop * stepY + 0.5f * cellHeight;
+        const float bandBottomY = startY - (trace.rowBottom - 1.0f) * stepY - 0.5f * cellHeight;
+        const float regionCenterY = 0.5f * (bandTopY + bandBottomY);
+        const float amp = 0.5f * (bandTopY - bandBottomY) * verticalPadding;
+
+        std::vector<Vertex> vertices;
+        vertices.reserve(n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+            const float x = x0 + (x1 - x0) * t;
+            const float s = juce::jlimit(-1.0f, 1.0f, trace.samples[i]);
+            // World +y is up: +1 must map to the top of the band so signals,
+            // waveform glyphs and the ADSR outline all read the right way up.
+            const float y = regionCenterY + s * amp;
+            vertices.push_back(Vertex{ { x, y, trace.z }, { 0.0f, 0.0f, 1.0f } });
+        }
+
+        openGLContext->extensions.glBufferData(GL_ARRAY_BUFFER,
+                                               static_cast<GLsizeiptr>(vertices.size() * sizeof(Vertex)),
+                                               vertices.data(),
+                                               GL_DYNAMIC_DRAW);
+
+        if (shaderUniforms->cellColor != nullptr)
+            shaderUniforms->cellColor->set(trace.color.getFloatRed(),
+                                           trace.color.getFloatGreen(),
+                                           trace.color.getFloatBlue(),
+                                           trace.color.getFloatAlpha());
+        if (shaderUniforms->glowColor != nullptr)
+            shaderUniforms->glowColor->set(0.0f, 0.0f, 0.0f);
+
+        glLineWidth(trace.lineWidth);
+        glDrawArrays(GL_LINE_STRIP, 0, static_cast<GLsizei>(vertices.size()));
+    }
+
+    glDepthMask(GL_TRUE);
+    glLineWidth(1.0f);
+    openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void TrackerUIComponent::renderCellText(const juce::Matrix3D<float>& projectionMatrix,

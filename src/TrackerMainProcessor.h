@@ -164,6 +164,18 @@ public:
         float normalizedY = 0.5f;
     };
     std::vector<PendingZoomCommand> consumePendingZoomCommands();
+    struct UiScreenshotRequest
+    {
+        std::shared_ptr<juce::WaitableEvent> completed;
+        std::shared_ptr<juce::Image> image;
+        std::shared_ptr<juce::String> error;
+    };
+    /** Must be called on the JUCE message thread. */
+    juce::String requestUiScreenshot(std::shared_ptr<UiScreenshotRequest> request);
+
+    /** Copies the most recent mono scope samples of the given machine stack into
+        out, oldest to newest. Blocks until the audio thread is idle. */
+    void copyStackScope(std::size_t stackIndex, std::vector<float>& out);
 
     template <typename Fn>
     auto withAudioThreadExclusive(Fn&& fn) -> decltype(fn())
@@ -264,6 +276,11 @@ private:
         int midiOutputChannel = 1;
         float gainDb = 0.0f;
         float meterLevel = 0.0f;
+        /** Audio-thread ring buffer of the stack's final mono output (L+R)/2 for the
+            UI oscilloscope. Allocated in prepareToPlay; the UI reads it via
+            copyStackScope under withAudioThreadExclusive. */
+        std::vector<float> scopeRing;
+        std::size_t scopeHead = 0;
     };
     struct SharedAuxBus
     {

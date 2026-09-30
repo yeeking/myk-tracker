@@ -106,7 +106,7 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     const std::lock_guard<std::mutex> lock(stateMutex);
 
     const std::size_t rows = static_cast<std::size_t>(juce::jmax(5, waveStepCount + 2));
-    std::vector<std::vector<UIBox>> boxes(5, std::vector<UIBox>(rows));
+    std::vector<std::vector<UIBox>> boxes(4, std::vector<UIBox>(rows));
 
     auto makeValueCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
@@ -119,6 +119,10 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
             *target = juce::jlimit(minValue, maxValue, *target + (step * static_cast<float>(direction)));
             updateVoiceEnvelopeParameters();
         };
+        cell.hasValueScale = true;
+        cell.valueNorm = maxValue > minValue
+            ? juce::jlimit(0.0f, 1.0f, (*target - minValue) / (maxValue - minValue))
+            : 0.0f;
         return cell;
     };
 
@@ -133,10 +137,13 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
         const std::lock_guard<std::mutex> guard(stateMutex);
         waveStepCount = juce::jlimit(1, kMaxWaveSteps, waveStepCount + direction);
     };
-    boxes[3][0].kind = UIBox::Kind::TrackerCell;
-    boxes[3][0].text = "ENV";
-    boxes[4][0].kind = UIBox::Kind::None;
-    boxes[4][0].isDisabled = true;
+    boxes[1][1].hasValueScale = true;
+    boxes[1][1].valueNorm = juce::jlimit(0.0f, 1.0f,
+        static_cast<float>(waveStepCount - 1) / static_cast<float>(kMaxWaveSteps - 1));
+    boxes[2][0].kind = UIBox::Kind::TrackerCell;
+    boxes[2][0].text = "ENV";
+    boxes[3][0].kind = UIBox::Kind::None;
+    boxes[3][0].isDisabled = true;
 
     for (std::size_t row = 2; row < rows; ++row)
     {
@@ -148,15 +155,17 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
         boxes[2][row].isDisabled = true;
         boxes[3][row].kind = UIBox::Kind::None;
         boxes[3][row].isDisabled = true;
-        boxes[4][row].kind = UIBox::Kind::None;
-        boxes[4][row].isDisabled = true;
     }
 
     for (int stepIndex = 0; stepIndex < waveStepCount; ++stepIndex)
     {
         const std::size_t row = static_cast<std::size_t>(stepIndex + 2);
+        // The pre-pass above marks these rows disabled; re-enable them so the
+        // cursor can land on the waveform selector cells.
+        boxes[0][row].isDisabled = false;
         boxes[0][row].kind = UIBox::Kind::TrackerCell;
         boxes[0][row].text = "W" + std::to_string(stepIndex + 1);
+        boxes[1][row].isDisabled = false;
         boxes[1][row].kind = UIBox::Kind::TrackerCell;
         boxes[1][row].text = getWaveformName(waveSteps[static_cast<std::size_t>(stepIndex)]);
         boxes[1][row].onAdjust = [this, stepIndex](int direction)
@@ -182,12 +191,49 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     for (std::size_t envIndex = 0; envIndex < envLabels.size(); ++envIndex)
     {
         const std::size_t row = envIndex + 1;
-        boxes[3][row].kind = UIBox::Kind::TrackerCell;
-        boxes[3][row].text = envLabels[envIndex];
-        boxes[4][row] = envValueCells[envIndex];
+        boxes[2][row].kind = UIBox::Kind::TrackerCell;
+        boxes[2][row].text = envLabels[envIndex];
+        boxes[3][row] = envValueCells[envIndex];
     }
 
     return boxes;
+}
+
+int WavetableSynthMachine::getWaveStepCount() const
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    return waveStepCount;
+}
+
+int WavetableSynthMachine::getWaveStepWaveform(int stepIndex) const
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    if (stepIndex < 0 || stepIndex >= waveStepCount)
+        return 0;
+    return static_cast<int>(waveSteps[static_cast<std::size_t>(stepIndex)]);
+}
+
+float WavetableSynthMachine::sampleWaveformForUi(int waveformIndex, double phase) const
+{
+    if (waveformIndex < 0 || waveformIndex > static_cast<int>(Waveform::square))
+        return 0.0f;
+    // Waveform tables are immutable after construction; the lock only keeps the
+    // step selection coherent with concurrent UI edits.
+    return sampleWaveform(static_cast<Waveform>(waveformIndex), phase);
+}
+
+void WavetableSynthMachine::getEnvelopeSettings(float& attack, float& decay, float& sustain,
+                                                float& release, float& maxAttack,
+                                                float& maxDecay, float& maxRelease) const
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    attack = attackSeconds;
+    decay = decaySeconds;
+    sustain = sustainLevel;
+    release = releaseSeconds;
+    maxAttack = kMaxAttackSeconds;
+    maxDecay = kMaxDecaySeconds;
+    maxRelease = kMaxReleaseSeconds;
 }
 
 bool WavetableSynthMachine::handleIncomingNote(unsigned short note,

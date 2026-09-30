@@ -11,6 +11,7 @@
 #include <string>
 #include <functional>
 #include <map>
+#include <cstdint>
 #include <cmath> // fmod
 #include <assert.h>  
 #include <mutex> 
@@ -93,6 +94,8 @@ class Step{
     void deactivate();
     /** returns the activity status of this step */
     bool isActive() const;
+    /** returns true if any row in this step can send an event when triggered */
+    bool hasTriggerableEvent() const;
     /** convert double to string with sent no. decimal places*/
       static std::string dblToString(double val, std::size_t dps);
   private: 
@@ -248,6 +251,7 @@ class Sequence{
     const SequenceReadHeadConfig& getReadHeadConfig(std::size_t head) const;
     bool setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig& config, bool requestResync = true);
     std::vector<SequenceReadHeadSnapshot> getReadHeadSnapshots() const;
+    std::uint64_t getTriggerEventCount() const noexcept;
     static const std::vector<std::string>& getRhythmPresets();
     static const char* readModeName(SequenceReadMode mode);
     static bool parseReadMode(const std::string& name, SequenceReadMode& mode);
@@ -323,6 +327,7 @@ class Sequence{
     };
     std::vector<ReadHeadState> readHeads;
     std::unique_ptr<std::atomic<bool>> pendingQuarterBeatResync;
+    std::unique_ptr<std::atomic<std::uint64_t>> triggerEventCount;
 
     std::size_t eligibleRandomSteps(std::array<std::size_t, 128>& eligible) const;
     void selectPositions(ReadHeadState& head);

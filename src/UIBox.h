@@ -50,6 +50,10 @@ struct UIBox
     std::uint32_t customFillArgb = 0;
     /** ARGB text colour override. */
     std::uint32_t customTextArgb = 0;
+    /** True when `valueNorm` describes a parameter value for the fill bar. */
+    bool hasValueScale = false;
+    /** Normalised parameter value in [0,1] shown by the horizontal fill bar. */
+    float valueNorm = 0.0f;
     /** Cell kind used by the renderer. */
     Kind kind = Kind::None;
 

@@ -52,6 +52,8 @@ public:
     bool keyStateChanged(bool isKeyDown, juce::Component* originatingComponent) override;
     /** next time we draw, call update on the sequencer's string representation */
     // void updateStringOnNextDraw();
+    /** Arms a one-shot OpenGL capture.  The request is completed on the next render frame. */
+    juce::String requestScreenshot(std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> request);
     long framesDrawn; 
 private:
 
@@ -71,12 +73,15 @@ private:
     size_t rowsInUI;
     juce::Rectangle<int> seqViewBounds;
     
+    void captureScreenshotFrame(const std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest>& request);
     void prepareControlPanelView();
     void prepareSongView();
     void prepareSequenceView();
     void prepareStepView();
     void prepareSeqConfigView();
     void prepareMachineConfigView();
+    void updateScopeCalibration(int machineId, std::size_t stackIndex,
+                                const std::vector<float>& samples);
     void prepareMixerView();
     void prepareResetConfirmationView();
     void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
@@ -109,6 +114,12 @@ private:
 
     TrackerUIComponent::CellGrid cellStates;
     std::vector<std::vector<float>> playheadGlow;
+    /** Last frame's valueNorm per display cell, used for change pulses. */
+    std::vector<std::vector<float>> lastValueNorm;
+    std::vector<std::uint64_t> seqConfigTriggerCounts;
+    std::vector<float> seqConfigTriggerFlash;
+    bool seqConfigTriggerBaselineValid = false;
+    std::size_t seqConfigTriggerSetIndex = std::size_t(-1);
     size_t visibleCols = 0;
     size_t visibleRows = 0;
     size_t startCol = 0;
@@ -125,6 +136,19 @@ private:
     TrackerPalette palette;
     SamplerPalette samplerPalette;
     std::vector<float> samplerColumnWidths;
+    /** Polylines drawn over the current grid (machine-page scope band). */
+    std::vector<TrackerUIComponent::Trace> currentTraces;
+    /** Scale applied to the live scope snapshot by the auto-calibration. */
+    float scopeCalScale = 1.0f;
+    /** Target scale the auto-calibration eases toward. */
+    float scopeCalTarget = 1.0f;
+    /** Hi-res ms of the last recalibration; 0 = never calibrated yet. */
+    std::int64_t scopeCalLastRecalMs = 0;
+    /** Hi-res ms of the previous machine-view frame (for the ease step). */
+    std::int64_t scopeCalLastFrameMs = 0;
+    /** Machine/stack the calibration state was last computed for. */
+    int scopeCalMachineId = -1;
+    std::size_t scopeCalStackIndex = 0;
     bool samplerViewActive = false;
     bool customMachineColumnWidthsActive = false;
     juce::File lastStateDirectory;
@@ -132,6 +156,8 @@ private:
 
     bool waitingForPaint;
     bool updateSeqStrOnNextDraw;
+    juce::CriticalSection screenshotLock;
+    std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> pendingScreenshot;
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
 

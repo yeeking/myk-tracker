@@ -85,6 +85,8 @@ struct TrackerPalette
     float ambientStrength = 0.32f;
     /** direction of the key light in 3D shading */
     juce::Vector3D<float> lightDirection { 0.2f, 0.45f, 1.0f };
+    /** violet (89,41,224) at ~35% alpha for horizontal parameter bars; hex is 0xAARRGGBB */
+    juce::Colour paramBarFill { 0x595929E0 };
 };
 
 namespace PaletteDefaults

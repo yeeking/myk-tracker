@@ -260,6 +260,8 @@ public:
 
   void refreshMachineStateForCurrentSequence();
   const std::vector<std::vector<UIBox>> &getMachineCells() const;
+  /** Machine stack index the current sequence's machineId maps onto for `type`. */
+  std::size_t getActiveMachineIndex(CommandType type) const;
   void machineAddEntry();
   void machineRemoveEntry();
   void machineActivateCurrentCell();
@@ -400,11 +402,12 @@ private:
   void decrementOnSequenceConfigPage();
   void decrementOnMachinePage();
   bool isMachineUiForCurrentSequence() const;
-  std::size_t getActiveMachineIndex(CommandType type) const;
   MachineInterface* getActiveMachine(CommandType type) const;
   void dismissMachineTransientUiIfNeeded();
   void rebuildMachineCells();
   void moveMachineCursor(int deltaRow, int deltaCol);
+  /** Move the cursor to the nearest cell it is allowed to rest on. */
+  void snapMachineCursorToLandable();
 
   SequencerAbs *sequencer;
   MachineHost *machineHost = nullptr;

@@ -38,6 +38,16 @@ public:
     /** Restores the synth state. */
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    /** Number of active wavetable steps, for UI preview. */
+    int getWaveStepCount() const;
+    /** Waveform index (0..3: sine, triangle, saw, square) of the given step. */
+    int getWaveStepWaveform(int stepIndex) const;
+    /** Samples a waveform by index at the given 0..1 phase, for UI preview. */
+    float sampleWaveformForUi(int waveformIndex, double phase) const;
+    /** Current envelope settings and their display maxima, for UI preview. */
+    void getEnvelopeSettings(float& attack, float& decay, float& sustain, float& release,
+                             float& maxAttack, float& maxDecay, float& maxRelease) const;
+
 private:
     /** Available base waveforms for wavetable morphing. */
     enum class Waveform

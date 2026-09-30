@@ -38,6 +38,10 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
             const std::lock_guard<std::mutex> guard(stateMutex);
             *target = juce::jlimit(minValue, maxValue, *target + step * static_cast<float>(direction));
         };
+        cell.hasValueScale = true;
+        cell.valueNorm = maxValue > minValue
+            ? juce::jlimit(0.0f, 1.0f, (*target - minValue) / (maxValue - minValue))
+            : 0.0f;
         return cell;
     };
 
@@ -66,6 +70,8 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
         const std::lock_guard<std::mutex> guard(stateMutex);
         syncTicks = juce::jlimit(1, 64, syncTicks + direction);
     };
+    boxes[1][1].hasValueScale = true;
+    boxes[1][1].valueNorm = juce::jlimit(0.0f, 1.0f, (syncTicks - 1) / 63.0f);
 
     boxes[0][2].kind = UIBox::Kind::TrackerCell;
     boxes[0][2].text = "MS";

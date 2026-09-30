@@ -27,13 +27,18 @@ std::vector<std::vector<UIBox>> WaveshaperDistortionMachine::getUIBoxes(const Ma
     {
         UIBox cell;
         cell.kind = UIBox::Kind::TrackerCell;
-        cell.text = formatFloat(target.load(std::memory_order_relaxed), decimals);
+        const float value = target.load(std::memory_order_relaxed);
+        cell.text = formatFloat(value, decimals);
         cell.onAdjust = [&target, step, minValue, maxValue](int direction)
         {
             const float currentValue = target.load(std::memory_order_relaxed);
             const float nextValue = juce::jlimit(minValue, maxValue, currentValue + step * static_cast<float>(direction));
             target.store(nextValue, std::memory_order_relaxed);
         };
+        cell.hasValueScale = true;
+        cell.valueNorm = maxValue > minValue
+            ? juce::jlimit(0.0f, 1.0f, (value - minValue) / (maxValue - minValue))
+            : 0.0f;
         return cell;
     };
 
