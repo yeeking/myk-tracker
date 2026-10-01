@@ -881,6 +881,8 @@ void Sequencer::setDefaultMIDIChannels()
     double machineId = floor(seq / 2);
     sequences[seq].setMachineId(machineId);
   }
+  // no lock held here, so request via the locking entry point
+  requestStrUpdate();
 }
 
 
@@ -978,6 +980,7 @@ void Sequencer::setSequenceLength(std::size_t sequence, std::size_t length)
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
   sequences[sequence].setLength(length);
+  stringUpdateRequested = true;
 }
 
 void Sequencer::shrinkSequence(std::size_t sequence)
@@ -985,6 +988,7 @@ void Sequencer::shrinkSequence(std::size_t sequence)
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
   sequences[sequence].setLength(sequences[sequence].getLength() - 1);
+  stringUpdateRequested = true;
 }
 void Sequencer::extendSequence(std::size_t sequence)
 {
@@ -992,6 +996,7 @@ void Sequencer::extendSequence(std::size_t sequence)
 
   sequences[sequence].ensureEnoughStepsForLength(sequences[sequence].getLength() + 1);
   sequences[sequence].setLength(sequences[sequence].getLength() + 1);
+  stringUpdateRequested = true;
 }
 
 /** update the data stored at a step in the sequencer */
@@ -1009,6 +1014,8 @@ void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<
     row[Step::cmdInd] = machineType;
   }
   sequences[sequence].setStepData(step, data);
+  // mark the display string grid stale so the UI rebuilds it on its next frame
+  stringUpdateRequested = true;
 }
 /** update a single value in the  data
  * stored at a step in the sequencer */
@@ -1021,6 +1028,7 @@ void Sequencer::setStepDataAt(std::size_t sequence, std::size_t step, std::size_
   if (col == Step::cmdInd)
     value = sequences[sequence].getMachineType();
   sequences[sequence].setStepDataAt(step, row, col, value);
+  stringUpdateRequested = true;
 }
 
 std::size_t Sequencer::howManyStepDataRows(std::size_t seq, std::size_t step)
@@ -1058,6 +1066,7 @@ void Sequencer::toggleStepActive(std::size_t sequence, std::size_t step)
   // if (!assertSeqAndStep(sequence, step))
     // return;
   sequences[sequence].toggleActive(step);
+  stringUpdateRequested = true;
 }
 bool Sequencer::isStepActive(std::size_t sequence, std::size_t step) const
 {
@@ -1075,11 +1084,18 @@ void Sequencer::resetSequence(std::size_t sequence)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   sequences[sequence].reset();
+  stringUpdateRequested = true;
 }
 
 void Sequencer::resetStepRow(std::size_t sequence, std::size_t step, std::size_t row)
 {
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
+  if (!assertSeqAndStep(sequence, step))
+    return;
   sequences[sequence].resetStepRow(step, row);
+  // mark the display string grid stale so the UI rebuilds it on its next frame
+  stringUpdateRequested = true;
 }
 
 
@@ -1208,6 +1224,8 @@ void Sequencer::toggleSequenceMute(std::size_t sequence)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   sequences[sequence].toggleMuteState();
+  // muted sequences render empty cells, so the grid must be rebuilt
+  stringUpdateRequested = true;
 }
 
 

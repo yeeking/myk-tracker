@@ -82,6 +82,11 @@ private:
     void prepareMachineConfigView();
     void updateScopeCalibration(int machineId, std::size_t stackIndex,
                                 const std::vector<float>& samples);
+    void appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
+                         std::size_t rows,
+                         int machineId,
+                         std::size_t stackIndex,
+                         std::vector<float>& scopeSamples);
     void prepareMixerView();
     void prepareResetConfirmationView();
     void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
@@ -155,7 +160,6 @@ private:
     std::unique_ptr<juce::FileChooser> stateFileChooser;
 
     bool waitingForPaint;
-    bool updateSeqStrOnNextDraw;
     juce::CriticalSection screenshotLock;
     std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> pendingScreenshot;
     // This reference is provided as a quick way for your editor to

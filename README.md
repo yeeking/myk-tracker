@@ -12,7 +12,7 @@ external MIDI routing.
 - `Sequence` page: browse sequences and steps, mute/arm tracks, and move around the current pattern.
 - `Step` page: edit the command rows inside a single step: command, note, velocity, and duration.
 - `Machine` page: inspect and configure the machine stack for the current track, including instruments and effects. SEND/RETURN levels render as horizontal fill bars scaled to their level, and the scope band under the grid shows the stack output with an auto-calibrating vertical scale.
-- `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing. Scaled parameters render as horizontal fill bars showing their normalized position.
+- `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing. Scaled parameters render as horizontal fill bars showing their normalized position. The bottom of the grid carries the same stack-output scope band (with auto-calibrating vertical scale) shown on the Machine page.
 - `Sequence Config` page: edit `SEND`, read-head count/selection, TPS, traversal mode, chord polyphony, rhythm, and head probability. Up to three independently timed heads may read the same sequence. A faint column flash briefly marks a sequence when its read head triggers active steps during playback.
 - `Mixer` page: edit the 16 machine stacks' mute, solo, gain, and post-mute meters. Multiple soloed stacks remain audible together.
 - `Reset / Quit` confirmation page: confirm tracker reset and, in standalone builds, quit.
@@ -138,11 +138,11 @@ persisted `slotId`, and either the control suffix or full address. For example,
 an envelope attack adjustment can be made without moving the visible cursor:
 
 ```json
-{"stackId":0,"slotId":"slot-1","controlId":"a-4-1","action":"adjust","direction":20}
+{"stackId":0,"slotId":"slot-1","controlId":"a-5-1","action":"adjust","direction":20}
 ```
 
 The full equivalent control ID is
-`stack/0/slot/slot-1/control/a-4-1`. Direct machine calls do not change the
+`stack/0/slot/slot-1/control/a-5-1`. Direct machine calls do not change the
 current GUI page or cursor, so they are safe while a person is navigating the
 tracker. The older `row`/`column` form remains only for compatibility and is
 cursor-driven.

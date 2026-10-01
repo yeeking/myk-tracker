@@ -160,8 +160,7 @@ TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
     seqEditor{p.getSequenceEditor()},
     uiComponent(openGLContext),
     rowsInUI{9},
-    waitingForPaint{false},
-    updateSeqStrOnNextDraw{false}
+    waitingForPaint{false}
 {
     TrackerUIComponent::Style style;
     style.background = palette.background;
@@ -458,13 +457,14 @@ void TrackerMainUI::timerCallback ()
                             dragState,
                             customMachineColumnWidthsActive ? &samplerColumnWidths : nullptr);
 
-  waitingForPaint = true; 
-  if (updateSeqStrOnNextDraw || framesDrawn % 60 == 0){
+  waitingForPaint = true;
+  // Edits raise the sequencer's string-update flag directly, so this
+  // periodic request is only a safety net for out-of-band changes.
+  if (framesDrawn % 60 == 0){
     audioProcessor.withAudioThreadExclusive([&]()
     {
         audioProcessor.getSequencer()->requestStrUpdate();
     });
-    updateSeqStrOnNextDraw = false; 
   }
   openGLContext.triggerRepaint();
 }
@@ -745,7 +745,11 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, browserActive ? std::min<std::size_t>(rows, 8) : rows, cols);
+        // The band (and its trace) are hidden while the file browser clamps
+        // the visible rows.
+        if (!browserActive)
+            appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, browserActive ? std::min<std::size_t>(rows, 8) : rows + 2, cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [sampler]";
         overlayState.color = samplerPalette.textPrimary;
         overlayState.glowColor = samplerPalette.glowActive;
@@ -775,7 +779,8 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
+        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rows + 2, cols);
 
         // WAVE previews: each source row shows one cycle of its base waveform,
         // and the ENV columns carry the ADSR outline.
@@ -786,7 +791,7 @@ void TrackerMainUI::prepareMachineConfigView()
             const int stepCount = synth->getWaveStepCount();
             for (int step = 0; step < stepCount; ++step)
             {
-                const float rowTop = static_cast<float>(step + 2);
+                const float rowTop = static_cast<float>(step + 5);
                 if (rowTop + 1.0f > static_cast<float>(rows))
                     break;
                 TrackerUIComponent::Trace glyph;
@@ -806,6 +811,44 @@ void TrackerMainUI::prepareMachineConfigView()
                 currentTraces.push_back(std::move(glyph));
             }
 
+            // Sub-osc previews: one trace per sub wave step row, beside the
+            // main oscillator's. The tint tends toward red as the sub's
+            // octave offset drops.
+            constexpr juce::uint32 subTints[] = {
+                0xFFFF5A5A, // -3
+                0xFFFF9E4A, // -2
+                0xFFE8E24A, // -1
+                0xFF8CE84A, //  0
+                0xFF4AE87A, // +1
+                0xFF3DE8C8, // +2
+                0xFF29A0FF  // +3
+            };
+            const int subOctave = synth->getSubOctaveOffset();
+            const juce::Colour subTint(subTints[
+                static_cast<std::size_t>(juce::jlimit(-3, 3, subOctave) + 3)]);
+            const int subStepCount = synth->getSubWaveStepCount();
+            for (int step = 0; step < subStepCount; ++step)
+            {
+                const float rowTop = static_cast<float>(step + 5);
+                if (rowTop + 1.0f > static_cast<float>(rows))
+                    break;
+                TrackerUIComponent::Trace glyph;
+                glyph.colStart = 2.0f;
+                glyph.colEnd = 3.0f;
+                glyph.rowTop = rowTop;
+                glyph.rowBottom = rowTop + 1.0f;
+                glyph.samples.resize(static_cast<std::size_t>(kGlyphSamples));
+                const int waveformIndex = synth->getSubWaveStepWaveform(step);
+                for (int i = 0; i < kGlyphSamples; ++i)
+                    glyph.samples[static_cast<std::size_t>(i)] =
+                        synth->sampleWaveformForUi(waveformIndex,
+                                                    static_cast<double>(i) / static_cast<double>(kGlyphSamples - 1));
+                glyph.color = subTint;
+                glyph.z = 1.15f;
+                glyph.lineWidth = 2.0f;
+                currentTraces.push_back(std::move(glyph));
+            }
+
             float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f;
             float maxAttack = 2.0f, maxDecay = 2.0f, maxRelease = 3.0f;
             synth->getEnvelopeSettings(attack, decay, sustain, release, maxAttack, maxDecay, maxRelease);
@@ -816,8 +859,8 @@ void TrackerMainUI::prepareMachineConfigView()
             const float totalSpan = juce::jmax(0.001f, attackSpan + decaySpan + kSustainSpan + releaseSpan);
 
             TrackerUIComponent::Trace envelope;
-            envelope.colStart = 2.0f;
-            envelope.colEnd = 4.0f;
+            envelope.colStart = 4.0f;
+            envelope.colEnd = 6.0f;
             envelope.rowTop = 1.0f;
             envelope.rowBottom = 5.0f;
             constexpr int kEnvSamples = 48;
@@ -862,7 +905,8 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
+        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rows + 2, cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [distortion]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
@@ -882,7 +926,8 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
+        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rows + 2, cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [delay]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
@@ -902,7 +947,8 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
+        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rows + 2, cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [channel strip]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
@@ -922,7 +968,8 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
+        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rows + 2, cols);
         overlayState.text = detailType.value() == CommandType::AuxSend1Fx
             ? "Shared aux [1] reverb"
             : "Shared aux [2] reverb";
@@ -944,7 +991,8 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        updateCellStates(machineBoxes, rows, cols);
+        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rows + 2, cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [midi]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
@@ -1015,19 +1063,79 @@ void TrackerMainUI::updateScopeCalibration(int machineId, std::size_t stackIndex
     for (const float sample : samples)
         peak = std::max(peak, std::abs(sample));
 
-    // Recalibrate at most once per second and only while there is signal;
-    // silence holds the last zoom instead of zooming in on noise.
-    if (scopeCalLastRecalMs == 0 || nowMs - scopeCalLastRecalMs >= 1000)
+    // Fast attack / slow release, like an envelope follower, and only while
+    // there is signal; below-noise silence holds the last zoom instead of
+    // zooming in on noise.
+    if (peak >= 0.01f)
     {
-        if (peak >= 0.01f)
+        const float neededScale = juce::jlimit(1.0f, 100.0f, 1.0f / peak);
+        if (neededScale < scopeCalTarget)
         {
-            scopeCalTarget = juce::jlimit(1.0f, 100.0f, 1.0f / peak);
+            // A new loud peak needs more zoom-out: take it immediately so a
+            // transient is not clipped for up to a second.
+            scopeCalTarget = neededScale;
+            scopeCalLastRecalMs = nowMs;
+        }
+        else if (scopeCalLastRecalMs == 0 || nowMs - scopeCalLastRecalMs >= 1000)
+        {
+            // A quieter signal only zooms in once it has held for a second.
+            scopeCalTarget = neededScale;
             scopeCalLastRecalMs = nowMs;
         }
     }
 
-    // Exponential ease toward the target (~0.3 s time constant).
-    scopeCalScale += (scopeCalTarget - scopeCalScale) * (1.0f - std::exp(-dtSeconds / 0.3f));
+    // Asymmetric ease toward the target: settle within a few frames when
+    // zooming out for loud signal, but drift slowly into quiet signal so the
+    // zoom-in does not pump on momentary gaps.
+    const float timeConstant = (scopeCalTarget < scopeCalScale) ? 0.05f : 1.5f;
+    scopeCalScale += (scopeCalTarget - scopeCalScale) * (1.0f - std::exp(-dtSeconds / timeConstant));
+}
+
+void TrackerMainUI::appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
+                                    std::size_t rows,
+                                    int machineId,
+                                    std::size_t stackIndex,
+                                    std::vector<float>& scopeSamples)
+{
+    const std::size_t cols = boxes.size();
+    if (cols == 0)
+        return;
+    for (auto& column : boxes)
+        column.resize(rows + 2);
+
+    // Dark band cells, matching the scope band built into the machine stack
+    // table. They are disabled and carry no callbacks, so the cursor cannot
+    // land on them; the editor's machineCells grid is left untouched.
+    for (std::size_t col = 0; col < cols; ++col)
+    {
+        for (std::size_t bandRow = 0; bandRow < 2; ++bandRow)
+        {
+            UIBox& cell = boxes[col][rows + bandRow];
+            cell.kind = UIBox::Kind::TrackerCell;
+            cell.isDisabled = true;
+            cell.useCustomFillColour = true;
+            cell.customFillArgb = 0xFF0A0F14;
+        }
+    }
+    boxes[0][rows].text = "OUT";
+
+    if (rows >= 4 && cols >= 1 && !scopeSamples.empty())
+    {
+        updateScopeCalibration(machineId, stackIndex, scopeSamples);
+        for (float& sample : scopeSamples)
+            sample *= scopeCalScale;
+
+        TrackerUIComponent::Trace scope;
+        scope.colStart = 0.0f;
+        scope.colEnd = static_cast<float>(cols);
+        scope.rowTop = static_cast<float>(rows);
+        scope.rowBottom = static_cast<float>(rows + 2);
+        scope.samples = std::move(scopeSamples);
+        scope.color = juce::Colour(0xFF29E0FF);
+        scope.z = 1.15f;
+        scope.lineWidth = 2.0f;
+        currentTraces.push_back(std::move(scope));
+    }
 }
 
 void TrackerMainUI::prepareMixerView()
