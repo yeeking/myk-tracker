@@ -8,6 +8,11 @@ constexpr double kStateVersion = 1.0;
 constexpr float kMaxAttackSeconds = 2.0f;
 constexpr float kMaxDecaySeconds = 2.0f;
 constexpr float kMaxReleaseSeconds = 3.0f;
+constexpr float kMinCyclerRate = 0.1f;
+constexpr float kMaxCyclerRate = 10.0f;
+/** Minimum attack+decay time used in AD mode so an empty envelope cannot
+    produce an infinite cycler speed. */
+constexpr double kMinAdTimeSeconds = 0.005;
 }
 
 WavetableSynthMachine::WavetableSynthMachine()
@@ -43,8 +48,36 @@ void WavetableSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce:
     const int numScheduledNotes = (blockNotes != nullptr) ? static_cast<int>(blockNotes->size()) : 0;
     int nextScheduledNote = 0;
 
+    // stateMutex is held for the whole block, so cycler settings and envelope
+    // times cannot change mid-block; the per-sample phase delta is computed
+    // once here.
+    double cyclerDelta = 0.0;
+    if (cyclerMode == CyclerMode::cps)
+        cyclerDelta = static_cast<double>(cyclerRate) / currentSampleRate;
+    else
+    {
+        const double adTime = juce::jmax(kMinAdTimeSeconds,
+            static_cast<double>(attackSeconds) + static_cast<double>(decaySeconds));
+        cyclerDelta = static_cast<double>(cyclerRate) / (adTime * currentSampleRate);
+    }
+
     for (int sample = 0; sample < numSamples; ++sample)
     {
+        // Advance the shared cycler only while a voice is sounding; the phase
+        // is kept across silences so the next note resumes mid-cycle.
+        bool anyVoiceActive = false;
+        for (const auto& voice : voices)
+            if (voice.active)
+            {
+                anyVoiceActive = true;
+                break;
+            }
+        if (anyVoiceActive)
+        {
+            cyclerPhase += cyclerDelta;
+            cyclerPhase -= std::floor(cyclerPhase);
+        }
+
         // Apply sequencer note events scheduled for this sample before rendering it,
         // so triggered voices start exactly on their tick's sample.
         while (nextScheduledNote < numScheduledNotes
@@ -105,7 +138,8 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     juce::ignoreUnused(context);
     const std::lock_guard<std::mutex> lock(stateMutex);
 
-    const std::size_t rows = static_cast<std::size_t>(juce::jmax(5, waveStepCount + 2));
+    // Two rows below the wave rows carry the cycler MODE and CYC cells.
+    const std::size_t rows = static_cast<std::size_t>(juce::jmax(5, waveStepCount + 4));
     std::vector<std::vector<UIBox>> boxes(4, std::vector<UIBox>(rows));
 
     auto makeValueCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
@@ -179,6 +213,31 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
             waveSteps[static_cast<std::size_t>(stepIndex)] = static_cast<Waveform>(next);
         };
     }
+
+    // Cycler controls: shared-phase clock mode and rate (cycles/second in
+    // CPS mode, cycles per attack+decay time in AD mode).
+    const std::size_t modeRow = static_cast<std::size_t>(waveStepCount + 2);
+    const std::size_t cycRow = static_cast<std::size_t>(waveStepCount + 3);
+
+    boxes[0][modeRow].isDisabled = false;
+    boxes[0][modeRow].kind = UIBox::Kind::TrackerCell;
+    boxes[0][modeRow].text = "MODE";
+    boxes[1][modeRow].isDisabled = false;
+    boxes[1][modeRow].kind = UIBox::Kind::TrackerCell;
+    boxes[1][modeRow].text = (cyclerMode == CyclerMode::ad) ? "AD" : "CPS";
+    boxes[1][modeRow].onAdjust = [this](int direction)
+    {
+        juce::ignoreUnused(direction);
+        const std::lock_guard<std::mutex> guard(stateMutex);
+        cyclerMode = (cyclerMode == CyclerMode::ad) ? CyclerMode::cps : CyclerMode::ad;
+    };
+    boxes[1][modeRow].hasValueScale = true;
+    boxes[1][modeRow].valueNorm = (cyclerMode == CyclerMode::ad) ? 0.0f : 1.0f;
+
+    boxes[0][cycRow].isDisabled = false;
+    boxes[0][cycRow].kind = UIBox::Kind::TrackerCell;
+    boxes[0][cycRow].text = "CYC";
+    boxes[1][cycRow] = makeValueCell(&cyclerRate, 0.1f, kMinCyclerRate, kMaxCyclerRate, 1);
 
     constexpr std::array<const char*, 4> envLabels { "A", "D", "S", "R" };
     const std::array<UIBox, 4> envValueCells {
@@ -291,6 +350,8 @@ void WavetableSynthMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("sustain", sustainLevel);
     root->setProperty("release", releaseSeconds);
     root->setProperty("waveStepCount", waveStepCount);
+    root->setProperty("cyclerMode", static_cast<int>(cyclerMode));
+    root->setProperty("cyclerRate", cyclerRate);
 
     juce::Array<juce::var> waveArray;
     for (int i = 0; i < kMaxWaveSteps; ++i)
@@ -324,6 +385,12 @@ void WavetableSynthMachine::setStateInformation(const void* data, int sizeInByte
     sustainLevel = juce::jlimit(0.0f, 1.0f, static_cast<float>(parsed.getProperty("sustain", sustainLevel)));
     releaseSeconds = juce::jlimit(0.0f, kMaxReleaseSeconds, static_cast<float>(parsed.getProperty("release", releaseSeconds)));
     waveStepCount = juce::jlimit(1, kMaxWaveSteps, static_cast<int>(parsed.getProperty("waveStepCount", waveStepCount)));
+    // Only the two known mode values are accepted; anything else falls back to
+    // CPS so corrupted or foreign state cannot pick an invalid cycler clock.
+    const int cyclerModeValue = static_cast<int>(parsed.getProperty("cyclerMode", static_cast<int>(cyclerMode)));
+    cyclerMode = (cyclerModeValue == static_cast<int>(CyclerMode::ad)) ? CyclerMode::ad : CyclerMode::cps;
+    cyclerRate = juce::jlimit(kMinCyclerRate, kMaxCyclerRate,
+        static_cast<float>(parsed.getProperty("cyclerRate", cyclerRate)));
 
     const auto wavesVar = obj->getProperty("waves");
     if (wavesVar.isArray())
@@ -387,17 +454,17 @@ WavetableSynthMachine::Voice& WavetableSynthMachine::allocateVoice()
 
 float WavetableSynthMachine::sampleVoice(Voice& voice) const
 {
-    const double progress = voice.noteDurationSamples > 0
-        ? juce::jlimit(0.0, 1.0, static_cast<double>(voice.ageSamples) / static_cast<double>(voice.noteDurationSamples))
-        : 0.0;
-    const int lastStep = juce::jmax(0, waveStepCount - 1);
-    const double stepPosition = progress * static_cast<double>(lastStep);
-    const int baseStep = juce::jlimit(0, lastStep, static_cast<int>(std::floor(stepPosition)));
-    const int nextStep = juce::jlimit(0, lastStep, baseStep + 1);
-    const float morph = voice.releaseStarted ? 1.0f : static_cast<float>(juce::jlimit(0.0, 1.0, stepPosition - static_cast<double>(baseStep)));
+    // All voices read the same shared cycler phase, so polyphonic notes stay
+    // on the same waveform step and crossfade together. The cycle wraps from
+    // the last step back to the first; released notes keep cycling.
+    const int stepCount = juce::jmax(1, waveStepCount);
+    const double stepPosition = cyclerPhase * static_cast<double>(stepCount);
+    const int baseStep = static_cast<int>(std::floor(stepPosition)) % stepCount;
+    const int nextStep = (baseStep + 1) % stepCount;
+    const float morph = static_cast<float>(stepPosition - std::floor(stepPosition));
 
-    const auto currentWave = waveSteps[static_cast<std::size_t>(voice.releaseStarted ? lastStep : baseStep)];
-    const auto nextWave = waveSteps[static_cast<std::size_t>(voice.releaseStarted ? lastStep : nextStep)];
+    const auto currentWave = waveSteps[static_cast<std::size_t>(baseStep)];
+    const auto nextWave = waveSteps[static_cast<std::size_t>(nextStep)];
     const float sampleA = sampleWaveform(currentWave, voice.phase);
     const float sampleB = sampleWaveform(nextWave, voice.phase);
     const float oscillatorSample = juce::jmap(morph, sampleA, sampleB);

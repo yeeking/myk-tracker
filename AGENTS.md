@@ -26,7 +26,11 @@ be reflected there.
   high-level tracker actions.
 - `src/MachineInterface.h`, `src/machines/`: machine contract and the internal
   instruments and effects. Arpeggiation is implemented by sequence read heads,
-  not stack machines.
+  not stack machines. `ArpeggiatorMachine.*` and `PolyArpeggiatorMachine.*`
+  are legacy leftovers absent from `target_sources` and never compiled into
+  the plugin; the `LegacyArpeggiator`/`LegacyPolyArpeggiator` command types
+  exist only to swallow and migrate old state. Do not resurrect or extend
+  them.
 - `src/SuperSamplerProcessor.*`, `src/SuperSamplePlayer.*`: sample loading and
   playback.
 - `src/standalone/`: the custom standalone audio/MIDI host.
@@ -39,6 +43,11 @@ be reflected there.
   their SVG sources.
 - `libs/JUCE/`: locally cloned third-party dependency. Do not modify or commit
   it as part of normal tracker work.
+- `libs/httplib.h`: vendored single-header HTTP server used by the local MCP
+  server; `src/HTTPServer.h` includes it as `../libs/httplib.h`. Do not replace
+  or reformat it.
+- `tests/`: standalone console regression tests for sequence read heads. See
+  Bootstrap and build for how to run them.
 - `build/`: local generated output. Never hand-edit or commit it.
 
 ## Bootstrap and build
@@ -68,9 +77,19 @@ The project also declares AU and VST3 formats. Format availability and artifact
 layout vary by platform and generator. Do not assume AU can be built on a
 non-Apple host.
 
-There is currently no automated C++ test target, lint target, or repository
-formatter configuration. The Python files named `test_*.py` under `devices/`
-are hardware-oriented utility scripts, not the main application's test suite.
+There is no lint target or repository formatter configuration. The only
+automated tests are the CTest target `sequence-read-head-tests`, a JUCE
+console app over `tests/SequenceReadHeadTests.cpp` (built when
+`BUILD_TESTING` is on, which is the default):
+
+```sh
+cmake --build build --target sequence-read-head-tests -j2
+ctest --test-dir build
+```
+
+Run it whenever you touch `Sequencer.cpp`, `SequencerCommands.cpp`, or
+read-head behaviour. The Python files named `test_*.py` under `devices/` are
+hardware-oriented utility scripts, not the main application's test suite.
 
 ## Architecture and invariants
 
@@ -106,6 +125,50 @@ are hardware-oriented utility scripts, not the main application's test suite.
   needs explicit bounds handling. Preserve note-off and `allNotesOff` cleanup
   when changing transport or routing.
 
+## Machine stacks
+
+- There are 16 fixed stacks (`kMachineStackCount`), each a `MachineStack` in
+  `TrackerMainProcessor`. A stack owns one persistent instance per machine
+  type — `SuperSamplerProcessor`, `WavetableSynthMachine`,
+  `WaveshaperDistortionMachine`, `DelayFxMachine`, `ChannelStripMachine` —
+  plus an ordered `slots` list.
+- `slots` are `SlotState {id, type, enabled, sendLevelDb, returnLevelDb}`
+  routing/chain entries that reference those fixed instances; a slot never
+  owns its machine. Slot types are unique per stack and cycle in the order
+  MidiNote, WavetableSynth, Sampler, DistortionFx, DelayFx, ChannelStripFx,
+  AuxSend1Fx, AuxSend2Fx. Fresh and reset stacks default to a single enabled
+  `WavetableSynth` slot so new sessions are audible without MIDI routing.
+  Slot `id` (e.g. `slot-7`) is the stable identity used by MCP; grid
+  coordinates are deliberately not an API.
+- Aux sends are parallel: two global `AuxReverbMachine` buses are shared by
+  all stacks; an enabled aux slot mixes a send-gain-scaled copy of the stack
+  output into its bus, and the buses are summed into the plugin output after
+  all stacks.
+- Notes walk the slots in order (`dispatchNoteThroughStack`). Effect slots
+  pass notes through unchanged; terminal slots consume them: `MidiNote`
+  queues external MIDI on the stack's MIDI channel, `Sampler` queues the
+  stack's internal sampler, `WavetableSynth` queues the stack's wavetable
+  synth (notes are applied sample-accurately in `processBlock`). When a stack
+  has no terminal slot at all, notes default to external MIDI. A sequence
+  routes to a stack via its `machineId` (the stack index) through
+  `sendMessageToMachine`; clock-driven machine events re-enter the chain at
+  their own `slotIndex + 1`.
+- Audio renders per stack into `renderBuffer`: sampler and wavetable sources
+  mix first, then enabled non-aux effect slots process the buffer in place in
+  slot order with SEND gain applied before and RETURN gain after, then the
+  stack gain applies. Only stacks with at least one enabled audio path are
+  processed: slot changes (add/remove/cycle/move/enable) must call
+  `refreshStackProcessingState` so the `*ProcessingActive` flags stay
+  correct. A *disabled* DelayFx slot still drains its tail buffer so delay
+  tails decay out instead of freezing.
+- `AudioEffectMachine` is the base for audio-only effects: it finalizes
+  `processBlock` into an in-place `processAudioBuffer(buffer)` and never
+  consumes note events. Delay machines are the only `ClockAbs` listeners;
+  sequence read heads require no machine clock.
+- `allNotesOffForStack` must silence every voice source in a stack:
+  wavetable synth, delay tail, sampler (queued `allNotesOff`), and the
+  stack's external MIDI channel.
+
 ## Coding conventions
 
 - Use C++17 and JUCE types/utilities where they already form the surrounding
@@ -128,9 +191,10 @@ are hardware-oriented utility scripts, not the main application's test suite.
 
 ## Verification
 
-For every change, at minimum build the narrowest affected target. Because the
-main app has no automated tests, report the exact build and manual checks you
-performed rather than saying simply that tests passed.
+For every change, at minimum build the narrowest affected target. The only
+automated coverage is `sequence-read-head-tests`; the audio, UI, and
+transport paths are untested, so report the exact build, test runs, and
+manual checks you performed rather than saying simply that tests passed.
 
 Use focused manual checks as applicable:
 
@@ -162,6 +226,9 @@ Use focused manual checks as applicable:
 
 - Inspect `git status` before and after work. The working tree may contain local
   JUCE/build directories or unrelated user changes; preserve them.
+- There is no `.gitignore`: `build/` and `libs/JUCE/` are untracked but *not*
+  ignored. Never run `git add -A` or commit with `-a`; stage only the specific
+  files you changed.
 - Keep changes scoped. Do not regenerate assets, update JUCE, or perform broad
   formatting unless the task explicitly requires it.
 - Update `README.md` when changing user-visible pages, keyboard shortcuts,

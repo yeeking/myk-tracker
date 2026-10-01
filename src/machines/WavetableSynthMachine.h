@@ -58,6 +58,13 @@ private:
         square
     };
 
+    /** Clock source for the shared waveform cycler. */
+    enum class CyclerMode
+    {
+        ad = 0,   /** Cycles per combined attack+decay envelope time. */
+        cps = 1   /** Cycles per second. */
+    };
+
     /** Runtime state for one polyphonic synth voice. */
     struct Voice
     {
@@ -114,6 +121,14 @@ private:
     int nextVoiceIndex = 0;
     /** Number of active wavetable steps. */
     int waveStepCount = 2;
+    /** Clock source for the waveform cycler. */
+    CyclerMode cyclerMode = CyclerMode::cps;
+    /** Cycler speed: cycles/second (CPS) or cycles per attack+decay time (AD). */
+    float cyclerRate = 1.0f;
+    /** Shared 0..1 cycler phase; advanced on the audio thread only while at
+        least one voice is active, so all voices select the same waveform
+        step and chords morph in lockstep. */
+    double cyclerPhase = 0.0;
     /** In-block note events for the current block; set on the audio thread by the
         processor immediately before processBlock and read only there. Points at
         processor-owned per-stack storage, stable until the next block. */
