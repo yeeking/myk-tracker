@@ -79,6 +79,7 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
     src/machines/DelayFxMachine.cpp
     src/machines/ChannelStripMachine.cpp
     src/machines/AuxReverbMachine.cpp
+    src/machines/FilterFxMachine.cpp
 )
 
 

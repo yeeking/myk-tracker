@@ -1,4 +1,5 @@
 #include "WavetableSynthMachine.h"
+#include "MachineStateCodec.h"
 
 #include <cmath>
 
@@ -31,7 +32,7 @@ void WavetableSynthMachine::prepareToPlay(double sampleRate, int samplesPerBlock
 {
     juce::ignoreUnused(samplesPerBlock);
     const std::lock_guard<std::mutex> lock(stateMutex);
-    currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    currentSampleRate = sanitizedSampleRate(sampleRate);
     updateVoiceEnvelopeParameters();
 }
 
@@ -167,20 +168,13 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
 
     auto makeValueCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
-        UIBox cell;
-        cell.kind = UIBox::Kind::TrackerCell;
-        cell.text = formatFloat(*target, decimals);
-        cell.onAdjust = [this, target, step, minValue, maxValue](int direction)
-        {
-            const std::lock_guard<std::mutex> guard(stateMutex);
-            *target = juce::jlimit(minValue, maxValue, *target + (step * static_cast<float>(direction)));
-            updateVoiceEnvelopeParameters();
-        };
-        cell.hasValueScale = true;
-        cell.valueNorm = maxValue > minValue
-            ? juce::jlimit(0.0f, 1.0f, (*target - minValue) / (maxValue - minValue))
-            : 0.0f;
-        return cell;
+        return makeFloatCell(*target, minValue, maxValue, decimals,
+            [this, target, step, minValue, maxValue](int direction)
+            {
+                const std::lock_guard<std::mutex> guard(stateMutex);
+                *target = juce::jlimit(minValue, maxValue, *target + (step * static_cast<float>(direction)));
+                updateVoiceEnvelopeParameters();
+            });
     };
 
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
@@ -541,47 +535,33 @@ void WavetableSynthMachine::getStateInformation(juce::MemoryBlock& destData)
         subWaveArray.add(static_cast<int>(subWaveSteps[static_cast<std::size_t>(i)]));
     root->setProperty("subWaves", subWaveArray);
 
-    const juce::String json = juce::JSON::toString(juce::var(root.get()));
-    destData.reset();
-    destData.append(json.toRawUTF8(), json.getNumBytesAsUTF8());
+    writeMachineStateJson(destData, juce::var(root.get()));
 }
 
 void WavetableSynthMachine::setStateInformation(const void* data, int sizeInBytes)
 {
-    if (data == nullptr || sizeInBytes <= 0)
-        return;
-    if (!juce::CharPointer_UTF8::isValidString(static_cast<const char*>(data), sizeInBytes))
-        return;
-
     const std::lock_guard<std::mutex> lock(stateMutex);
-    const auto json = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
-    if (json.isEmpty())
-        return;
-
-    const auto parsed = juce::JSON::fromString(json);
-    if (!parsed.isObject())
+    const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
+    if (parsed.isVoid())
         return;
 
     const auto* obj = parsed.getDynamicObject();
-    attackSeconds = juce::jlimit(0.0f, kMaxAttackSeconds, static_cast<float>(parsed.getProperty("attack", attackSeconds)));
-    decaySeconds = juce::jlimit(0.0f, kMaxDecaySeconds, static_cast<float>(parsed.getProperty("decay", decaySeconds)));
-    sustainLevel = juce::jlimit(0.0f, 1.0f, static_cast<float>(parsed.getProperty("sustain", sustainLevel)));
-    releaseSeconds = juce::jlimit(0.0f, kMaxReleaseSeconds, static_cast<float>(parsed.getProperty("release", releaseSeconds)));
-    waveStepCount = juce::jlimit(1, kMaxWaveSteps, static_cast<int>(parsed.getProperty("waveStepCount", waveStepCount)));
+    attackSeconds = getFloatProperty(parsed, "attack", attackSeconds, 0.0f, kMaxAttackSeconds);
+    decaySeconds = getFloatProperty(parsed, "decay", decaySeconds, 0.0f, kMaxDecaySeconds);
+    sustainLevel = getFloatProperty(parsed, "sustain", sustainLevel, 0.0f, 1.0f);
+    releaseSeconds = getFloatProperty(parsed, "release", releaseSeconds, 0.0f, kMaxReleaseSeconds);
+    waveStepCount = getIntProperty(parsed, "waveStepCount", waveStepCount, 1, kMaxWaveSteps);
     // Only the two known mode values are accepted; anything else falls back to
     // CPS so corrupted or foreign state cannot pick an invalid cycler clock.
     const int cyclerModeValue = static_cast<int>(parsed.getProperty("cyclerMode", static_cast<int>(cyclerMode)));
     cyclerMode = (cyclerModeValue == static_cast<int>(CyclerMode::ad)) ? CyclerMode::ad : CyclerMode::cps;
-    cyclerRate = juce::jlimit(kMinCyclerRate, kMaxCyclerRate,
-        static_cast<float>(parsed.getProperty("cyclerRate", cyclerRate)));
-    mainLevel = juce::jlimit(0.0f, 1.0f,
-        static_cast<float>(parsed.getProperty("mainLevel", mainLevel)));
+    cyclerRate = getFloatProperty(parsed, "cyclerRate", cyclerRate, kMinCyclerRate, kMaxCyclerRate);
+    mainLevel = getFloatProperty(parsed, "mainLevel", mainLevel, 0.0f, 1.0f);
     // Only the seven known octave offsets (-3..+3) are accepted; anything
     // else falls back to the note's own octave.
     const int mainOctaveValue = static_cast<int>(parsed.getProperty("mainOctave", mainOctaveOffset));
     mainOctaveOffset = (mainOctaveValue >= -3 && mainOctaveValue <= 3) ? mainOctaveValue : 0;
-    mainDetuneCents = juce::jlimit(kMinDetuneCents, kMaxDetuneCents,
-        static_cast<float>(parsed.getProperty("mainDetune", mainDetuneCents)));
+    mainDetuneCents = getFloatProperty(parsed, "mainDetune", mainDetuneCents, kMinDetuneCents, kMaxDetuneCents);
 
     const auto wavesVar = obj->getProperty("waves");
     if (wavesVar.isArray())
@@ -597,15 +577,13 @@ void WavetableSynthMachine::setStateInformation(const void* data, int sizeInByte
         }
     }
 
-    subWaveStepCount = juce::jlimit(1, kMaxWaveSteps,
-        static_cast<int>(parsed.getProperty("subWaveStepCount", subWaveStepCount)));
+    subWaveStepCount = getIntProperty(parsed, "subWaveStepCount", subWaveStepCount, 1, kMaxWaveSteps);
     // Only the seven known octave offsets (-3..+3) are accepted; anything
     // else falls back to the default octave-down position.
     const int subOctaveValue = static_cast<int>(parsed.getProperty("subOctave", subOctaveOffset));
     subOctaveOffset = (subOctaveValue >= -3 && subOctaveValue <= 3) ? subOctaveValue : -1;
-    subLevel = juce::jlimit(0.0f, 1.0f, static_cast<float>(parsed.getProperty("subLevel", subLevel)));
-    subDetuneCents = juce::jlimit(kMinDetuneCents, kMaxDetuneCents,
-        static_cast<float>(parsed.getProperty("subDetune", subDetuneCents)));
+    subLevel = getFloatProperty(parsed, "subLevel", subLevel, 0.0f, 1.0f);
+    subDetuneCents = getFloatProperty(parsed, "subDetune", subDetuneCents, kMinDetuneCents, kMaxDetuneCents);
 
     const auto subWavesVar = obj->getProperty("subWaves");
     if (subWavesVar.isArray())
@@ -779,9 +757,4 @@ const char* WavetableSynthMachine::getWaveformName(WavetableSynthMachine::Wavefo
         case Waveform::odd5: return "ODD5";
         default: return "---";
     }
-}
-
-std::string WavetableSynthMachine::formatFloat(float value, int decimals)
-{
-    return juce::String(value, decimals).toStdString();
 }

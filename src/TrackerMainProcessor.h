@@ -9,9 +9,11 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <deque>
 #include <optional>
 #include <thread>
@@ -29,6 +31,7 @@
 #include "machines/DelayFxMachine.h"
 #include "machines/ChannelStripMachine.h"
 #include "machines/AuxReverbMachine.h"
+#include "machines/FilterFxMachine.h"
 
 class TrackerControlService;
 
@@ -237,13 +240,25 @@ private:
         juce::MidiMessage message;
         int samplePosition = 0;
     };
-    struct ScheduledWavetableNote
+    /** A sequencer note scheduled for an internal-synth (wavetable/filter) stack. */
+    struct ScheduledNoteEvent
     {
         std::size_t stackIndex = 0;
         unsigned short note = 0;
         unsigned short velocity = 0;
         unsigned short durationTicks = 0;
         int samplePosition = 0;
+    };
+    /** Pending + scratch buffers for one note-event pipeline (message-thread enqueue, audio-thread drain). */
+    struct NoteEventQueue
+    {
+        std::vector<ScheduledNoteEvent> pending;
+        std::vector<ScheduledNoteEvent> scratch;
+        void clear()
+        {
+            pending.clear();
+            scratch.clear();
+        }
     };
     struct MachineStack
     {
@@ -262,15 +277,19 @@ private:
         std::unique_ptr<WaveshaperDistortionMachine> distortionFx;
         std::unique_ptr<DelayFxMachine> delayFx;
         std::unique_ptr<ChannelStripMachine> channelStripFx;
+        std::unique_ptr<FilterFxMachine> filterFx;
         std::vector<SlotState> slots;
         juce::AudioBuffer<float> renderBuffer;
         juce::AudioBuffer<float> delayTailBuffer;
         juce::MidiBuffer samplerMidiBuffer;
         /** Wavetable notes distributed into the current block, sorted by sample offset. */
         std::vector<MachineScheduledNote> wavetableBlockNotes;
+        /** Filter-sweep notes distributed into the current block, sorted by sample offset. */
+        std::vector<MachineScheduledNote> filterBlockNotes;
         bool audioProcessingActive = false;
         bool samplerProcessingActive = false;
         bool wavetableProcessingActive = false;
+        bool filterProcessingActive = false;
         bool muted = false;
         bool solo = false;
         int midiOutputChannel = 1;
@@ -281,6 +300,19 @@ private:
             copyStackScope under withAudioThreadExclusive. */
         std::vector<float> scopeRing;
         std::size_t scopeHead = 0;
+
+        /** Invokes `f` for each owned machine in fixed stack order. The machines
+            are always constructed by initialiseMachines before any use. */
+        template <typename F>
+        void forEachMachine(F&& f)
+        {
+            f(*sampler);
+            f(*wavetableSynth);
+            f(*distortionFx);
+            f(*delayFx);
+            f(*channelStripFx);
+            f(*filterFx);
+        }
     };
     struct SharedAuxBus
     {
@@ -290,8 +322,8 @@ private:
     };
     std::vector<ScheduledSamplerEvent> samplerEventsToSend;
     std::vector<ScheduledSamplerEvent> scratchFutureSamplerEvents;
-    std::vector<ScheduledWavetableNote> wavetableEventsToSend;
-    std::vector<ScheduledWavetableNote> scratchFutureWavetableNotes;
+    NoteEventQueue wavetableEvents;
+    NoteEventQueue filterEvents;
     std::vector<MachineStack> machineStacks;
     SharedAuxBus auxBus1;
     SharedAuxBus auxBus2;
@@ -360,6 +392,9 @@ private:
     SharedAuxBus* getAuxBusForType(CommandType type);
     const SharedAuxBus* getAuxBusForType(CommandType type) const;
     static MachineStack::SlotState makeDefaultSlotState(CommandType type);
+    /** (property key, machine) pairs for state save/restore. The persisted names
+        are part of the plugin state format; do not rename. */
+    static std::array<std::pair<const char*, MachineInterface*>, 6> stackMachineStateEntries(MachineStack& stack);
     static bool isAuxSendType(CommandType type);
     static bool slotSupportsReturnLevel(CommandType type);
     static bool slotAllowsDuplicate(CommandType type);
@@ -391,10 +426,17 @@ private:
                                  unsigned short outNote,
                                  unsigned short outVelocity,
                                  unsigned short outDurTicks);
-    void enqueueStackWavetableNote(std::size_t stackIndex,
-                                   unsigned short note,
-                                   unsigned short velocity,
-                                   unsigned short durInTicks);
+    void enqueueStackNote(NoteEventQueue& queue,
+                          std::size_t stackIndex,
+                          unsigned short note,
+                          unsigned short velocity,
+                          unsigned short durInTicks);
+    /** Delivers queued note events that fall inside the current block and keeps the
+        per-stack delivery vector sorted for the machine's cursor walk. */
+    void distributeNoteEvents(NoteEventQueue& queue,
+                              int blockStartSample,
+                              int blockEndSample,
+                              std::vector<MachineScheduledNote> MachineStack::* blockNotesMember);
     bool isStackAssigned(std::size_t stackIndex);
     bool stackContainsType(std::size_t stackIndex, CommandType machineType) const;
     std::optional<std::size_t> findMachineInStack(std::size_t stackIndex, CommandType type) const;

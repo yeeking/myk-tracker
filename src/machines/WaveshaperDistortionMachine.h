@@ -15,10 +15,8 @@ public:
     /** Creates the distortion machine with its default drive, tone, and mix. */
     WaveshaperDistortionMachine() = default;
 
-    /** Prepares sample-rate-dependent processing state. */
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
-    /** Releases processing state back to its idle defaults. */
-    void releaseResources() override;
+    /** Resets tone filter state after prepare or release. */
+    void clearTransientState() override;
     /** Builds the machine-editor UI cells for the distortion controls. */
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     /** Processes the stack audio buffer through the waveshaper. */
@@ -27,6 +25,10 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     /** Restores the current distortion settings. */
     void setStateInformation(const void* data, int sizeInBytes) override;
+
+protected:
+    /** Stores the sanitized sample rate used by tone filtering. */
+    void prepareDsp(double sampleRate, int samplesPerBlock) override;
 
 private:
     /** Minimum allowed drive multiplier. */
@@ -47,10 +49,6 @@ private:
     /** Per-channel filter state for the tone stage. */
     std::array<float, 2> toneState {};
 
-    /** Formats floating point values for compact tracker display. */
-    static std::string formatFloat(float value, int decimals);
-    /** Applies the distortion transfer function. */
-    static float softClip(float input);
     /** Resets the tone filter state for both channels. */
     void resetToneState();
 };

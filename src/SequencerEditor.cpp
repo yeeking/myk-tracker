@@ -44,30 +44,12 @@ const std::vector<ChordShortcut> kChordShortcuts = {
 
 bool showsStackSendLevel(CommandType type)
 {
-  return type == CommandType::DistortionFx
-      || type == CommandType::DelayFx
-      || type == CommandType::ChannelStripFx
-      || type == CommandType::AuxSend1Fx
-      || type == CommandType::AuxSend2Fx;
+  return machineTraits(type).isAudioEffect;
 }
 
 std::string getStackMachineLabel(CommandType type)
 {
-  switch (type)
-  {
-    case CommandType::MidiNote: return "MIDI";
-    case CommandType::Log: return "LOG";
-    case CommandType::Sampler: return "SAMPLER";
-    case CommandType::LegacyArpeggiator:
-    case CommandType::LegacyPolyArpeggiator: return "LEGACY";
-    case CommandType::WavetableSynth: return "WAVE";
-    case CommandType::DistortionFx: return "DIST";
-    case CommandType::DelayFx: return "DELAY";
-    case CommandType::ChannelStripFx: return "CHSTR";
-    case CommandType::AuxSend1Fx: return "AUX1";
-    case CommandType::AuxSend2Fx: return "AUX2";
-    default: return "MACH";
-  }
+  return machineTraits(type).shortLabel;
 }
 
 std::string formatStackLevelDb(float value)

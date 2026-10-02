@@ -130,14 +130,15 @@ hardware-oriented utility scripts, not the main application's test suite.
 - There are 16 fixed stacks (`kMachineStackCount`), each a `MachineStack` in
   `TrackerMainProcessor`. A stack owns one persistent instance per machine
   type — `SuperSamplerProcessor`, `WavetableSynthMachine`,
-  `WaveshaperDistortionMachine`, `DelayFxMachine`, `ChannelStripMachine` —
-  plus an ordered `slots` list.
+  `WaveshaperDistortionMachine`, `DelayFxMachine`, `ChannelStripMachine`,
+  `FilterFxMachine` — plus an ordered `slots` list.
 - `slots` are `SlotState {id, type, enabled, sendLevelDb, returnLevelDb}`
   routing/chain entries that reference those fixed instances; a slot never
   owns its machine. Slot types are unique per stack and cycle in the order
   MidiNote, WavetableSynth, Sampler, DistortionFx, DelayFx, ChannelStripFx,
-  AuxSend1Fx, AuxSend2Fx. Fresh and reset stacks default to a single enabled
-  `WavetableSynth` slot so new sessions are audible without MIDI routing.
+  AuxSend1Fx, AuxSend2Fx, FilterFx. Fresh and reset stacks default to a
+  single enabled `WavetableSynth` slot so new sessions are audible without
+  MIDI routing.
   Slot `id` (e.g. `slot-7`) is the stable identity used by MCP; grid
   coordinates are deliberately not an API.
 - Aux sends are parallel: two global `AuxReverbMachine` buses are shared by
@@ -162,12 +163,13 @@ hardware-oriented utility scripts, not the main application's test suite.
   correct. A *disabled* DelayFx slot still drains its tail buffer so delay
   tails decay out instead of freezing.
 - `AudioEffectMachine` is the base for audio-only effects: it finalizes
-  `processBlock` into an in-place `processAudioBuffer(buffer)` and never
-  consumes note events. Delay machines are the only `ClockAbs` listeners;
-  sequence read heads require no machine clock.
-- `allNotesOffForStack` must silence every voice source in a stack:
-  wavetable synth, delay tail, sampler (queued `allNotesOff`), and the
-  stack's external MIDI channel.
+  `processBlock` into an in-place `processAudioBuffer(buffer)`, maps
+  `prepareToPlay()`/`releaseResources()` onto `prepareDsp()` and
+  `clearTransientState()`, and never consumes note events. Delay machines are
+  the only `ClockAbs` listeners; sequence read heads require no machine clock.
+- `allNotesOffForStack` calls every machine's `allNotesOff()` handler, then
+  queues the stack's internal sampler `allNotesOff` and the stack's external
+  MIDI channel `allNotesOff`.
 
 ## Coding conventions
 

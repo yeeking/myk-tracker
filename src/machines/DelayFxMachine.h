@@ -8,6 +8,7 @@
 
 #include "AudioEffectMachine.h"
 #include "ClockAbs.h"
+#include "MachineUi.h"
 
 class DelayFxMachine final : public AudioEffectMachine, public ClockListener
 {
@@ -15,10 +16,8 @@ public:
     /** Creates the delay effect with default sync timing and mix values. */
     DelayFxMachine() = default;
 
-    /** Prepares internal buffers for realtime processing. */
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
-    /** Releases realtime resources and clears delay state. */
-    void releaseResources() override;
+    /** Clears the delay buffer and write head under the state mutex. */
+    void clearTransientState() override;
     /** Builds the machine-editor UI cells for the delay controls. */
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     /** Applies the delay effect to the stack audio buffer. */
@@ -36,6 +35,10 @@ public:
     /** Restores the delay settings from serialised state. */
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+protected:
+    /** Resizes delay storage for the current sample rate. */
+    void prepareDsp(double sampleRate, int samplesPerBlock) override;
+
 private:
     /** Selects between tracker-synchronised delay time and free milliseconds. */
     enum class DelayMode
@@ -49,7 +52,7 @@ private:
     /** Current host/sample playback rate. */
     double currentSampleRate = 44100.0;
     /** Current tracker tick duration used for sync mode. */
-    double currentSecondsPerTick = 60.0 / (120.0 * 8.0);
+    double currentSecondsPerTick = kDefaultTrackerSecondsPerTick;
     /** Active delay timing mode. */
     DelayMode mode = DelayMode::sync;
     /** Delay length in tracker ticks when sync mode is selected. */
@@ -76,8 +79,6 @@ private:
     void clearDelayBuffer();
     /** Returns the active delay time in samples. */
     int getDelaySamples() const;
-    /** Formats floating point values for compact tracker display. */
-    static std::string formatFloat(float value, int decimals);
     /** Returns the display label for the current delay mode. */
     static const char* getModeName(DelayMode mode);
 };

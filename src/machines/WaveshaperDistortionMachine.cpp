@@ -1,4 +1,6 @@
 #include "WaveshaperDistortionMachine.h"
+#include "MachineStateCodec.h"
+#include "MachineUi.h"
 #include <cmath>
 
 namespace
@@ -6,14 +8,13 @@ namespace
 constexpr double kDistortionStateVersion = 1.0;
 }
 
-void WaveshaperDistortionMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
+void WaveshaperDistortionMachine::prepareDsp(double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused(samplesPerBlock);
-    currentSampleRate.store(sampleRate > 0.0 ? sampleRate : 44100.0, std::memory_order_relaxed);
-    resetToneState();
+    currentSampleRate.store(sanitizedSampleRate(sampleRate), std::memory_order_relaxed);
 }
 
-void WaveshaperDistortionMachine::releaseResources()
+void WaveshaperDistortionMachine::clearTransientState()
 {
     resetToneState();
 }
@@ -25,21 +26,13 @@ std::vector<std::vector<UIBox>> WaveshaperDistortionMachine::getUIBoxes(const Ma
 
     auto makeValueCell = [](std::atomic<float>& target, float step, float minValue, float maxValue, int decimals)
     {
-        UIBox cell;
-        cell.kind = UIBox::Kind::TrackerCell;
-        const float value = target.load(std::memory_order_relaxed);
-        cell.text = formatFloat(value, decimals);
-        cell.onAdjust = [&target, step, minValue, maxValue](int direction)
-        {
-            const float currentValue = target.load(std::memory_order_relaxed);
-            const float nextValue = juce::jlimit(minValue, maxValue, currentValue + step * static_cast<float>(direction));
-            target.store(nextValue, std::memory_order_relaxed);
-        };
-        cell.hasValueScale = true;
-        cell.valueNorm = maxValue > minValue
-            ? juce::jlimit(0.0f, 1.0f, (value - minValue) / (maxValue - minValue))
-            : 0.0f;
-        return cell;
+        return makeFloatCell(target.load(std::memory_order_relaxed), minValue, maxValue, decimals,
+            [&target, step, minValue, maxValue](int direction)
+            {
+                const float currentValue = target.load(std::memory_order_relaxed);
+                const float nextValue = juce::jlimit(minValue, maxValue, currentValue + step * static_cast<float>(direction));
+                target.store(nextValue, std::memory_order_relaxed);
+            });
     };
 
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
@@ -102,45 +95,24 @@ void WaveshaperDistortionMachine::getStateInformation(juce::MemoryBlock& destDat
     root->setProperty("mix", mix.load(std::memory_order_relaxed));
     root->setProperty("output", output.load(std::memory_order_relaxed));
 
-    const auto json = juce::JSON::toString(juce::var(root.get()));
-    destData.reset();
-    destData.append(json.toRawUTF8(), json.getNumBytesAsUTF8());
+    writeMachineStateJson(destData, juce::var(root.get()));
 }
 
 void WaveshaperDistortionMachine::setStateInformation(const void* data, int sizeInBytes)
 {
-    if (data == nullptr || sizeInBytes <= 0)
-        return;
-    if (!juce::CharPointer_UTF8::isValidString(static_cast<const char*>(data), sizeInBytes))
-        return;
-
-    const auto json = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
-    if (json.isEmpty())
+    const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
+    if (parsed.isVoid())
         return;
 
-    const auto parsed = juce::JSON::fromString(json);
-    if (!parsed.isObject())
-        return;
-
-    const float driveValue = juce::jlimit(kMinDrive, kMaxDrive, static_cast<float>(parsed.getProperty("drive", drive.load(std::memory_order_relaxed))));
-    const float toneValue = juce::jlimit(0.0f, 1.0f, static_cast<float>(parsed.getProperty("tone", tone.load(std::memory_order_relaxed))));
-    const float mixValue = juce::jlimit(0.0f, 1.0f, static_cast<float>(parsed.getProperty("mix", mix.load(std::memory_order_relaxed))));
-    const float outputValue = juce::jlimit(0.0f, 2.0f, static_cast<float>(parsed.getProperty("output", output.load(std::memory_order_relaxed))));
+    const float driveValue = getFloatProperty(parsed, "drive", drive.load(std::memory_order_relaxed), kMinDrive, kMaxDrive);
+    const float toneValue = getFloatProperty(parsed, "tone", tone.load(std::memory_order_relaxed), 0.0f, 1.0f);
+    const float mixValue = getFloatProperty(parsed, "mix", mix.load(std::memory_order_relaxed), 0.0f, 1.0f);
+    const float outputValue = getFloatProperty(parsed, "output", output.load(std::memory_order_relaxed), 0.0f, 2.0f);
     drive.store(driveValue, std::memory_order_relaxed);
     tone.store(toneValue, std::memory_order_relaxed);
     mix.store(mixValue, std::memory_order_relaxed);
     output.store(outputValue, std::memory_order_relaxed);
     resetToneState();
-}
-
-std::string WaveshaperDistortionMachine::formatFloat(float value, int decimals)
-{
-    return juce::String(value, decimals).toStdString();
-}
-
-float WaveshaperDistortionMachine::softClip(float input)
-{
-    return std::tanh(input);
 }
 
 void WaveshaperDistortionMachine::resetToneState()

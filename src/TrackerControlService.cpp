@@ -45,7 +45,8 @@ std::optional<CommandType> commandTypeFromName(const juce::String& name)
         { "wavetable_synth", CommandType::WavetableSynth },
         { "distortion", CommandType::DistortionFx }, { "delay", CommandType::DelayFx },
         { "channel_strip", CommandType::ChannelStripFx }, { "aux_send_1", CommandType::AuxSend1Fx },
-        { "aux_send_2", CommandType::AuxSend2Fx }, { "log", CommandType::Log }
+        { "aux_send_2", CommandType::AuxSend2Fx }, { "filter", CommandType::FilterFx },
+        { "filter_fx", CommandType::FilterFx }, { "log", CommandType::Log }
     };
     const auto lower = name.toLowerCase();
     for (const auto& [label, type] : types)
@@ -696,8 +697,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     {
                         const auto type = commandTypeFromName(stringArg(args, "command"));
                         if (!type) return fail("invalid_argument", "Unknown command type");
-                        if (*type != CommandType::MidiNote && *type != CommandType::Log
-                            && *type != CommandType::Sampler && *type != CommandType::WavetableSynth)
+                        if (!machineTraits(*type).isStepCommandType)
                             return fail("invalid_argument", "Step commands support midi, log, sampler, or wavetable_synth");
                         event[Step::cmdInd] = static_cast<double>(*type);
                     }
@@ -1031,7 +1031,6 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 detail.getDynamicObject()->setProperty("startNote", startNote);
                 detail.getDynamicObject()->setProperty("endNote", endNote);
                 return success(detail);
-                break;
             }
             case CommandKind::uiAction:
             {
@@ -1245,7 +1244,6 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else return fail("unsupported", "Audio settings are only available in the standalone application");
                 }
                 else return fail("invalid_argument", "Unknown application action");
-                break;
             }
             case CommandKind::getScreenshot:
                 return fail("unsupported", "Screenshots must use the dedicated capture path");

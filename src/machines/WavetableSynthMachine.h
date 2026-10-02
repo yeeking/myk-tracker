@@ -7,6 +7,7 @@
 #include <JuceHeader.h>
 
 #include "MachineInterface.h"
+#include "MachineUi.h"
 
 class WavetableSynthMachine final : public MachineInterface
 {
@@ -152,7 +153,7 @@ private:
     /** Current sample rate used by the synth. */
     double currentSampleRate = 44100.0;
     /** Current tracker tick duration used for note lengths. */
-    double currentSecondsPerTick = 60.0 / (120.0 * 8.0);
+    double currentSecondsPerTick = kDefaultTrackerSecondsPerTick;
     /** Round-robin voice allocation cursor. */
     int nextVoiceIndex = 0;
     /** Number of active wavetable steps. */
@@ -222,6 +223,4 @@ private:
     float sampleWaveform(Waveform waveform, double phase) const;
     /** Returns the short display name for a waveform. */
     static const char* getWaveformName(Waveform waveform);
-    /** Formats floating point values for compact tracker display. */
-    static std::string formatFloat(float value, int decimals);
 };

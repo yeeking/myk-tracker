@@ -1,5 +1,6 @@
-#pragma once 
+#pragma once
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -71,6 +72,55 @@ enum class CommandType : std::size_t {
     ChannelStripFx = 8,
     AuxSend1Fx = 9,
     AuxSend2Fx = 10,
+    FilterFx = 11,
+};
+
+/** Shared behaviour table for machine types so the processor, editor, UI and
+    control service all agree on labels and routing. */
+struct MachineTypeTraits {
+    /** Short uppercase cell label shown in the stack grid (e.g. "WAVE"). */
+    const char* shortLabel = "MACH";
+    /** Long name shown in detail views (e.g. "wavetable synth"). */
+    const char* longName = "";
+    /** True for audio-only effect machines in the stack audio path. */
+    bool isAudioEffect = false;
+    /** True for machine types a sequence step row may store. */
+    bool isStepCommandType = false;
+    /** True for machine types that route notes through a stack. */
+    bool isStackRoutable = false;
+    /** Position in kSlotCycleTypes, or -1 when the type cannot be cycled in. */
+    int slotCycleIndex = -1;
+};
+
+constexpr MachineTypeTraits machineTraits(CommandType type) {
+    switch (type) {
+        case CommandType::MidiNote: return { "MIDI", "midi", false, true, true, 0 };
+        case CommandType::Log: return { "LOG", "log", false, true, false, -1 };
+        case CommandType::Sampler: return { "SAMPLER", "sampler", false, true, true, 2 };
+        case CommandType::LegacyArpeggiator:
+        case CommandType::LegacyPolyArpeggiator: return { "LEGACY", "legacy", false, false, false, -1 };
+        case CommandType::WavetableSynth: return { "WAVE", "wavetable synth", false, true, true, 1 };
+        case CommandType::DistortionFx: return { "DIST", "distortion", true, false, true, 3 };
+        case CommandType::DelayFx: return { "DELAY", "delay", true, false, true, 4 };
+        case CommandType::ChannelStripFx: return { "CHSTR", "channel strip", true, false, true, 5 };
+        case CommandType::AuxSend1Fx: return { "AUX1", "shared aux [1] reverb", true, false, true, 6 };
+        case CommandType::AuxSend2Fx: return { "AUX2", "shared aux [2] reverb", true, false, true, 7 };
+        case CommandType::FilterFx: return { "FILTER", "filter", true, false, true, 8 };
+    }
+    return {};
+}
+
+/** Slot types a stack can hold, in the order the slot-type cycle walks. */
+constexpr std::array<CommandType, 9> kSlotCycleTypes = {
+    CommandType::MidiNote,
+    CommandType::WavetableSynth,
+    CommandType::Sampler,
+    CommandType::DistortionFx,
+    CommandType::DelayFx,
+    CommandType::ChannelStripFx,
+    CommandType::AuxSend1Fx,
+    CommandType::AuxSend2Fx,
+    CommandType::FilterFx
 };
 
 

@@ -1,4 +1,5 @@
 #include "DelayFxMachine.h"
+#include "MachineStateCodec.h"
 #include <cmath>
 
 namespace
@@ -6,16 +7,15 @@ namespace
 constexpr double kDelayStateVersion = 1.0;
 }
 
-void DelayFxMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
+void DelayFxMachine::prepareDsp(double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused(samplesPerBlock);
     const std::lock_guard<std::mutex> lock(stateMutex);
-    currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    currentSampleRate = sanitizedSampleRate(sampleRate);
     resizeDelayBuffer();
-    clearDelayBuffer();
 }
 
-void DelayFxMachine::releaseResources()
+void DelayFxMachine::clearTransientState()
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
     clearDelayBuffer();
@@ -28,21 +28,14 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
 
     std::vector<std::vector<UIBox>> boxes(2, std::vector<UIBox>(5));
 
-    auto makeFloatCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
+    auto buildFloatCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
-        UIBox cell;
-        cell.kind = UIBox::Kind::TrackerCell;
-        cell.text = formatFloat(*target, decimals);
-        cell.onAdjust = [this, target, step, minValue, maxValue](int direction)
-        {
-            const std::lock_guard<std::mutex> guard(stateMutex);
-            *target = juce::jlimit(minValue, maxValue, *target + step * static_cast<float>(direction));
-        };
-        cell.hasValueScale = true;
-        cell.valueNorm = maxValue > minValue
-            ? juce::jlimit(0.0f, 1.0f, (*target - minValue) / (maxValue - minValue))
-            : 0.0f;
-        return cell;
+        return makeFloatCell(*target, minValue, maxValue, decimals,
+            [this, target, step, minValue, maxValue](int direction)
+            {
+                const std::lock_guard<std::mutex> guard(stateMutex);
+                *target = juce::jlimit(minValue, maxValue, *target + step * static_cast<float>(direction));
+            });
     };
 
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
@@ -75,16 +68,16 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
 
     boxes[0][2].kind = UIBox::Kind::TrackerCell;
     boxes[0][2].text = "MS";
-    boxes[1][2] = makeFloatCell(&delayMs, 5.0f, 1.0f, static_cast<float>(kMaxDelaySeconds * 1000), 0);
+    boxes[1][2] = buildFloatCell(&delayMs, 5.0f, 1.0f, static_cast<float>(kMaxDelaySeconds * 1000), 0);
     boxes[1][2].isDisabled = mode != DelayMode::milliseconds;
 
     boxes[0][3].kind = UIBox::Kind::TrackerCell;
     boxes[0][3].text = "FDBK";
-    boxes[1][3] = makeFloatCell(&feedback, 0.05f, 0.0f, 0.95f, 2);
+    boxes[1][3] = buildFloatCell(&feedback, 0.05f, 0.0f, 0.95f, 2);
 
     boxes[0][4].kind = UIBox::Kind::TrackerCell;
     boxes[0][4].text = "MIX";
-    boxes[1][4] = makeFloatCell(&mix, 0.05f, 0.0f, 1.0f, 2);
+    boxes[1][4] = buildFloatCell(&mix, 0.05f, 0.0f, 1.0f, 2);
 
     return boxes;
 }
@@ -128,8 +121,7 @@ void DelayFxMachine::setSecondsPerTick(double secondsPerTick)
 
 void DelayFxMachine::allNotesOff()
 {
-    const std::lock_guard<std::mutex> lock(stateMutex);
-    clearDelayBuffer();
+    clearTransientState();
 }
 
 void DelayFxMachine::tick(int quarterBeat, bool isQuarterNoteBoundary)
@@ -157,32 +149,21 @@ void DelayFxMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("feedback", feedback);
     root->setProperty("mix", mix);
 
-    const auto json = juce::JSON::toString(juce::var(root.get()));
-    destData.reset();
-    destData.append(json.toRawUTF8(), json.getNumBytesAsUTF8());
+    writeMachineStateJson(destData, juce::var(root.get()));
 }
 
 void DelayFxMachine::setStateInformation(const void* data, int sizeInBytes)
 {
-    if (data == nullptr || sizeInBytes <= 0)
-        return;
-    if (!juce::CharPointer_UTF8::isValidString(static_cast<const char*>(data), sizeInBytes))
-        return;
-
-    const auto json = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
-    if (json.isEmpty())
-        return;
-
-    const auto parsed = juce::JSON::fromString(json);
-    if (!parsed.isObject())
+    const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
+    if (parsed.isVoid())
         return;
 
     const std::lock_guard<std::mutex> lock(stateMutex);
-    mode = static_cast<DelayMode>(juce::jlimit(0, 1, static_cast<int>(parsed.getProperty("mode", static_cast<int>(mode)))));
-    syncTicks = juce::jlimit(1, 64, static_cast<int>(parsed.getProperty("syncTicks", syncTicks)));
-    delayMs = juce::jlimit(1.0f, static_cast<float>(kMaxDelaySeconds * 1000), static_cast<float>(parsed.getProperty("delayMs", delayMs)));
-    feedback = juce::jlimit(0.0f, 0.95f, static_cast<float>(parsed.getProperty("feedback", feedback)));
-    mix = juce::jlimit(0.0f, 1.0f, static_cast<float>(parsed.getProperty("mix", mix)));
+    mode = static_cast<DelayMode>(getIntProperty(parsed, "mode", static_cast<int>(mode), 0, 1));
+    syncTicks = getIntProperty(parsed, "syncTicks", syncTicks, 1, 64);
+    delayMs = getFloatProperty(parsed, "delayMs", delayMs, 1.0f, static_cast<float>(kMaxDelaySeconds * 1000));
+    feedback = getFloatProperty(parsed, "feedback", feedback, 0.0f, 0.95f);
+    mix = getFloatProperty(parsed, "mix", mix, 0.0f, 1.0f);
     clearDelayBuffer();
 }
 
@@ -205,11 +186,6 @@ int DelayFxMachine::getDelaySamples() const
         return juce::jlimit(1, juce::jmax(1, delayBuffer.getNumSamples() - 1), static_cast<int>(std::round(currentSecondsPerTick * static_cast<double>(syncTicks) * currentSampleRate)));
 
     return juce::jlimit(1, juce::jmax(1, delayBuffer.getNumSamples() - 1), static_cast<int>(std::round((static_cast<double>(delayMs) / 1000.0) * currentSampleRate)));
-}
-
-std::string DelayFxMachine::formatFloat(float value, int decimals)
-{
-    return juce::String(value, decimals).toStdString();
 }
 
 const char* DelayFxMachine::getModeName(DelayMode modeValue)

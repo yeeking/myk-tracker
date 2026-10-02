@@ -10,7 +10,6 @@
 #include "TrackerControlService.h"
 #include "TrackerMainUI.h"
 #include "SequencerCommands.h"
-// #include "SimpleClock.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -40,14 +39,25 @@ std::string describeStackCursorAction(const std::string& cellText)
     if (cellText == "DOWN") return "move down";
     if (cellText == "ON") return "enabled";
     if (cellText == "OFF") return "disabled";
-    if (cellText == "SAMPLER") return "sampler";
-    if (cellText == "WAVE") return "wavetable synth";
-    if (cellText == "DIST") return "distortion";
-    if (cellText == "DELAY") return "delay";
-    if (cellText == "CHSTR") return "channel strip";
-    if (cellText == "MIDI") return "midi";
     if (cellText.empty()) return "stack";
+    for (std::size_t typeValue = 0; typeValue <= static_cast<std::size_t>(CommandType::FilterFx); ++typeValue)
+    {
+        const auto traits = machineTraits(static_cast<CommandType>(typeValue));
+        if (cellText == traits.shortLabel)
+            return traits.longName;
+    }
     return juce::String(cellText).toLowerCase().toStdString();
+}
+
+bool isSimpleMachineDetail(CommandType type)
+{
+    return type == CommandType::DistortionFx
+        || type == CommandType::DelayFx
+        || type == CommandType::FilterFx
+        || type == CommandType::ChannelStripFx
+        || type == CommandType::AuxSend1Fx
+        || type == CommandType::AuxSend2Fx
+        || type == CommandType::MidiNote;
 }
 
 std::string makeSequenceTitle(std::size_t sequenceIndex, std::size_t stepIndex, std::size_t stepCount, int bpmInt)
@@ -551,8 +561,6 @@ void TrackerMainUI::prepareStepView()
     style.lightDirection = palette.lightDirection;
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
-    // Step* step = sequencer->getStep(seqEditor->getCurrentSequence(), seqEditor->getCurrentStep());
-    // std::vector<std::vector<std::string>> grid = step->toStringGrid();
     std::vector<std::pair<int, int>> playHeads;
     std::vector<std::vector<std::string>> grid;
     size_t currentSequence = 0;
@@ -892,7 +900,7 @@ void TrackerMainUI::prepareMachineConfigView()
         overlayState.glowStrength = 0.25f;
         return;
     }
-    if (detailType.has_value() && detailType.value() == CommandType::DistortionFx)
+    if (detailType.has_value() && isSimpleMachineDetail(detailType.value()))
     {
         TrackerUIComponent::Style style;
         style.background = palette.background;
@@ -907,93 +915,15 @@ void TrackerMainUI::prepareMachineConfigView()
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
         updateCellStates(machineBoxes, rows + 2, cols);
-        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [distortion]";
-        overlayState.color = palette.textPrimary;
-        overlayState.glowColor = palette.gridPlayhead;
-        overlayState.glowStrength = 0.25f;
-        return;
-    }
-    if (detailType.has_value() && detailType.value() == CommandType::DelayFx)
-    {
-        TrackerUIComponent::Style style;
-        style.background = palette.background;
-        style.lightColor = palette.lightColor;
-        style.defaultGlowColor = palette.gridPlayhead;
-        style.ambientStrength = palette.ambientStrength;
-        style.lightDirection = palette.lightDirection;
-        uiComponent.setStyle(style);
-        uiComponent.setCellSize(cellWidth, cellHeight);
 
-        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
-        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
-        updateCellStates(machineBoxes, rows + 2, cols);
-        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [delay]";
-        overlayState.color = palette.textPrimary;
-        overlayState.glowColor = palette.gridPlayhead;
-        overlayState.glowStrength = 0.25f;
-        return;
-    }
-    if (detailType.has_value() && detailType.value() == CommandType::ChannelStripFx)
-    {
-        TrackerUIComponent::Style style;
-        style.background = palette.background;
-        style.lightColor = palette.lightColor;
-        style.defaultGlowColor = palette.gridPlayhead;
-        style.ambientStrength = palette.ambientStrength;
-        style.lightDirection = palette.lightDirection;
-        uiComponent.setStyle(style);
-        uiComponent.setCellSize(cellWidth, cellHeight);
+        const auto detail = detailType.value();
+        if (detail == CommandType::AuxSend1Fx)
+            overlayState.text = "Shared aux [1] reverb";
+        else if (detail == CommandType::AuxSend2Fx)
+            overlayState.text = "Shared aux [2] reverb";
+        else
+            overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [" + machineTraits(detail).longName + "]";
 
-        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
-        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
-        updateCellStates(machineBoxes, rows + 2, cols);
-        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [channel strip]";
-        overlayState.color = palette.textPrimary;
-        overlayState.glowColor = palette.gridPlayhead;
-        overlayState.glowStrength = 0.25f;
-        return;
-    }
-    if (detailType.has_value() && (detailType.value() == CommandType::AuxSend1Fx || detailType.value() == CommandType::AuxSend2Fx))
-    {
-        TrackerUIComponent::Style style;
-        style.background = palette.background;
-        style.lightColor = palette.lightColor;
-        style.defaultGlowColor = palette.gridPlayhead;
-        style.ambientStrength = palette.ambientStrength;
-        style.lightDirection = palette.lightDirection;
-        uiComponent.setStyle(style);
-        uiComponent.setCellSize(cellWidth, cellHeight);
-
-        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
-        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
-        updateCellStates(machineBoxes, rows + 2, cols);
-        overlayState.text = detailType.value() == CommandType::AuxSend1Fx
-            ? "Shared aux [1] reverb"
-            : "Shared aux [2] reverb";
-        overlayState.color = palette.textPrimary;
-        overlayState.glowColor = palette.gridPlayhead;
-        overlayState.glowStrength = 0.25f;
-        return;
-    }
-    if (detailType.has_value() && detailType.value() == CommandType::MidiNote)
-    {
-        TrackerUIComponent::Style style;
-        style.background = palette.background;
-        style.lightColor = palette.lightColor;
-        style.defaultGlowColor = palette.gridPlayhead;
-        style.ambientStrength = palette.ambientStrength;
-        style.lightDirection = palette.lightDirection;
-        uiComponent.setStyle(style);
-        uiComponent.setCellSize(cellWidth, cellHeight);
-
-        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
-        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
-        updateCellStates(machineBoxes, rows + 2, cols);
-        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [midi]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
         overlayState.glowStrength = 0.25f;
@@ -1183,11 +1113,6 @@ void TrackerMainUI::prepareMixerView()
 
 void TrackerMainUI::prepareControlPanelView()
 {
-    // std::vector<std::vector<std::string>> grid = trackerController->getControlPanelAsGridOfStrings();
-    // controlPanelTable.updateData(grid, 
-    //     1, 12, 
-    //     0, 0, // todo - pull these from the editor which keeps track of this 
-    //     std::vector<std::pair<int, int>>(), false); 
 }
 
 void TrackerMainUI::prepareSongView()
@@ -1414,10 +1339,6 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
         playheadGlow[col].resize(rowsToDisplay, 0.0f);
         lastValueNorm[col].resize(rowsToDisplay, -1.0f);
     }
-    // const float glowDecayStep = 0.1f;
-    // const float glowDecayScalar = 0.8f;
-    
-
     for (size_t displayCol = 0; displayCol < colsToDisplay; ++displayCol)
     {
         const size_t col = nextStartCol + displayCol;

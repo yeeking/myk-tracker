@@ -46,11 +46,7 @@ bool isAudioSourceType(CommandType type)
 
 bool isAudioEffectType(CommandType type)
 {
-    return type == CommandType::DistortionFx
-        || type == CommandType::DelayFx
-        || type == CommandType::ChannelStripFx
-        || type == CommandType::AuxSend1Fx
-        || type == CommandType::AuxSend2Fx;
+    return machineTraits(type).isAudioEffect;
 }
 
 float gainDbToLinear(float gainDb)
@@ -92,6 +88,31 @@ float linearToMeterNormalised(float linearLevel)
     return juce::jlimit(0.0f, 1.0f, (db + 48.0f) / 48.0f);
 }
 
+juce::String encodeMachineState(MachineInterface* machine)
+{
+    if (machine == nullptr)
+        return juce::String();
+    juce::MemoryBlock state;
+    machine->getStateInformation(state);
+    return juce::Base64::toBase64(state.getData(), state.getSize());
+}
+
+void decodeMachineState(const juce::var& encodedVar, MachineInterface* machine)
+{
+    if (machine == nullptr)
+        return;
+    const auto encoded = encodedVar.toString();
+    if (encoded.isEmpty())
+        return;
+    juce::MemoryBlock state;
+    juce::MemoryOutputStream stream(state, false);
+    if (!juce::Base64::convertFromBase64(stream, encoded))
+        return;
+    if (state.getSize() == 0)
+        return;
+    machine->setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+}
+
 }
 
 void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
@@ -104,14 +125,23 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
     const int onSample = elapsedSamples;
     const int offsetSamples = (samplesPerTickInt * static_cast<int>(outDurTicks)) % maxHorizon;
     const int offSample = onSample + offsetSamples;
-    const int samplesSinceLast = onSample - lastQdOnAt; 
     lastQdOnAt = onSample;
 
-    // DBG("q-ing midi: delta since last note on " << samplesSinceLast << " on at " << onSample << " off at " << offSample);
-    
     targetBuffer.addEvent(MidiMessage::noteOn((int)channel, (int)outNote, (uint8)outVelocity), onSample);
     targetBuffer.addEvent(MidiMessage::noteOff((int)channel, (int)outNote, (uint8)outVelocity), offSample);
     outstandingNoteOffs++;
+}
+
+std::array<std::pair<const char*, MachineInterface*>, 6> TrackerMainProcessor::stackMachineStateEntries(MachineStack& stack)
+{
+    std::array<std::pair<const char*, MachineInterface*>, 6> entries;
+    entries[0] = { "sampler", stack.sampler.get() };
+    entries[1] = { "wavetableSynth", stack.wavetableSynth.get() };
+    entries[2] = { "distortionFx", stack.distortionFx.get() };
+    entries[3] = { "delayFx", stack.delayFx.get() };
+    entries[4] = { "channelStripFx", stack.channelStripFx.get() };
+    entries[5] = { "filterFx", stack.filterFx.get() };
+    return entries;
 }
 
 TrackerMainProcessor::MachineStack::SlotState TrackerMainProcessor::makeDefaultSlotState(CommandType type)
@@ -148,6 +178,7 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
     bool hasAudioPath = false;
     bool samplerActive = false;
     bool wavetableActive = false;
+    bool filterActive = false;
 
     for (const auto& slot : stack.slots)
     {
@@ -164,6 +195,10 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
                 wavetableActive = true;
                 hasAudioPath = true;
                 break;
+            case CommandType::FilterFx:
+                filterActive = true;
+                hasAudioPath = true;
+                break;
             default:
                 if (isAudioEffectType(slot.type))
                     hasAudioPath = true;
@@ -174,6 +209,7 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
     stack.audioProcessingActive = hasAudioPath;
     stack.samplerProcessingActive = samplerActive;
     stack.wavetableProcessingActive = wavetableActive;
+    stack.filterProcessingActive = filterActive;
 }
 
 void TrackerMainProcessor::refreshAllStackProcessingStates()
@@ -204,30 +240,19 @@ bool TrackerMainProcessor::isStackAssigned(std::size_t stackIndex)
     return false;
 }
 
+// Real-time path: dispatch on the type table instead of dynamic_cast.
 AudioEffectMachine* TrackerMainProcessor::getAudioEffectForStackType(MachineStack& stack, CommandType type)
 {
-    switch (type)
-    {
-        case CommandType::DistortionFx: return stack.distortionFx.get();
-        case CommandType::DelayFx: return stack.delayFx.get();
-        case CommandType::ChannelStripFx: return stack.channelStripFx.get();
-        case CommandType::AuxSend1Fx: return auxBus1.machine.get();
-        case CommandType::AuxSend2Fx: return auxBus2.machine.get();
-        default: return nullptr;
-    }
+    if (!isAudioEffectType(type))
+        return nullptr;
+    return static_cast<AudioEffectMachine*> (getMachineForStackType(stack, type));
 }
 
 const AudioEffectMachine* TrackerMainProcessor::getAudioEffectForStackType(const MachineStack& stack, CommandType type) const
 {
-    switch (type)
-    {
-        case CommandType::DistortionFx: return stack.distortionFx.get();
-        case CommandType::DelayFx: return stack.delayFx.get();
-        case CommandType::ChannelStripFx: return stack.channelStripFx.get();
-        case CommandType::AuxSend1Fx: return auxBus1.machine.get();
-        case CommandType::AuxSend2Fx: return auxBus2.machine.get();
-        default: return nullptr;
-    }
+    if (!isAudioEffectType(type))
+        return nullptr;
+    return static_cast<const AudioEffectMachine*> (getMachineForStackType(stack, type));
 }
 
 std::unique_ptr<Sequencer> TrackerMainProcessor::createDefaultSequenceSet()
@@ -458,10 +483,10 @@ void TrackerMainProcessor::allNotesOffForStack(std::size_t stackIndex)
 {
     if (auto* stack = getMachineStack(stackIndex))
     {
-        if (stack->wavetableSynth != nullptr)
-            stack->wavetableSynth->allNotesOff();
-        if (stack->delayFx != nullptr)
-            stack->delayFx->allNotesOff();
+        stack->forEachMachine([] (MachineInterface& machine)
+        {
+            machine.allNotesOff();
+        });
         samplerEventsToSend.push_back({ stackIndex, MidiMessage::allNotesOff(1), elapsedSamples });
         midiToSend.addEvent(MidiMessage::allNotesOff(getStackMidiOutputChannel(stackIndex)), elapsedSamples);
     }
@@ -479,12 +504,63 @@ void TrackerMainProcessor::enqueueStackSamplerMidi(std::size_t stackIndex,
     samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOff(1, static_cast<int>(outNote), static_cast<uint8>(outVelocity)), offSample });
 }
 
-void TrackerMainProcessor::enqueueStackWavetableNote(std::size_t stackIndex,
-                                                     unsigned short note,
-                                                     unsigned short velocity,
-                                                     unsigned short durInTicks)
+void TrackerMainProcessor::enqueueStackNote(NoteEventQueue& queue,
+                                             std::size_t stackIndex,
+                                             unsigned short note,
+                                             unsigned short velocity,
+                                             unsigned short durInTicks)
 {
-    wavetableEventsToSend.push_back({ stackIndex, note, velocity, durInTicks, elapsedSamples });
+    queue.pending.push_back({ stackIndex, note, velocity, durInTicks, elapsedSamples });
+}
+
+void TrackerMainProcessor::distributeNoteEvents(NoteEventQueue& queue,
+                                                int blockStartSample,
+                                                int blockEndSample,
+                                                std::vector<MachineScheduledNote> MachineStack::* blockNotesMember)
+{
+    queue.scratch.clear();
+    if (queue.scratch.capacity() < queue.pending.size())
+        queue.scratch.reserve(queue.pending.size());
+    for (const auto& event : queue.pending)
+    {
+        bool inThisBlock = false;
+        int sampleOffset = 0;
+        if (blockEndSample < blockStartSample)
+        {
+            if (event.samplePosition >= blockStartSample || event.samplePosition < blockEndSample)
+            {
+                inThisBlock = true;
+                sampleOffset = event.samplePosition - blockStartSample;
+            }
+        }
+        else if (event.samplePosition >= blockStartSample && event.samplePosition < blockEndSample)
+        {
+            inThisBlock = true;
+            sampleOffset = event.samplePosition - blockStartSample;
+        }
+
+        if (inThisBlock)
+        {
+            const std::size_t safeStackIndex = event.stackIndex < machineStacks.size() ? event.stackIndex : 0u;
+            (machineStacks[safeStackIndex].*blockNotesMember).push_back(
+                { sampleOffset, event.note, event.velocity, event.durationTicks });
+        }
+        else
+        {
+            queue.scratch.push_back(event);
+        }
+    }
+    queue.pending.swap(queue.scratch);
+
+    // the machines walk these with a cursor, so keep them sorted by sample offset
+    for (auto& stack : machineStacks)
+    {
+        std::stable_sort((stack.*blockNotesMember).begin(), (stack.*blockNotesMember).end(),
+                         [](const MachineScheduledNote& a, const MachineScheduledNote& b)
+                         {
+                             return a.sampleOffset < b.sampleOffset;
+                         });
+    }
 }
 
 void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
@@ -534,7 +610,7 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                 break;
             case CommandType::WavetableSynth:
                 // Notes are queued and applied sample-accurately in the synth's processBlock.
-                enqueueStackWavetableNote(stackIndex, note, velocity, durInTicks);
+                enqueueStackNote(wavetableEvents, stackIndex, note, velocity, durInTicks);
                 anyTerminalTriggered = true;
                 break;
             case CommandType::DistortionFx:
@@ -542,6 +618,11 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
             case CommandType::ChannelStripFx:
             case CommandType::AuxSend1Fx:
             case CommandType::AuxSend2Fx:
+            case CommandType::FilterFx:
+                // The filter retriggers its cutoff envelope from any note that
+                // reaches it; the actual audio is processed on the audio path.
+                enqueueStackNote(filterEvents, stackIndex, note, velocity, durInTicks);
+                break;
             case CommandType::Log:
                 break;
             default:
@@ -678,10 +759,6 @@ TrackerMainProcessor::TrackerMainProcessor()
             app->systemRequestedQuit();
     });
 
-    // sequencer.decrementSeqParam(0, 1);
-    // sequencer.decrementSeqParam(0, 1);
-
-    // put some test notes into the sequencer to see if they flow through
     initialiseOsc();
     controlService = std::make_unique<TrackerControlService>(*this);
 }
@@ -792,16 +869,19 @@ void TrackerMainProcessor::initialiseMachines()
         stack.distortionFx = std::make_unique<WaveshaperDistortionMachine>();
         stack.delayFx = std::make_unique<DelayFxMachine>();
         stack.channelStripFx = std::make_unique<ChannelStripMachine>();
+        stack.filterFx = std::make_unique<FilterFxMachine>();
         // A fresh tracker should be immediately audible.  MIDI output remains
         // available as a stack type, but every new/reset stack starts with an
         // enabled internal synth instead of a silent external-MIDI route.
         stack.slots = { makeDefaultSlotState(CommandType::WavetableSynth) };
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
+        stack.filterBlockNotes.clear();
         stack.midiOutputChannel = 1;
         stack.audioProcessingActive = false;
         stack.samplerProcessingActive = false;
         stack.wavetableProcessingActive = false;
+        stack.filterProcessingActive = false;
         stack.muted = false;
         stack.solo = false;
         stack.gainDb = 0.0f;
@@ -809,17 +889,15 @@ void TrackerMainProcessor::initialiseMachines()
     }
     samplerEventsToSend.clear();
     scratchFutureSamplerEvents.clear();
-    wavetableEventsToSend.clear();
-    scratchFutureWavetableNotes.clear();
+    wavetableEvents.clear();
+    filterEvents.clear();
 
     const double secondsPerTick = getSecondsPerTickFromBpm(getBPM());
     for (auto& stack : machineStacks)
-    {
-        if (stack.wavetableSynth != nullptr)
-            stack.wavetableSynth->setSecondsPerTick(secondsPerTick);
-        if (stack.delayFx != nullptr)
-            stack.delayFx->setSecondsPerTick(secondsPerTick);
-    }
+        stack.forEachMachine([&secondsPerTick] (MachineInterface& machine)
+        {
+            machine.setSecondsPerTick(secondsPerTick);
+        });
     refreshAllStackProcessingStates();
     configureClockListeners();
     updateClockedMachineActivity();
@@ -1119,6 +1197,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         stack.delayTailBuffer.clear();
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
+        stack.filterBlockNotes.clear();
         // Fixed-size scope ring for the UI oscilloscope; independent of the block
         // size so it is allocated once and reused across sample-rate changes.
         if (stack.scopeRing.empty())
@@ -1126,25 +1205,16 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
             stack.scopeRing.assign(1024, 0.0f);
             stack.scopeHead = 0;
         }
-        if (stack.sampler != nullptr)
-            stack.sampler->prepareToPlay(sampleRate, samplesPerBlock);
-        if (stack.wavetableSynth != nullptr)
+        // setSecondsPerTick is a no-op for machines that do not track tick time.
+        stack.forEachMachine([&sampleRate, &samplesPerBlock, secondsPerTick] (MachineInterface& machine)
         {
-            stack.wavetableSynth->prepareToPlay(sampleRate, samplesPerBlock);
-            stack.wavetableSynth->setSecondsPerTick(secondsPerTick);
-        }
-        if (stack.distortionFx != nullptr)
-            stack.distortionFx->prepareToPlay(sampleRate, samplesPerBlock);
-        if (stack.delayFx != nullptr)
-        {
-            stack.delayFx->prepareToPlay(sampleRate, samplesPerBlock);
-            stack.delayFx->setSecondsPerTick(secondsPerTick);
-        }
-        if (stack.channelStripFx != nullptr)
-            stack.channelStripFx->prepareToPlay(sampleRate, samplesPerBlock);
+            machine.prepareToPlay(sampleRate, samplesPerBlock);
+            machine.setSecondsPerTick(secondsPerTick);
+        });
     }
     scratchFutureSamplerEvents.clear();
-    scratchFutureWavetableNotes.clear();
+    wavetableEvents.scratch.clear();
+    filterEvents.scratch.clear();
     emptyMidiBuffer.clear();
     updateClockedMachineActivity();
 }
@@ -1165,19 +1235,15 @@ void TrackerMainProcessor::releaseResources()
         stack.delayTailBuffer.setSize(0, 0);
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
-        if (stack.sampler != nullptr)
-            stack.sampler->releaseResources();
-        if (stack.wavetableSynth != nullptr)
-            stack.wavetableSynth->releaseResources();
-        if (stack.distortionFx != nullptr)
-            stack.distortionFx->releaseResources();
-        if (stack.delayFx != nullptr)
-            stack.delayFx->releaseResources();
-        if (stack.channelStripFx != nullptr)
-            stack.channelStripFx->releaseResources();
+        stack.filterBlockNotes.clear();
+        stack.forEachMachine([] (MachineInterface& machine)
+        {
+            machine.releaseResources();
+        });
     }
     scratchFutureSamplerEvents.clear();
-    scratchFutureWavetableNotes.clear();
+    wavetableEvents.scratch.clear();
+    filterEvents.scratch.clear();
     emptyMidiBuffer.clear();
 }
 
@@ -1392,6 +1458,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
+        stack.filterBlockNotes.clear();
     }
 
     for (const auto& event : samplerEventsToSend)
@@ -1426,47 +1493,10 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     // now distribute the sequencer notes destined for the wavetable synths,
     // keeping only the ones that fall within this block (with in-block offsets)
-    scratchFutureWavetableNotes.clear();
-    if (scratchFutureWavetableNotes.capacity() < wavetableEventsToSend.size())
-        scratchFutureWavetableNotes.reserve(wavetableEventsToSend.size());
-    for (const auto& event : wavetableEventsToSend)
-    {
-        bool inThisBlock = false;
-        int sampleOffset = 0;
-        if (blockEndSample < blockStartSample)
-        {
-            if (event.samplePosition >= blockStartSample || event.samplePosition < blockEndSample)
-            {
-                inThisBlock = true;
-                sampleOffset = event.samplePosition - blockStartSample;
-            }
-        }
-        else if (event.samplePosition >= blockStartSample && event.samplePosition < blockEndSample)
-        {
-            inThisBlock = true;
-            sampleOffset = event.samplePosition - blockStartSample;
-        }
+    distributeNoteEvents(wavetableEvents, blockStartSample, blockEndSample, &MachineStack::wavetableBlockNotes);
 
-        if (inThisBlock)
-        {
-            const std::size_t safeStackIndex = event.stackIndex < machineStacks.size() ? event.stackIndex : 0u;
-            machineStacks[safeStackIndex].wavetableBlockNotes.push_back(
-                { sampleOffset, event.note, event.velocity, event.durationTicks });
-        }
-        else
-        {
-            scratchFutureWavetableNotes.push_back(event);
-        }
-    }
-    wavetableEventsToSend.swap(scratchFutureWavetableNotes);
-
-    // the machines walk these with a cursor, so keep them sorted by sample offset
-    for (auto& stack : machineStacks)
-        std::stable_sort(stack.wavetableBlockNotes.begin(), stack.wavetableBlockNotes.end(),
-                         [](const MachineScheduledNote& a, const MachineScheduledNote& b)
-                         {
-                             return a.sampleOffset < b.sampleOffset;
-                         });
+    // now distribute the sequencer notes that retrigger filter cutoff sweeps
+    distributeNoteEvents(filterEvents, blockStartSample, blockEndSample, &MachineStack::filterBlockNotes);
 
     if (auxBus1.inputBuffer.getNumChannels() != 2 || auxBus1.inputBuffer.getNumSamples() != buffer.getNumSamples())
         auxBus1.inputBuffer.setSize(2, buffer.getNumSamples(), false, false, true);
@@ -1506,6 +1536,10 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 stack->wavetableSynth->scheduleBlockNotes(stack->wavetableBlockNotes);
                 stack->wavetableSynth->processBlock(stackBuffer, emptyMidiBuffer);
             }
+            // The filter's audio runs through the effect slot loop below; this
+            // only hands over the notes that retrigger its cutoff envelope.
+            if (stack->filterProcessingActive && stack->filterFx != nullptr)
+                stack->filterFx->scheduleBlockNotes(stack->filterBlockNotes);
 
             for (const auto& slot : stack->slots)
             {
@@ -1976,10 +2010,10 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
                             if (commandType == static_cast<int>(CommandType::LegacyArpeggiator)
                                 || commandType == static_cast<int>(CommandType::LegacyPolyArpeggiator))
                                 continue;
-                            if (commandType != static_cast<int>(CommandType::MidiNote)
-                                && commandType != static_cast<int>(CommandType::Log)
-                                && commandType != static_cast<int>(CommandType::Sampler)
-                                && commandType != static_cast<int>(CommandType::WavetableSynth))
+                            // Persisted rows may hold stale or invalid command values.
+                            if (commandType < 0
+                                || commandType > static_cast<int>(CommandType::FilterFx)
+                                || !machineTraits(static_cast<CommandType>(commandType)).isStepCommandType)
                                 row[Step::cmdInd] = static_cast<double>(CommandType::MidiNote);
                             if (row.size() == 6)
                             {
@@ -2074,32 +2108,11 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         stackObj->setProperty("muted", stack.muted);
         stackObj->setProperty("solo", stack.solo);
 
-        auto encodeMachineState = [](MachineInterface* machine)
-        {
-            if (machine == nullptr)
-                return juce::String();
-            juce::MemoryBlock state;
-            machine->getStateInformation(state);
-            return juce::Base64::toBase64(state.getData(), state.getSize());
-        };
-
-        stackObj->setProperty("sampler", encodeMachineState(stack.sampler.get()));
-        stackObj->setProperty("wavetableSynth", encodeMachineState(stack.wavetableSynth.get()));
-        stackObj->setProperty("distortionFx", encodeMachineState(stack.distortionFx.get()));
-        stackObj->setProperty("delayFx", encodeMachineState(stack.delayFx.get()));
-        stackObj->setProperty("channelStripFx", encodeMachineState(stack.channelStripFx.get()));
+        for (const auto& [key, machine] : stackMachineStateEntries(stack))
+            stackObj->setProperty(key, encodeMachineState(machine));
         stackStates.add(stackObj.get());
     }
     root->setProperty("machineStacks", stackStates);
-
-    auto encodeMachineState = [](MachineInterface* machine)
-    {
-        if (machine == nullptr)
-            return juce::String();
-        juce::MemoryBlock state;
-        machine->getStateInformation(state);
-        return juce::Base64::toBase64(state.getData(), state.getSize());
-    };
 
     juce::DynamicObject::Ptr auxObj = new juce::DynamicObject();
     auxObj->setProperty("aux1", encodeMachineState(auxBus1.machine.get()));
@@ -2319,27 +2332,8 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
                                         static_cast<float>(stackArray[static_cast<int>(i)].getProperty("gainDb", stack.gainDb)));
             stack.meterLevel = 0.0f;
 
-            auto decodeMachineState = [](const juce::var& encodedVar, MachineInterface* machine)
-            {
-                if (machine == nullptr)
-                    return;
-                const auto encoded = encodedVar.toString();
-                if (encoded.isEmpty())
-                    return;
-                juce::MemoryBlock state;
-                juce::MemoryOutputStream stream(state, false);
-                if (!juce::Base64::convertFromBase64(stream, encoded))
-                    return;
-                if (state.getSize() == 0)
-                    return;
-                machine->setStateInformation(state.getData(), static_cast<int>(state.getSize()));
-            };
-
-            decodeMachineState(stackArray[static_cast<int>(i)].getProperty("sampler", juce::var()), stack.sampler.get());
-            decodeMachineState(stackArray[static_cast<int>(i)].getProperty("wavetableSynth", juce::var()), stack.wavetableSynth.get());
-            decodeMachineState(stackArray[static_cast<int>(i)].getProperty("distortionFx", juce::var()), stack.distortionFx.get());
-            decodeMachineState(stackArray[static_cast<int>(i)].getProperty("delayFx", juce::var()), stack.delayFx.get());
-            decodeMachineState(stackArray[static_cast<int>(i)].getProperty("channelStripFx", juce::var()), stack.channelStripFx.get());
+            for (const auto& [key, machine] : stackMachineStateEntries(stack))
+                decodeMachineState(stackArray[static_cast<int>(i)].getProperty(key, juce::var()), machine);
             stack.muted = static_cast<bool>(stackArray[static_cast<int>(i)].getProperty("muted", false));
             stack.solo = static_cast<bool>(stackArray[static_cast<int>(i)].getProperty("solo", false));
             refreshStackProcessingState(stack);
@@ -2348,36 +2342,12 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
 
     if (const auto sharedAuxVar = stateVar.getProperty("sharedAuxBuses", juce::var()); sharedAuxVar.isObject())
     {
-        auto decodeMachineState = [](const juce::var& encodedVar, MachineInterface* machine)
-        {
-            if (machine == nullptr)
-                return;
-            const auto encoded = encodedVar.toString();
-            if (encoded.isEmpty())
-                return;
-            juce::MemoryBlock state;
-            juce::MemoryOutputStream stream(state, false);
-            if (!juce::Base64::convertFromBase64(stream, encoded))
-                return;
-            if (state.getSize() == 0)
-                return;
-            machine->setStateInformation(state.getData(), static_cast<int>(state.getSize()));
-        };
-
         decodeMachineState(sharedAuxVar.getProperty("aux1", juce::var()), auxBus1.machine.get());
         decodeMachineState(sharedAuxVar.getProperty("aux2", juce::var()), auxBus2.machine.get());
     }
 
-    // syncSequenceStrings();
-    
     viewedSequencer->updateSeqStringGrid();
 
-    // msSinceLastStateUpdate = stateUpdateIntervalMs;
-    // {
-    //     const juce::SpinLock::ScopedLockType lock(stateLock);
-    //     latestStateJson = juce::JSON::toString(getUiState());
-    //     stateDirty.store(true, std::memory_order_release);
-    // }
     sendChangeMessage();
 }
 
@@ -2653,6 +2623,7 @@ std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
         case CommandType::DistortionFx:
         case CommandType::DelayFx:
         case CommandType::ChannelStripFx:
+        case CommandType::FilterFx:
             return machineStacks.size();
         case CommandType::AuxSend1Fx:
         case CommandType::AuxSend2Fx:
@@ -2779,17 +2750,7 @@ void TrackerMainProcessor::addMachineToStack(std::size_t stackIndex)
 {
     if (auto* stack = getMachineStack(stackIndex))
     {
-        const std::vector<CommandType> cycle = {
-            CommandType::MidiNote,
-            CommandType::WavetableSynth,
-            CommandType::Sampler,
-            CommandType::DistortionFx,
-            CommandType::DelayFx,
-            CommandType::ChannelStripFx,
-            CommandType::AuxSend1Fx,
-            CommandType::AuxSend2Fx
-        };
-        for (const auto type : cycle)
+        for (const auto type : kSlotCycleTypes)
         {
             const bool duplicate = std::any_of(stack->slots.begin(), stack->slots.end(),
                 [type](const MachineStack::SlotState& slot) { return slot.type == type; });
@@ -2824,26 +2785,15 @@ void TrackerMainProcessor::cycleMachineTypeInStack(std::size_t stackIndex, std::
         if (slotIndex >= stack->slots.size())
             return;
 
-        const std::vector<CommandType> cycle = {
-            CommandType::MidiNote,
-            CommandType::WavetableSynth,
-            CommandType::Sampler,
-            CommandType::DistortionFx,
-            CommandType::DelayFx,
-            CommandType::ChannelStripFx,
-            CommandType::AuxSend1Fx,
-            CommandType::AuxSend2Fx
-        };
-
-        auto currentIt = std::find(cycle.begin(), cycle.end(), stack->slots[slotIndex].type);
-        if (currentIt == cycle.end())
+        const int cycleCount = static_cast<int>(kSlotCycleTypes.size());
+        int currentIndex = machineTraits(stack->slots[slotIndex].type).slotCycleIndex;
+        if (currentIndex < 0)
             return;
 
-        int currentIndex = static_cast<int>(std::distance(cycle.begin(), currentIt));
-        for (int attempt = 0; attempt < static_cast<int>(cycle.size()); ++attempt)
+        for (int attempt = 0; attempt < cycleCount; ++attempt)
         {
-            currentIndex = (currentIndex + direction + static_cast<int>(cycle.size())) % static_cast<int>(cycle.size());
-            const auto candidate = cycle[static_cast<std::size_t>(currentIndex)];
+            currentIndex = (currentIndex + direction + cycleCount) % cycleCount;
+            const auto candidate = kSlotCycleTypes[static_cast<std::size_t>(currentIndex)];
             const bool duplicate = std::any_of(stack->slots.begin(), stack->slots.end(),
                 [candidate, slotIndex, stack](const MachineStack::SlotState& slot)
                 {
@@ -2948,7 +2898,8 @@ void TrackerMainProcessor::allNotesOff()
         midiToSend.addEvent(MidiMessage::allNotesOff(chan), static_cast<int>(elapsedSamples));
     }
     samplerEventsToSend.clear();
-    wavetableEventsToSend.clear();
+    wavetableEvents.clear();
+    filterEvents.clear();
     for (std::size_t i = 0; i < machineStacks.size(); ++i)
         allNotesOffForStack(i);
 }
@@ -2958,14 +2909,7 @@ std::string TrackerMainProcessor::describeStepNote(CommandType machineType, unsi
     if (note == 0)
         return "----";
 
-    if (machineType == CommandType::MidiNote
-        || machineType == CommandType::Sampler
-        || machineType == CommandType::WavetableSynth
-        || machineType == CommandType::DistortionFx
-        || machineType == CommandType::DelayFx
-        || machineType == CommandType::ChannelStripFx
-        || machineType == CommandType::AuxSend1Fx
-        || machineType == CommandType::AuxSend2Fx)
+    if (machineTraits(machineType).isStackRoutable)
     {
         const auto stackIndex = static_cast<std::size_t>(machineId);
         if (const auto* stack = getMachineStack(stackIndex))
@@ -2983,14 +2927,7 @@ std::string TrackerMainProcessor::describeStepNote(CommandType machineType, unsi
 
 void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks)
 {
-    if (machineType == CommandType::MidiNote
-        || machineType == CommandType::Sampler
-        || machineType == CommandType::WavetableSynth
-        || machineType == CommandType::DistortionFx
-        || machineType == CommandType::DelayFx
-        || machineType == CommandType::ChannelStripFx
-        || machineType == CommandType::AuxSend1Fx
-        || machineType == CommandType::AuxSend2Fx)
+    if (machineTraits(machineType).isStackRoutable)
     {
         dispatchNoteThroughStack(static_cast<std::size_t>(machineId), note, velocity, durInTicks);
         return;
@@ -3020,12 +2957,10 @@ void TrackerMainProcessor::setBPM(double _bpm)
     bpm.store(_bpm, std::memory_order_relaxed);
     const double secondsPerTick = getSecondsPerTickFromBpm(_bpm);
     for (auto& stack : machineStacks)
-    {
-        if (stack.wavetableSynth != nullptr)
-            stack.wavetableSynth->setSecondsPerTick(secondsPerTick);
-        if (stack.delayFx != nullptr)
-            stack.delayFx->setSecondsPerTick(secondsPerTick);
-    }
+        stack.forEachMachine([&secondsPerTick] (MachineInterface& machine)
+        {
+            machine.setSecondsPerTick(secondsPerTick);
+        });
 }
 
 double TrackerMainProcessor::getBPM()
@@ -3053,7 +2988,8 @@ void TrackerMainProcessor::clearPendingEvents()
 {
     midiToSend.clear();
     samplerEventsToSend.clear();
-    wavetableEventsToSend.clear();
+    wavetableEvents.clear();
+    filterEvents.clear();
 }
 
 TrackerMainProcessor::MachineStack* TrackerMainProcessor::getMachineStack(std::size_t stackIndex)
@@ -3094,40 +3030,23 @@ MachineInterface* TrackerMainProcessor::getMachineForStackType(MachineStack& sta
 {
     switch (type)
     {
-        case CommandType::MidiNote:
-        case CommandType::Log:
-            return nullptr;
         case CommandType::Sampler: return stack.sampler.get();
-        case CommandType::LegacyArpeggiator:
-        case CommandType::LegacyPolyArpeggiator: return nullptr;
         case CommandType::WavetableSynth: return stack.wavetableSynth.get();
         case CommandType::DistortionFx: return stack.distortionFx.get();
         case CommandType::DelayFx: return stack.delayFx.get();
         case CommandType::ChannelStripFx: return stack.channelStripFx.get();
+        case CommandType::FilterFx: return stack.filterFx.get();
         case CommandType::AuxSend1Fx: return auxBus1.machine.get();
         case CommandType::AuxSend2Fx: return auxBus2.machine.get();
         default: return nullptr;
     }
 }
 
+// Read-only with respect to the stack and machines, so delegating from the
+// const overload is safe despite the const_cast.
 const MachineInterface* TrackerMainProcessor::getMachineForStackType(const MachineStack& stack, CommandType type) const
 {
-    switch (type)
-    {
-        case CommandType::MidiNote:
-        case CommandType::Log:
-            return nullptr;
-        case CommandType::Sampler: return stack.sampler.get();
-        case CommandType::LegacyArpeggiator:
-        case CommandType::LegacyPolyArpeggiator: return nullptr;
-        case CommandType::WavetableSynth: return stack.wavetableSynth.get();
-        case CommandType::DistortionFx: return stack.distortionFx.get();
-        case CommandType::DelayFx: return stack.delayFx.get();
-        case CommandType::ChannelStripFx: return stack.channelStripFx.get();
-        case CommandType::AuxSend1Fx: return auxBus1.machine.get();
-        case CommandType::AuxSend2Fx: return auxBus2.machine.get();
-        default: return nullptr;
-    }
+    return const_cast<TrackerMainProcessor*>(this)->getMachineForStackType(const_cast<MachineStack&>(stack), type);
 }
 
 TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBusForType(CommandType type)

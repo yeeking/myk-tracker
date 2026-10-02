@@ -13,12 +13,14 @@ class AuxReverbMachine final : public AudioEffectMachine
 public:
     explicit AuxReverbMachine(const juce::Reverb::Parameters& defaults = {});
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override;
+    void clearTransientState() override;
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     void processAudioBuffer(juce::AudioBuffer<float>& buffer) override;
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
+
+protected:
+    void prepareDsp(double sampleRate, int samplesPerBlock) override;
 
 private:
     static constexpr double kStateVersion = 1.0;
@@ -38,7 +40,5 @@ private:
     void updateParameters();
 
     static float clampUnit(float value);
-    static std::string formatFloat(float value, int decimals);
-    UIBox makeLabelCell(const std::string& text) const;
     UIBox makeValueCell(std::atomic<float>& target, float step, int decimals);
 };

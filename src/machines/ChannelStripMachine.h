@@ -14,12 +14,14 @@ class ChannelStripMachine final : public AudioEffectMachine
 public:
     ChannelStripMachine();
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override;
+    void clearTransientState() override;
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     void processAudioBuffer(juce::AudioBuffer<float>& buffer) override;
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
+
+protected:
+    void prepareDsp(double sampleRate, int samplesPerBlock) override;
 
 private:
     using Filter = juce::dsp::ProcessorDuplicator<
@@ -120,14 +122,6 @@ private:
     void updateEQCoefficients(const ParameterSnapshot& parameters);
     void resetDSPState();
 
-    static float softClip(float x);
-    static std::string formatFloat(float value, int decimals);
-    static std::string formatDb(float value, int decimals);
-    static std::string formatRatio(float value);
-    static std::string formatHz(float hz);
-    static float clampParameter(float value, float minValue, float maxValue);
-
-    UIBox makeLabelCell(const std::string& text) const;
     UIBox makeValueCell(std::atomic<float>& target, float step, float minValue, float maxValue, int decimals);
     UIBox makeDbCell(std::atomic<float>& target, float step, float minValue, float maxValue, int decimals);
     UIBox makeFrequencyCell(std::atomic<float>& target, float step, float minValue, float maxValue);

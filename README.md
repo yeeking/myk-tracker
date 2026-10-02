@@ -6,6 +6,15 @@ Fresh or reset tracker sessions place an enabled wavetable synth in every
 machine stack, so newly entered notes are audible without first configuring
 external MIDI routing.
 
+Machine stacks chain instruments and effects; the slot type cycles in the
+order MIDI, WAVE, SAMPLER, DIST, DELAY, CHSTR, AUX1, AUX2, FILTER. The
+FILTER slot is a resonant low/high-pass filter at the end of the stack's
+audio path. A note-triggered envelope (`A`, `D`, `S`, `R` cells) sweeps the
+cutoff on every note: `COFF` is the top of the sweep, `AMT` sets how far the
+low end falls (0 leaves the cutoff static, 1 reaches 20 Hz), `POL` chooses
+whether the attack runs low-to-high or high-to-low, `MODE` switches LP/HP,
+and `RES` adds resonance.
+
 ## Main Pages
 
 - `Song` page: arrange sequence sets into a song and choose how many beats each row runs before switching.

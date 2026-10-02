@@ -9,6 +9,19 @@ public:
     /** Virtual destructor for effect-machine polymorphism. */
     ~AudioEffectMachine() override = default;
 
+    /** Prepares sample-rate-dependent DSP, then clears transient state. */
+    void prepareToPlay(double sampleRate, int samplesPerBlock) final
+    {
+        prepareDsp(sampleRate, samplesPerBlock);
+        clearTransientState();
+    }
+
+    /** Clears transient state when realtime resources are released. */
+    void releaseResources() final
+    {
+        clearTransientState();
+    }
+
     /** Forwards machine processing to the in-place audio effect path. */
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) final
     {
@@ -28,4 +41,8 @@ public:
 
     /** Processes the stack audio buffer in place. */
     virtual void processAudioBuffer(juce::AudioBuffer<float>& buffer) = 0;
+
+protected:
+    /** Sets up sample-rate-dependent DSP without clearing transient state. */
+    virtual void prepareDsp(double sampleRate, int samplesPerBlock) = 0;
 };

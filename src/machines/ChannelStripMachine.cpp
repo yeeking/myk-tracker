@@ -1,4 +1,6 @@
 #include "ChannelStripMachine.h"
+#include "MachineStateCodec.h"
+#include "MachineUi.h"
 
 #include <cmath>
 
@@ -10,13 +12,13 @@ ChannelStripMachine::ChannelStripMachine()
 {
 }
 
-void ChannelStripMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
+void ChannelStripMachine::prepareDsp(double sampleRate, int samplesPerBlock)
 {
-    currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    currentSampleRate = sanitizedSampleRate(sampleRate);
 
     processSpec.sampleRate = currentSampleRate;
     processSpec.maximumBlockSize = juce::jmax(kMinimumPreparedBlockSize,
-                                               static_cast<juce::uint32>(juce::jmax(1, samplesPerBlock)));
+                                                static_cast<juce::uint32>(juce::jmax(1, samplesPerBlock)));
     processSpec.numChannels = kMaxChannels;
 
     oversampling.reset();
@@ -49,14 +51,13 @@ void ChannelStripMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
     compOutputGain.setRampDurationSeconds(0.02);
     satMixSmoothed.reset(currentSampleRate, 0.02);
 
-    saturator.functionToUse = [](float x) { return ChannelStripMachine::softClip(x); };
-    distShaper.functionToUse = [](float x) { return ChannelStripMachine::softClip(x * 0.85f); };
+    saturator.functionToUse = [](float x) { return softClip(x); };
+    distShaper.functionToUse = [](float x) { return softClip(x * 0.85f); };
 
     updateDSPSettings(captureParameters());
-    resetDSPState();
 }
 
-void ChannelStripMachine::releaseResources()
+void ChannelStripMachine::clearTransientState()
 {
     resetDSPState();
 }
@@ -211,44 +212,33 @@ void ChannelStripMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("midFreqHz", parameters.midFreqHz);
     root->setProperty("trebleDb", parameters.trebleDb);
 
-    const auto json = juce::JSON::toString(juce::var(root.get()));
-    destData.reset();
-    destData.append(json.toRawUTF8(), json.getNumBytesAsUTF8());
+    writeMachineStateJson(destData, juce::var(root.get()));
 }
 
 void ChannelStripMachine::setStateInformation(const void* data, int sizeInBytes)
 {
-    if (data == nullptr || sizeInBytes <= 0)
-        return;
-    if (!juce::CharPointer_UTF8::isValidString(static_cast<const char*>(data), sizeInBytes))
-        return;
-
-    const auto json = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
-    if (json.isEmpty())
+    const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
+    if (parsed.isVoid())
         return;
 
-    const auto parsed = juce::JSON::fromString(json);
-    if (!parsed.isObject())
-        return;
-
-    satDriveDb.store(clampParameter(static_cast<float>(parsed.getProperty("satDriveDb", satDriveDb.load())), kMinSatDriveDb, kMaxSatDriveDb));
-    satMix.store(clampParameter(static_cast<float>(parsed.getProperty("satMix", satMix.load())), kMinSatMix, kMaxSatMix));
-    distDriveDb.store(clampParameter(static_cast<float>(parsed.getProperty("distDriveDb", distDriveDb.load())), kMinDistDriveDb, kMaxDistDriveDb));
-    distOutputDb.store(clampParameter(static_cast<float>(parsed.getProperty("distOutputDb", distOutputDb.load())), kMinDistOutputDb, kMaxDistOutputDb));
-    compInputDb.store(clampParameter(static_cast<float>(parsed.getProperty("compInputDb", compInputDb.load())), kMinCompInputDb, kMaxCompInputDb));
-    compThresholdDb.store(clampParameter(static_cast<float>(parsed.getProperty("compThresholdDb", compThresholdDb.load())), kMinCompThresholdDb, kMaxCompThresholdDb));
-    compRatio.store(clampParameter(static_cast<float>(parsed.getProperty("compRatio", compRatio.load())), kMinCompRatio, kMaxCompRatio));
-    compAttackMs.store(clampParameter(static_cast<float>(parsed.getProperty("compAttackMs", compAttackMs.load())), kMinCompAttackMs, kMaxCompAttackMs));
-    compOutputDb.store(clampParameter(static_cast<float>(parsed.getProperty("compOutputDb", compOutputDb.load())), kMinCompOutputDb, kMaxCompOutputDb));
+    satDriveDb.store(getFloatProperty(parsed, "satDriveDb", satDriveDb.load(), kMinSatDriveDb, kMaxSatDriveDb));
+    satMix.store(getFloatProperty(parsed, "satMix", satMix.load(), kMinSatMix, kMaxSatMix));
+    distDriveDb.store(getFloatProperty(parsed, "distDriveDb", distDriveDb.load(), kMinDistDriveDb, kMaxDistDriveDb));
+    distOutputDb.store(getFloatProperty(parsed, "distOutputDb", distOutputDb.load(), kMinDistOutputDb, kMaxDistOutputDb));
+    compInputDb.store(getFloatProperty(parsed, "compInputDb", compInputDb.load(), kMinCompInputDb, kMaxCompInputDb));
+    compThresholdDb.store(getFloatProperty(parsed, "compThresholdDb", compThresholdDb.load(), kMinCompThresholdDb, kMaxCompThresholdDb));
+    compRatio.store(getFloatProperty(parsed, "compRatio", compRatio.load(), kMinCompRatio, kMaxCompRatio));
+    compAttackMs.store(getFloatProperty(parsed, "compAttackMs", compAttackMs.load(), kMinCompAttackMs, kMaxCompAttackMs));
+    compOutputDb.store(getFloatProperty(parsed, "compOutputDb", compOutputDb.load(), kMinCompOutputDb, kMaxCompOutputDb));
     // limiterThresholdDb was the old, misleadingly named persisted field.
     // Continue accepting it so existing sessions retain their displayed value.
-    limiterCeilingDb.store(clampParameter(static_cast<float>(parsed.getProperty(
-        "limiterCeilingDb", parsed.getProperty("limiterThresholdDb", limiterCeilingDb.load()))),
+    limiterCeilingDb.store(getFloatProperty(parsed, "limiterCeilingDb",
+        static_cast<float>(parsed.getProperty("limiterThresholdDb", limiterCeilingDb.load())),
         kMinLimiterCeilingDb, kMaxLimiterCeilingDb));
-    bassDb.store(clampParameter(static_cast<float>(parsed.getProperty("bassDb", bassDb.load())), kMinEqDb, kMaxEqDb));
-    midDb.store(clampParameter(static_cast<float>(parsed.getProperty("midDb", midDb.load())), kMinEqDb, kMaxEqDb));
-    midFreqHz.store(clampParameter(static_cast<float>(parsed.getProperty("midFreqHz", midFreqHz.load())), kMinMidFreqHz, kMaxMidFreqHz));
-    trebleDb.store(clampParameter(static_cast<float>(parsed.getProperty("trebleDb", trebleDb.load())), kMinEqDb, kMaxEqDb));
+    bassDb.store(getFloatProperty(parsed, "bassDb", bassDb.load(), kMinEqDb, kMaxEqDb));
+    midDb.store(getFloatProperty(parsed, "midDb", midDb.load(), kMinEqDb, kMaxEqDb));
+    midFreqHz.store(getFloatProperty(parsed, "midFreqHz", midFreqHz.load(), kMinMidFreqHz, kMaxMidFreqHz));
+    trebleDb.store(getFloatProperty(parsed, "trebleDb", trebleDb.load(), kMinEqDb, kMaxEqDb));
 
     dspDirty.store(true, std::memory_order_release);
     dspResetRequested.store(true, std::memory_order_release);
@@ -345,65 +335,16 @@ void ChannelStripMachine::resetDSPState()
     saturationDryBuffer.clear();
 }
 
-float ChannelStripMachine::softClip(float x)
-{
-    return std::tanh(x);
-}
-
-std::string ChannelStripMachine::formatFloat(float value, int decimals)
-{
-    return juce::String(value, decimals).toStdString();
-}
-
-std::string ChannelStripMachine::formatDb(float value, int decimals)
-{
-    return juce::String(value, decimals).toStdString();
-}
-
-std::string ChannelStripMachine::formatRatio(float value)
-{
-    return juce::String(value, 1).toStdString();
-}
-
-std::string ChannelStripMachine::formatHz(float hz)
-{
-    if (hz >= 1000.0f)
-        return juce::String(hz / 1000.0f, 2).toStdString() + "k";
-    return juce::String(hz, 0).toStdString();
-}
-
-float ChannelStripMachine::clampParameter(float value, float minValue, float maxValue)
-{
-    return juce::jlimit(minValue, maxValue, value);
-}
-
-UIBox ChannelStripMachine::makeLabelCell(const std::string& text) const
-{
-    UIBox cell;
-    cell.kind = UIBox::Kind::TrackerCell;
-    cell.text = text;
-    return cell;
-}
-
 UIBox ChannelStripMachine::makeValueCell(std::atomic<float>& target, float step, float minValue, float maxValue, int decimals)
 {
-    UIBox cell;
-    cell.kind = UIBox::Kind::TrackerCell;
-    const float value = target.load(std::memory_order_relaxed);
-    cell.text = formatFloat(value, decimals);
-    cell.onAdjust = [this, targetPtr = &target, step, minValue, maxValue](int direction)
-    {
-        const auto next = clampParameter(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)),
-                                          minValue,
-                                          maxValue);
-        targetPtr->store(next, std::memory_order_relaxed);
-        dspDirty.store(true, std::memory_order_release);
-    };
-    cell.hasValueScale = true;
-    cell.valueNorm = maxValue > minValue
-        ? juce::jlimit(0.0f, 1.0f, (value - minValue) / (maxValue - minValue))
-        : 0.0f;
-    return cell;
+    return makeFloatCell(target.load(std::memory_order_relaxed), minValue, maxValue, decimals,
+        [this, targetPtr = &target, step, minValue, maxValue](int direction)
+        {
+            const auto next = juce::jlimit(minValue, maxValue,
+                targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
+            targetPtr->store(next, std::memory_order_relaxed);
+            dspDirty.store(true, std::memory_order_release);
+        });
 }
 
 UIBox ChannelStripMachine::makeDbCell(std::atomic<float>& target, float step, float minValue, float maxValue, int decimals)
@@ -421,9 +362,8 @@ UIBox ChannelStripMachine::makeFrequencyCell(std::atomic<float>& target, float s
     cell.text = formatHz(value);
     cell.onAdjust = [this, targetPtr = &target, step, minValue, maxValue](int direction)
     {
-        const auto next = clampParameter(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)),
-                                          minValue,
-                                          maxValue);
+        const auto next = juce::jlimit(minValue, maxValue,
+            targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
         targetPtr->store(next, std::memory_order_relaxed);
         dspDirty.store(true, std::memory_order_release);
     };

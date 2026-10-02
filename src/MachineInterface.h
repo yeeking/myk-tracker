@@ -53,6 +53,8 @@ public:
     virtual void prepareToPlay(double sampleRate, int samplesPerBlock) = 0;
     /** Releases any realtime playback resources. */
     virtual void releaseResources() = 0;
+    /** Clears sample-rate-dependent transient DSP state. */
+    virtual void clearTransientState() {}
     /** Processes audio and/or MIDI for the current block. */
     virtual void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) = 0;
 

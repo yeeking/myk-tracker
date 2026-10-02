@@ -1,4 +1,6 @@
 #include "AuxReverbMachine.h"
+#include "MachineStateCodec.h"
+#include "MachineUi.h"
 
 AuxReverbMachine::AuxReverbMachine(const juce::Reverb::Parameters& defaults)
     : defaultParameters(defaults)
@@ -11,19 +13,18 @@ AuxReverbMachine::AuxReverbMachine(const juce::Reverb::Parameters& defaults)
     freezeMode.store(clampUnit(defaultParameters.freezeMode), std::memory_order_relaxed);
 }
 
-void AuxReverbMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
+void AuxReverbMachine::prepareDsp(double sampleRate, int samplesPerBlock)
 {
     juce::dsp::ProcessSpec spec;
-    spec.sampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    spec.sampleRate = sanitizedSampleRate(sampleRate);
     spec.maximumBlockSize = static_cast<juce::uint32>(juce::jmax(1, samplesPerBlock));
     spec.numChannels = 2;
 
     reverb.prepare(spec);
-    reverb.reset();
     updateParameters();
 }
 
-void AuxReverbMachine::releaseResources()
+void AuxReverbMachine::clearTransientState()
 {
     reverb.reset();
 }
@@ -73,32 +74,21 @@ void AuxReverbMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("width", parameters.width);
     root->setProperty("freezeMode", parameters.freezeMode);
 
-    const auto json = juce::JSON::toString(juce::var(root.get()));
-    destData.reset();
-    destData.append(json.toRawUTF8(), json.getNumBytesAsUTF8());
+    writeMachineStateJson(destData, juce::var(root.get()));
 }
 
 void AuxReverbMachine::setStateInformation(const void* data, int sizeInBytes)
 {
-    if (data == nullptr || sizeInBytes <= 0)
-        return;
-    if (!juce::CharPointer_UTF8::isValidString(static_cast<const char*>(data), sizeInBytes))
-        return;
-
-    const auto json = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
-    if (json.isEmpty())
+    const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
+    if (parsed.isVoid())
         return;
 
-    const auto parsed = juce::JSON::fromString(json);
-    if (!parsed.isObject())
-        return;
-
-    roomSize.store(clampUnit(static_cast<float>(parsed.getProperty("roomSize", roomSize.load(std::memory_order_relaxed)))), std::memory_order_relaxed);
-    damping.store(clampUnit(static_cast<float>(parsed.getProperty("damping", damping.load(std::memory_order_relaxed)))), std::memory_order_relaxed);
-    wetLevel.store(clampUnit(static_cast<float>(parsed.getProperty("wetLevel", wetLevel.load(std::memory_order_relaxed)))), std::memory_order_relaxed);
-    dryLevel.store(clampUnit(static_cast<float>(parsed.getProperty("dryLevel", dryLevel.load(std::memory_order_relaxed)))), std::memory_order_relaxed);
-    width.store(clampUnit(static_cast<float>(parsed.getProperty("width", width.load(std::memory_order_relaxed)))), std::memory_order_relaxed);
-    freezeMode.store(clampUnit(static_cast<float>(parsed.getProperty("freezeMode", freezeMode.load(std::memory_order_relaxed)))), std::memory_order_relaxed);
+    roomSize.store(getFloatProperty(parsed, "roomSize", roomSize.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);
+    damping.store(getFloatProperty(parsed, "damping", damping.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);
+    wetLevel.store(getFloatProperty(parsed, "wetLevel", wetLevel.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);
+    dryLevel.store(getFloatProperty(parsed, "dryLevel", dryLevel.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);
+    width.store(getFloatProperty(parsed, "width", width.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);
+    freezeMode.store(getFloatProperty(parsed, "freezeMode", freezeMode.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);
     dspDirty.store(true, std::memory_order_release);
 }
 
@@ -124,32 +114,13 @@ float AuxReverbMachine::clampUnit(float value)
     return juce::jlimit(0.0f, 1.0f, value);
 }
 
-std::string AuxReverbMachine::formatFloat(float value, int decimals)
-{
-    return juce::String(value, decimals).toStdString();
-}
-
-UIBox AuxReverbMachine::makeLabelCell(const std::string& text) const
-{
-    UIBox cell;
-    cell.kind = UIBox::Kind::TrackerCell;
-    cell.text = text;
-    return cell;
-}
-
 UIBox AuxReverbMachine::makeValueCell(std::atomic<float>& target, float step, int decimals)
 {
-    UIBox cell;
-    cell.kind = UIBox::Kind::TrackerCell;
-    const float value = target.load(std::memory_order_relaxed);
-    cell.text = formatFloat(value, decimals);
-    cell.onAdjust = [this, targetPtr = &target, step](int direction)
-    {
-        const float next = clampUnit(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
-        targetPtr->store(next, std::memory_order_relaxed);
-        dspDirty.store(true, std::memory_order_release);
-    };
-    cell.hasValueScale = true;
-    cell.valueNorm = clampUnit(value);
-    return cell;
+    return makeFloatCell(target.load(std::memory_order_relaxed), 0.0f, 1.0f, decimals,
+        [this, targetPtr = &target, step](int direction)
+        {
+            const float next = clampUnit(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
+            targetPtr->store(next, std::memory_order_relaxed);
+            dspDirty.store(true, std::memory_order_release);
+        });
 }
