@@ -98,9 +98,9 @@ juce::var schema(const juce::StringArray& operations = {}, bool revisions = true
         addTyped(name, "string");
     for (const auto* name : { "setId", "sequenceId", "stepId", "row", "column", "length", "headCount", "headIndex", "ticksPerStep", "polyphony", "machineStackId", "stackId", "direction", "playerId", "startNote", "endNote" })
         addTyped(name, "integer");
-    for (const auto* name : { "note", "velocity", "durationTicks", "bpm", "headProbability", "gainDb" })
+    for (const auto* name : { "note", "velocity", "durationTicks", "bpm", "headProbability", "gainDb", "cutoffHz" })
         addTyped(name, "number");
-    for (const auto* name : { "internalClock", "muted", "solo", "armed", "enabled", "confirm" })
+    for (const auto* name : { "internalClock", "muted", "solo", "armed", "enabled", "confirm", "controlMode" })
         addTyped(name, "boolean");
     for (const auto* name : { "notes", "lengths" }) addTyped(name, "array");
     properties.getDynamicObject()->setProperty("value", object());
@@ -136,13 +136,13 @@ const std::vector<ToolDefinition>& tools()
         { "tracker_notes_set", "Replace a track's notes from compact per-step notes/chords; grows a track up to 128 steps and uses one velocity and durationTicks for all notes.", TrackerControlService::CommandKind::setTrackNotes, {}, false },
         { "tracker_lengths_set", "Set each step's note duration from a compact lengths array.", TrackerControlService::CommandKind::setTrackLengths, {}, false },
         { "tracker_transport", "Control transport, tempo, clock mode, and song mode.", TrackerControlService::CommandKind::transport, { "play", "stop", "toggle", "rewind", "set" } },
-        { "tracker_set_step", "Create, patch, clear, or activate a tracker step.", TrackerControlService::CommandKind::setStep, { "set", "patch", "clear", "toggle_active" } },
-        { "tracker_edit_sequence", "Edit routing and sequence-owned read heads (count, selected head, TPS, mode, polyphony, rhythm, probability) and focus the affected sequence.", TrackerControlService::CommandKind::editSequence, { "set" } },
+        { "tracker_set_step", "Create, patch, clear, or activate a tracker step; note-mode and control-mode commands are both accepted.", TrackerControlService::CommandKind::setStep, { "set", "patch", "clear", "toggle_active" } },
+        { "tracker_edit_sequence", "Edit routing, sequence note/control mode, and sequence-owned read heads (count, selected head, TPS, mode, polyphony, rhythm, probability) and focus the affected sequence.", TrackerControlService::CommandKind::editSequence, { "set" } },
         { "tracker_edit_song", "Edit song rows or song playback mode.", TrackerControlService::CommandKind::editSong, { "add", "remove", "set_mode", "select" } },
         { "tracker_edit_machine_stack", "Edit stack slots, routing, gain, mute, solo, order, and idempotent enablement.", TrackerControlService::CommandKind::editMachineStack, { "add", "remove", "move", "cycle_type", "toggle", "set_enabled", "set_gain", "set_send", "set_muted", "set_solo" } },
         { "tracker_machine_control", "Invoke a machine control directly by stable stack/slot/control address; legacy grid addressing remains available for compatibility.", TrackerControlService::CommandKind::machineControl, { "activate", "adjust", "insert", "set", "preview", "reset", "text", "backspace" } },
         { "tracker_load_sample", "Load a local sample into a stack sampler and map it to an inclusive MIDI note range; poll completion with loadId.", TrackerControlService::CommandKind::loadSample, { "load", "status" } },
-        { "tracker_ui_action", "Perform a GUI-equivalent navigation or edit action.", TrackerControlService::CommandKind::uiAction, { "up", "down", "left", "right", "activate", "increment", "decrement", "add_row", "remove_row", "reset", "next_step", "mute", "arm", "note", "page" } },
+        { "tracker_ui_action", "Perform a GUI-equivalent navigation or edit action.", TrackerControlService::CommandKind::uiAction, { "up", "down", "left", "right", "activate", "increment", "decrement", "add_row", "remove_row", "reset", "next_step", "mute", "solo", "explode", "control_mode", "arm", "note", "page" } },
         { "tracker_screenshot", "Capture the current tracker UI as a PNG MCP image content block.", TrackerControlService::CommandKind::getScreenshot, {}, true },
         { "tracker_application", "Reset, quit, or open standalone audio settings.", TrackerControlService::CommandKind::application, { "reset", "quit", "audio_settings" }, false, true }
     };

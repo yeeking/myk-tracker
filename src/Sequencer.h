@@ -150,7 +150,8 @@ class Sequence{
     static constexpr std::size_t polyphonyConfig{5};
     static constexpr std::size_t rhythmConfig{6};
     static constexpr std::size_t probabilityConfig{7};
-    static constexpr std::size_t configCount{8};
+    static constexpr std::size_t sequenceModeConfig{8};
+    static constexpr std::size_t configCount{9};
     static constexpr std::size_t maxReadHeads{3};
     static constexpr std::size_t maxChordPolyphony{5};
      
@@ -269,6 +270,8 @@ class Sequence{
     void deactivateProcessors();
     /** clear the data from this sequence. Does not clear step event functions*/
     void reset();
+    /** replace the current sequence with one note per step, preserving step/row order */
+    void explodeNotes();
     /** set this step, row values to zero */
     void resetStepRow(std::size_t step, std::size_t row);
 
@@ -277,6 +280,20 @@ class Sequence{
     bool isMuted() const;
     /** change mote state to its opposite */
     void toggleMuteState();
+    /** returns the solo state of this sequence */
+    bool isSolo() const;
+    /** set the solo state of this sequence */
+    void setSoloState(bool isSolo);
+    /** change solo state to its opposite */
+    void toggleSoloState();
+    /** returns true when playback should be silenced by mute or active soloing */
+    bool isPlaybackMuted() const;
+    /** returns true when the sequence uses control-command entry */
+    bool isControlMode() const;
+    /** set the sequence entry mode */
+    void setControlMode(bool enabled);
+    /** change the sequence entry mode to its opposite */
+    void toggleControlMode();
     /** tell the sequence to reset its position counter at next tick. Useful for rewinding*/
     void rewindAtNextZero();
     /** prime this sequence so the next tick triggers step zero immediately */
@@ -315,6 +332,8 @@ class Sequence{
     /** used to keep in sync with the '1'*/
     std::size_t tickOfFour;
     bool muted; 
+    bool solo;
+    bool controlMode{false};
     struct ReadHeadState
     {
       SequenceReadHeadConfig config;
@@ -384,6 +403,7 @@ class Sequencer : public SequencerAbs {
       Sequencer(Sequencer&& other) noexcept = default;
       Sequencer& operator=(Sequencer&& other) noexcept = default;
 
+      static constexpr std::size_t maxSequences{128};
       /** set seq channels and seq types of this sequence to the same as the sent sequence*/
       void copyChannelAndTypeSettings(Sequencer* otherSeq);
       std::size_t howManySequences() const ;
@@ -413,6 +433,10 @@ class Sequencer : public SequencerAbs {
       void shrinkSequence(std::size_t sequence);
       /** increase the length of the sequence by 1, adding new steps in memory if needed, as per setSequenceLength*/
       void extendSequence(std::size_t sequence);
+      /** insert a fresh sequence at the sent index, shifting later sequences right */
+      bool insertSequence(std::size_t index, std::size_t length, double machineId, bool controlMode);
+      /** erase the sequence at the sent index, shifting later sequences left */
+      bool eraseSequence(std::size_t index);
       // void setStepCallback(std::size_t sequence, std::size_t step, std::function<void (std::vector<std::vector<double>>*)> callback);
       /** update the data stored at a step in the sequencer */
       void setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data);
@@ -453,6 +477,20 @@ class Sequencer : public SequencerAbs {
       
       /** toggle mute state of the sent sequence */
       void toggleSequenceMute(std::size_t sequence);
+      /** explode the sent sequence into one note per step */
+      void explodeSequence(std::size_t sequence);
+      /** toggle solo state of the sent sequence */
+      void toggleSequenceSolo(std::size_t sequence);
+      /** set solo state of the sent sequence */
+      void setSequenceSolo(std::size_t sequence, bool isSolo);
+      /** true when the sent sequence uses control-command entry */
+      bool isSequenceControlMode(std::size_t sequence) const;
+      /** set the control-command entry mode for the sent sequence */
+      void setSequenceControlMode(std::size_t sequence, bool enabled);
+      /** toggle the control-command entry mode for the sent sequence */
+      void toggleSequenceControlMode(std::size_t sequence);
+      /** true when at least one sequence is soloed */
+      bool isSoloModeActive() const;
       /** toggle activity state of specified step in specified sequence*/
       void toggleStepActive(std::size_t sequence, std::size_t step);
       bool isStepActive(std::size_t sequence, std::size_t step) const;
@@ -499,6 +537,8 @@ class Sequencer : public SequencerAbs {
       void setupSeqConfigSpecs();
       /** rebuilds the sequence string grid. caller must hold the rw_mutex write lock */
       void updateSeqStringGridLocked();
+      /** recalculates the solo-active flag. caller must hold the rw_mutex write lock */
+      void updateSoloModeActiveLocked();
      
       bool assertSeqAndStep(std::size_t sequence, std::size_t step) const;
         
@@ -512,6 +552,8 @@ class Sequencer : public SequencerAbs {
       bool triggerOnTick;
       /** if this is true, update my display string on next tick  */
       bool stringUpdateRequested;
+      /** true when at least one sequence is soloed, so non-solo sequences are silenced */
+      std::unique_ptr<std::atomic<bool>> soloModeActive;
 
       std::vector<Sequence> sequences;
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */

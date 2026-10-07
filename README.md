@@ -9,21 +9,24 @@ external MIDI routing.
 Machine stacks chain instruments and effects; the slot type cycles in the
 order MIDI, WAVE, SAMPLER, DIST, DELAY, CHSTR, AUX1, AUX2, FILTER. The
 FILTER slot is a resonant low/high-pass filter at the end of the stack's
-audio path. A note-triggered envelope (`A`, `D`, `S`, `R` cells) sweeps the
-cutoff on every note: `COFF` is the top of the sweep, `AMT` sets how far the
-low end falls (0 leaves the cutoff static, 1 reaches 20 Hz), `POL` chooses
-whether the attack runs low-to-high or high-to-low, `MODE` switches LP/HP,
-and `RES` adds resonance.
+audio path. A note-triggered envelope (`A`, `D`, `S`, `R`, `BEND` cells)
+sweeps the cutoff on every note: `COFF` is the top of the sweep, `AMT` sets
+how far the low end falls (0 leaves the cutoff static, 1 reaches 20 Hz),
+`POL` chooses whether the attack runs low-to-high or high-to-low, `MODE`
+switches LP/HP, and `RES` adds resonance. `BEND` curves the envelope stages
+from -2 (slow-then-fast) through 0 (linear) to +2 (fast-then-slow) while
+leaving the sustain level unchanged.
 
 ## Main Pages
 
 - `Song` page: arrange sequence sets into a song and choose how many beats each row runs before switching.
-- `Sequence` page: browse sequences and steps, mute/arm tracks, and move around the current pattern.
-- `Step` page: edit the command rows inside a single step: command, note, velocity, and duration.
+- `Sequence` page: browse sequences and steps, mute/solo/arm tracks, and move around the current pattern. A pattern can hold from 1 to 128 sequences. Control-mode sequences are marked with a bright violet column outline. When one or more sequences are soloed, the others render empty and stay silent; mute still overrides solo. `Shift+E` explodes the current sequence: every note event is collected in step/row order and rewritten as one note per step, resizing the sequence to the note count.
+- `Step` page: edit the command rows inside a single step: command, note, velocity, and duration. A sequence in control mode can store `TAUX1`, `TAUX2`, or `COFF` events that operate the sequence's machine stack during playback.
 - `Machine` page: inspect and configure the machine stack for the current track, including instruments and effects. SEND/RETURN levels render as horizontal fill bars scaled to their level, and the scope band under the grid shows the stack output with an auto-calibrating vertical scale.
-- `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing. Scaled parameters render as horizontal fill bars showing their normalized position. The bottom of the grid carries the same stack-output scope band (with auto-calibrating vertical scale) shown on the Machine page.
-- `Sequence Config` page: edit `SEND`, read-head count/selection, TPS, traversal mode, chord polyphony, rhythm, and head probability. Up to three independently timed heads may read the same sequence. A faint column flash briefly marks a sequence when its read head triggers active steps during playback.
+- `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing. Scaled parameters render as horizontal fill bars showing their normalized position. WAVE draws waveform glyphs and the current ADSR curve over the ENV columns; FILTER draws the current ADSR curve in an ENV band. The bottom of the grid carries the same stack-output scope band (with auto-calibrating vertical scale) shown on the Machine page.
+- `Sequence Config` page: edit `SEND`, sequence mode (`SEQ:NOTE` / `SEQ:CON`), read-head count/selection, TPS, traversal mode, chord polyphony, rhythm, and head probability. Control mode switches step entry from notes to `TAUX1`, `TAUX2`, and `COFF` events without rewriting existing step data. Up to three independently timed heads may read the same sequence. A faint column flash briefly marks a sequence when its read head triggers active steps during playback.
 - `Mixer` page: edit the 16 machine stacks' mute, solo, gain, and post-mute meters. Multiple soloed stacks remain audible together.
+- `Help` page: show the main keyboard shortcuts. `Shift+H` toggles the page, `Backspace` returns to the previous page, and page shortcut keys also leave Help.
 - `Reset / Quit` confirmation page: confirm tracker reset and, in standalone builds, quit.
 
 ## Keyboard Shortcuts
@@ -43,7 +46,12 @@ and `RES` adds resonance.
 - `Tab`: next step (wrapping to the first step on the Step page), or next
   machine detail when already editing a machine detail view.
 - `Backspace`: reset or clear the current item. On machine pages, this first tries the machine-specific clear action.
-- `q`: mute/unmute the current sequence.
+- `Shift+M` on the Sequence page: mute/unmute the current sequence.
+- `Shift+S` on the Sequence page: solo/unsolo the current sequence.
+- `Shift+E` on the Sequence page: explode the current sequence into one note per step, growing or shrinking the sequence to fit the collected notes.
+- `Shift+I` on the Sequence page: insert a blank eight-step control-mode sequence to the right of the current sequence, using the same machine stack.
+- `Shift+K` on the Sequence page: delete the current sequence and shift later sequences left.
+- `Shift+H`: toggle the Help page.
 - `e`: arm the current sequence for note entry.
 - `r`: rewind transport.
 - `-`: remove a row or entry where supported.
@@ -52,6 +60,7 @@ and `RES` adds resonance.
 - `,` / `.`: octave down / octave up for note entry.
 - `_` / `+`: decrease / increase BPM by 1.
 - Piano note keys: enter notes into steps and machine note cells using the current octave.
+- Control-mode sequence keys: when the current sequence is in `SEQ:CON` mode, `z` enters `TAUX1`, `x` enters `TAUX2`, and `c` enters `COFF` (default `2000` Hz) on the Sequence and Step pages. Piano note keys and Step-page chord shortcuts are suppressed in that mode.
 - Chord shortcut keys on the Step page:
   - `q`: major triad
   - `w`: minor triad
@@ -172,12 +181,19 @@ the complete state document. `tracker_notes` returns sparse note rows as
 `n: [[stepId, note, ...], ...]`; `tracker_step` returns raw event rows as
 `v: [[command, note, velocity, durationTicks], ...]`.
 
-`tracker_edit_sequence` accepts `headCount`, `headIndex`, `ticksPerStep`,
-`mode` (`linear`, `random`, or `rand_chord`), `polyphony`, `rhythm`, and
-`headProbability`. Rhythm is any nonzero binary pattern of one to four bits.
-Head configuration and live positions are included in state and sequence-set
-resources. Probability gates a whole step/chord; events no longer carry their
-own probability field.
+`tracker_edit_sequence` accepts `controlMode` plus `headCount`, `headIndex`,
+`ticksPerStep`, `mode` (`linear`, `random`, or `rand_chord`), `polyphony`,
+`rhythm`, and `headProbability`. Rhythm is any nonzero binary pattern of one
+to four bits. Head configuration and live positions are included in state and
+sequence-set resources. Probability gates a whole step/chord; events no longer
+carry their own probability field.
+
+`tracker_set_step` accepts note-mode and control-mode commands, including
+`toggle_aux_1`, `toggle_aux_2`, and `filter_cutoff` (aliases `taux1`, `taux2`,
+and `coff`). A `filter_cutoff` event stores its cutoff in the note field;
+supply `note` or `cutoffHz` in the range `20`–`20000` Hz. `tracker_ui_action`
+also supports `action: "control_mode"` to toggle the current sequence between
+note and control entry.
 
 `tracker_notes_set` replaces all note events in one track. Its `notes` array
 is step-ordered: a number is one note, an inner array is a chord, and `0` or

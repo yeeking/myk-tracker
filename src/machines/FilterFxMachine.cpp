@@ -6,6 +6,11 @@
 namespace
 {
 constexpr double kFilterStateVersion = 1.0;
+constexpr float kMaxAttackSeconds = 2.0f;
+constexpr float kMaxDecaySeconds = 2.0f;
+constexpr float kMaxReleaseSeconds = 3.0f;
+constexpr float kMinEnvelopeBend = -2.0f;
+constexpr float kMaxEnvelopeBend = 2.0f;
 }
 
 void FilterFxMachine::prepareDsp(double sampleRate, int samplesPerBlock)
@@ -28,7 +33,7 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
     juce::ignoreUnused(context);
     const std::lock_guard<std::mutex> lock(stateMutex);
 
-    std::vector<std::vector<UIBox>> boxes(2, std::vector<UIBox>(9));
+    std::vector<std::vector<UIBox>> boxes(2, std::vector<UIBox>(10));
 
     auto buildFloatCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
@@ -73,11 +78,11 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
 
     boxes[0][5].kind = UIBox::Kind::TrackerCell;
     boxes[0][5].text = "A";
-    boxes[1][5] = buildFloatCell(&attackSeconds, 0.01f, 0.0f, 2.0f, 2);
+    boxes[1][5] = buildFloatCell(&attackSeconds, 0.01f, 0.0f, kMaxAttackSeconds, 2);
 
     boxes[0][6].kind = UIBox::Kind::TrackerCell;
     boxes[0][6].text = "D";
-    boxes[1][6] = buildFloatCell(&decaySeconds, 0.01f, 0.0f, 2.0f, 2);
+    boxes[1][6] = buildFloatCell(&decaySeconds, 0.01f, 0.0f, kMaxDecaySeconds, 2);
 
     boxes[0][7].kind = UIBox::Kind::TrackerCell;
     boxes[0][7].text = "S";
@@ -85,7 +90,11 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
 
     boxes[0][8].kind = UIBox::Kind::TrackerCell;
     boxes[0][8].text = "R";
-    boxes[1][8] = buildFloatCell(&releaseSeconds, 0.01f, 0.0f, 3.0f, 2);
+    boxes[1][8] = buildFloatCell(&releaseSeconds, 0.01f, 0.0f, kMaxReleaseSeconds, 2);
+
+    boxes[0][9].kind = UIBox::Kind::TrackerCell;
+    boxes[0][9].text = "BEND";
+    boxes[1][9] = buildFloatCell(&envelopeBend, 0.05f, kMinEnvelopeBend, kMaxEnvelopeBend, 2);
 
     return boxes;
 }
@@ -108,6 +117,7 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
         snap.decaySeconds = decaySeconds;
         snap.sustainLevel = sustainLevel;
         snap.releaseSeconds = releaseSeconds;
+        snap.envelopeBend = envelopeBend;
     }
 
     const int numSamples = buffer.getNumSamples();
@@ -158,9 +168,14 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
             return !a.isAttack && b.isAttack;
         });
 
-    // Live A/D/S/R edits apply on the next retrigger so an in-flight ramp is
-    // never retimed mid-note.
-    const juce::ADSR::Parameters params(snap.attackSeconds, snap.decaySeconds, snap.sustainLevel, snap.releaseSeconds);
+    // Live A/D/S/R/BEND edits apply on the next retrigger so an in-flight ramp
+    // is never retimed mid-note.
+    CurvedAdsr::Parameters params;
+    params.attack = snap.attackSeconds;
+    params.decay = snap.decaySeconds;
+    params.sustain = snap.sustainLevel;
+    params.release = snap.releaseSeconds;
+    params.bend = snap.envelopeBend;
 
     // Log-space sweep: COFF is the top of the sweep, AMT sets how far the low
     // end falls (AMT=0 leaves the cutoff static at COFF, AMT=1 reaches 20 Hz).
@@ -184,7 +199,7 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
             {
                 ++activeNotes;
                 // Retrigger from the bottom of the sweep with the current
-                // envelope parameters (reset before noteOn, per juce::ADSR).
+                // envelope parameters (reset before noteOn, per CurvedAdsr).
                 envelope.reset();
                 envelope.setParameters(params);
                 envelope.noteOn();
@@ -240,6 +255,7 @@ void FilterFxMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("decay", decaySeconds);
     root->setProperty("sustain", sustainLevel);
     root->setProperty("release", releaseSeconds);
+    root->setProperty("bend", envelopeBend);
 
     writeMachineStateJson(destData, juce::var(root.get()));
 }
@@ -260,10 +276,33 @@ void FilterFxMachine::setStateInformation(const void* data, int sizeInBytes)
         attackSeconds = getFloatProperty(parsed, "attack", attackSeconds, 0.0f, 2.0f);
         decaySeconds = getFloatProperty(parsed, "decay", decaySeconds, 0.0f, 2.0f);
         sustainLevel = getFloatProperty(parsed, "sustain", sustainLevel, 0.0f, 1.0f);
-        releaseSeconds = getFloatProperty(parsed, "release", releaseSeconds, 0.0f, 3.0f);
+        releaseSeconds = getFloatProperty(parsed, "release", releaseSeconds, 0.0f, kMaxReleaseSeconds);
+        envelopeBend = getFloatProperty(parsed, "bend", envelopeBend, kMinEnvelopeBend, kMaxEnvelopeBend);
+        if (!std::isfinite(envelopeBend))
+            envelopeBend = 0.0f;
     }
 
     clearTransientState();
+}
+
+void FilterFxMachine::getEnvelopeSettings(float& attack, float& decay, float& sustain, float& release,
+                                          float& bend, float& maxAttack, float& maxDecay, float& maxRelease) const
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    attack = attackSeconds;
+    decay = decaySeconds;
+    sustain = sustainLevel;
+    release = releaseSeconds;
+    bend = envelopeBend;
+    maxAttack = kMaxAttackSeconds;
+    maxDecay = kMaxDecaySeconds;
+    maxRelease = kMaxReleaseSeconds;
+}
+
+void FilterFxMachine::setCutoffHz(double hz)
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    cutoffHz = juce::jlimit(kMinCutoffHz, kMaxCutoffHz, static_cast<float>(hz));
 }
 
 float FilterFxMachine::toFilterResonance(float resonanceControl)

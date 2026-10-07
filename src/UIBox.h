@@ -40,6 +40,8 @@ struct UIBox
     bool isHighlighted = false;
     /** True when the parent track is armed for input. */
     bool isArmed = false;
+    /** True when the cell belongs to a control-mode sequence column. */
+    bool isControlModeSequence = false;
     /** True when the cell represents note-bearing content. */
     bool hasNote = false;
     /** True when `customFillArgb` should override normal fill colours. */

@@ -15,8 +15,12 @@ class MachineUtilsAbs{
         /** play a note - would generally trigger a note on now
          * and schedule a note off for later
          */
-        virtual void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
-        virtual std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const = 0;
+         virtual void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
+         virtual std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const = 0;
+         /** toggle the enabled state of an aux send slot on the sent stack */
+         virtual void toggleAuxSendForStack(unsigned short, bool) {}
+         /** set the filter cutoff for the sent stack's filter machine */
+         virtual void setFilterCutoffHzForStack(unsigned short, double) {}
         /**
          * send any queued notes, e.g. note offs 
          * q'd by sendMessageToMachine

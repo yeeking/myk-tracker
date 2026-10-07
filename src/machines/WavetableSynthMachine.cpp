@@ -18,6 +18,8 @@ constexpr double kMinAdTimeSeconds = 0.005;
     pitch), shared by the main and sub oscillators. */
 constexpr float kMinDetuneCents = -50.0f;
 constexpr float kMaxDetuneCents = 50.0f;
+constexpr float kMinEnvelopeBend = -2.0f;
+constexpr float kMaxEnvelopeBend = 2.0f;
 }
 
 WavetableSynthMachine::WavetableSynthMachine()
@@ -313,6 +315,10 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
         boxes[5][row] = envValueCells[envIndex];
     }
 
+    boxes[4][5].kind = UIBox::Kind::TrackerCell;
+    boxes[4][5].text = "BEND";
+    boxes[5][5] = makeValueCell(&envelopeBend, 0.05f, kMinEnvelopeBend, kMaxEnvelopeBend, 2);
+
     // Sub-oscillator block (columns 2-3): header, step count, mix level,
     // octave offset, detune, then one row per sub wave step. The control
     // rows mirror the main oscillator's LEV/OCT/DET and the wave step rows
@@ -444,14 +450,16 @@ float WavetableSynthMachine::sampleWaveformForUi(int waveformIndex, double phase
 }
 
 void WavetableSynthMachine::getEnvelopeSettings(float& attack, float& decay, float& sustain,
-                                                float& release, float& maxAttack,
-                                                float& maxDecay, float& maxRelease) const
+                                                float& release, float& bend,
+                                                float& maxAttack, float& maxDecay,
+                                                float& maxRelease) const
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
     attack = attackSeconds;
     decay = decaySeconds;
     sustain = sustainLevel;
     release = releaseSeconds;
+    bend = envelopeBend;
     maxAttack = kMaxAttackSeconds;
     maxDecay = kMaxDecaySeconds;
     maxRelease = kMaxReleaseSeconds;
@@ -513,6 +521,7 @@ void WavetableSynthMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("decay", decaySeconds);
     root->setProperty("sustain", sustainLevel);
     root->setProperty("release", releaseSeconds);
+    root->setProperty("bend", envelopeBend);
     root->setProperty("waveStepCount", waveStepCount);
     root->setProperty("cyclerMode", static_cast<int>(cyclerMode));
     root->setProperty("cyclerRate", cyclerRate);
@@ -550,6 +559,9 @@ void WavetableSynthMachine::setStateInformation(const void* data, int sizeInByte
     decaySeconds = getFloatProperty(parsed, "decay", decaySeconds, 0.0f, kMaxDecaySeconds);
     sustainLevel = getFloatProperty(parsed, "sustain", sustainLevel, 0.0f, 1.0f);
     releaseSeconds = getFloatProperty(parsed, "release", releaseSeconds, 0.0f, kMaxReleaseSeconds);
+    envelopeBend = getFloatProperty(parsed, "bend", envelopeBend, kMinEnvelopeBend, kMaxEnvelopeBend);
+    if (!std::isfinite(envelopeBend))
+        envelopeBend = 0.0f;
     waveStepCount = getIntProperty(parsed, "waveStepCount", waveStepCount, 1, kMaxWaveSteps);
     // Only the two known mode values are accepted; anything else falls back to
     // CPS so corrupted or foreign state cannot pick an invalid cycler clock.
@@ -660,11 +672,12 @@ void WavetableSynthMachine::updateMainDetuneMultiplier()
 
 void WavetableSynthMachine::updateVoiceEnvelopeParameters()
 {
-    juce::ADSR::Parameters parameters;
+    CurvedAdsr::Parameters parameters;
     parameters.attack = attackSeconds;
     parameters.decay = decaySeconds;
     parameters.sustain = sustainLevel;
     parameters.release = releaseSeconds;
+    parameters.bend = envelopeBend;
 
     for (auto& voice : voices)
     {

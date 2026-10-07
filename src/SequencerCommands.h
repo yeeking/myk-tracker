@@ -35,6 +35,7 @@ struct Parameter {
 struct SequenceReadOnly {
     double machineType;
     double machineId;
+    bool controlMode = false;
 };
 
 /** Commands are the main things that are executed by the sequencer when triggering a step 
@@ -73,6 +74,9 @@ enum class CommandType : std::size_t {
     AuxSend1Fx = 9,
     AuxSend2Fx = 10,
     FilterFx = 11,
+    ToggleAux1 = 12,
+    ToggleAux2 = 13,
+    FilterCutoff = 14,
 };
 
 /** Shared behaviour table for machine types so the processor, editor, UI and
@@ -90,6 +94,8 @@ struct MachineTypeTraits {
     bool isStackRoutable = false;
     /** Position in kSlotCycleTypes, or -1 when the type cannot be cycled in. */
     int slotCycleIndex = -1;
+    /** True for sequence control commands that are not stack-routable machines. */
+    bool isControlCommand = false;
 };
 
 constexpr MachineTypeTraits machineTraits(CommandType type) {
@@ -106,6 +112,9 @@ constexpr MachineTypeTraits machineTraits(CommandType type) {
         case CommandType::AuxSend1Fx: return { "AUX1", "shared aux [1] reverb", true, false, true, 6 };
         case CommandType::AuxSend2Fx: return { "AUX2", "shared aux [2] reverb", true, false, true, 7 };
         case CommandType::FilterFx: return { "FILTER", "filter", true, false, true, 8 };
+        case CommandType::ToggleAux1: return { "TAUX1", "toggle aux [1] send", false, true, false, -1, true };
+        case CommandType::ToggleAux2: return { "TAUX2", "toggle aux [2] send", false, true, false, -1, true };
+        case CommandType::FilterCutoff: return { "COFF", "filter cutoff", false, true, false, -1, true };
     }
     return {};
 }

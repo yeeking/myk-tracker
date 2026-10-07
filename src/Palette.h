@@ -49,6 +49,8 @@ struct TrackerPalette
     juce::Colour gridEmpty { 0xFF1B2024 };
     /** cell outline colour when cell has content */
     juce::Colour gridNote { 0xFF00F6FF };
+    /** bright violet outline for control-mode sequence columns */
+    juce::Colour sequenceControlModeOutline { 0xFFB44CFF };
     /** glow colour for playhead-highlighted cells */
     // juce::Colour gridPlayhead { 0xFFFF3B2F };
     /** playhead highlight colour; hex literals use 0xAARRGGBB channel order */

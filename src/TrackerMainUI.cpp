@@ -10,6 +10,7 @@
 #include "TrackerControlService.h"
 #include "TrackerMainUI.h"
 #include "SequencerCommands.h"
+#include "machines/CurvedAdsr.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -98,6 +99,7 @@ juce::Colour getSeqConfigRowColour(std::size_t row, const TrackerPalette& p)
             return p.seqConfigRouting;
         case Sequence::headCountConfig:
         case Sequence::headConfig:
+        case Sequence::sequenceModeConfig:
             return p.seqConfigTopology;
         case Sequence::tpsConfig:
         case Sequence::modeConfig:
@@ -366,6 +368,7 @@ void TrackerMainUI::timerCallback ()
   else if (snapshotMode == "config") editMode = SequencerEditorMode::configuringSequence;
   else if (snapshotMode == "machine") editMode = SequencerEditorMode::machineConfig;
   else if (snapshotMode == "mixer") editMode = SequencerEditorMode::mixer;
+  else if (snapshotMode == "help") editMode = SequencerEditorMode::help;
   else if (snapshotMode == "reset") editMode = SequencerEditorMode::resetConfirmation;
   if (editMode != SequencerEditorMode::configuringSequence)
   {
@@ -407,6 +410,11 @@ void TrackerMainUI::timerCallback ()
       case SequencerEditorMode::mixer:
       {
           prepareMixerView();
+          break;
+      }
+      case SequencerEditorMode::help:
+      {
+          prepareHelpView();
           break;
       }
       case SequencerEditorMode::resetConfirmation:
@@ -533,6 +541,19 @@ void TrackerMainUI::prepareSequenceView()
                                         playHeads,
                                         true,
                                         armedSequence);
+  const auto controlModes = ui.getProperty("sequenceControlModes", juce::var());
+  if (controlModes.isArray())
+  {
+      const auto& controlModeArray = *controlModes.getArray();
+      for (int sequenceIndex = 0; sequenceIndex < controlModeArray.size()
+           && static_cast<std::size_t>(sequenceIndex) < boxes.size(); ++sequenceIndex)
+      {
+          if (!static_cast<bool>(controlModeArray[sequenceIndex]))
+              continue;
+          for (auto& cell : boxes[static_cast<std::size_t>(sequenceIndex)])
+              cell.isControlModeSequence = true;
+      }
+  }
   const std::array<juce::Colour, 3> headColours { juce::Colours::red, juce::Colours::cyan, juce::Colours::magenta };
   for (const auto& headCell : headCells)
   {
@@ -857,14 +878,9 @@ void TrackerMainUI::prepareMachineConfigView()
                 currentTraces.push_back(std::move(glyph));
             }
 
-            float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f;
+            float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f, bend = 0.0f;
             float maxAttack = 2.0f, maxDecay = 2.0f, maxRelease = 3.0f;
-            synth->getEnvelopeSettings(attack, decay, sustain, release, maxAttack, maxDecay, maxRelease);
-            const float attackSpan = maxAttack > 0.0f ? attack / maxAttack : 0.0f;
-            const float decaySpan = maxDecay > 0.0f ? decay / maxDecay : 0.0f;
-            const float releaseSpan = maxRelease > 0.0f ? release / maxRelease : 0.0f;
-            constexpr float kSustainSpan = 0.35f;
-            const float totalSpan = juce::jmax(0.001f, attackSpan + decaySpan + kSustainSpan + releaseSpan);
+            synth->getEnvelopeSettings(attack, decay, sustain, release, bend, maxAttack, maxDecay, maxRelease);
 
             TrackerUIComponent::Trace envelope;
             envelope.colStart = 4.0f;
@@ -873,21 +889,9 @@ void TrackerMainUI::prepareMachineConfigView()
             envelope.rowBottom = 5.0f;
             constexpr int kEnvSamples = 48;
             envelope.samples.resize(static_cast<std::size_t>(kEnvSamples));
-            for (int i = 0; i < kEnvSamples; ++i)
-            {
-                const float x = (static_cast<float>(i) / static_cast<float>(kEnvSamples - 1)) * totalSpan;
-                float value;
-                if (x <= attackSpan)
-                    value = attackSpan > 0.0f ? x / attackSpan : 1.0f;
-                else if (x <= attackSpan + decaySpan)
-                    value = 1.0f - (1.0f - sustain) * (decaySpan > 0.0f ? (x - attackSpan) / decaySpan : 1.0f);
-                else if (x <= attackSpan + decaySpan + kSustainSpan)
-                    value = sustain;
-                else
-                    value = sustain * (1.0f - (releaseSpan > 0.0f ? (x - attackSpan - decaySpan - kSustainSpan) / releaseSpan : 1.0f));
-                // Trace samples are -1..1; map the 0..1 envelope onto that range.
-                envelope.samples[static_cast<std::size_t>(i)] = value * 2.0f - 1.0f;
-            }
+            CurvedAdsr::fillTraceSamples(envelope.samples,
+                                         attack, decay, sustain, release, bend,
+                                         maxAttack, maxDecay, maxRelease);
             envelope.color = juce::Colour(0xFFFFD21E);
             envelope.z = 1.15f;
             envelope.lineWidth = 2.0f;
@@ -911,12 +915,31 @@ void TrackerMainUI::prepareMachineConfigView()
         uiComponent.setStyle(style);
         uiComponent.setCellSize(cellWidth, cellHeight);
 
-        const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
-        const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
-        updateCellStates(machineBoxes, rows + 2, cols);
-
+        const std::size_t baseRows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const std::size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         const auto detail = detailType.value();
+
+        std::size_t rowsBeforeScope = baseRows;
+        if (detail == CommandType::FilterFx)
+        {
+            std::vector<float> envelopeSamples(48);
+            if (auto* filter = dynamic_cast<FilterFxMachine*>(
+                    audioProcessor.getMachine(CommandType::FilterFx, static_cast<std::size_t>(machineId))))
+            {
+                float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f, bend = 0.0f;
+                float maxAttack = 2.0f, maxDecay = 2.0f, maxRelease = 3.0f;
+                filter->getEnvelopeSettings(attack, decay, sustain, release, bend, maxAttack, maxDecay, maxRelease);
+                CurvedAdsr::fillTraceSamples(envelopeSamples,
+                                             attack, decay, sustain, release, bend,
+                                             maxAttack, maxDecay, maxRelease);
+            }
+            appendEnvelopeBand(machineBoxes, baseRows, envelopeSamples);
+            rowsBeforeScope += 2;
+        }
+
+        appendScopeBand(machineBoxes, rowsBeforeScope, machineId, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rowsBeforeScope + 2, cols);
+
         if (detail == CommandType::AuxSend1Fx)
             overlayState.text = "Shared aux [1] reverb";
         else if (detail == CommandType::AuxSend2Fx)
@@ -1068,6 +1091,46 @@ void TrackerMainUI::appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
     }
 }
 
+void TrackerMainUI::appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
+                                       std::size_t rows,
+                                       const std::vector<float>& envelopeSamples)
+{
+    const std::size_t cols = boxes.size();
+    if (cols == 0)
+        return;
+    for (auto& column : boxes)
+        column.resize(rows + 2);
+
+    // The preview band uses the same dark, non-interactive style as the scope
+    // band; only the trace itself carries the envelope shape.
+    for (std::size_t col = 0; col < cols; ++col)
+    {
+        for (std::size_t bandRow = 0; bandRow < 2; ++bandRow)
+        {
+            UIBox& cell = boxes[col][rows + bandRow];
+            cell.kind = UIBox::Kind::TrackerCell;
+            cell.isDisabled = true;
+            cell.useCustomFillColour = true;
+            cell.customFillArgb = 0xFF0A0F14;
+        }
+    }
+    boxes[0][rows].text = "ENV";
+
+    if (!envelopeSamples.empty())
+    {
+        TrackerUIComponent::Trace envelope;
+        envelope.colStart = 0.0f;
+        envelope.colEnd = static_cast<float>(cols);
+        envelope.rowTop = static_cast<float>(rows);
+        envelope.rowBottom = static_cast<float>(rows + 2);
+        envelope.samples = envelopeSamples;
+        envelope.color = juce::Colour(0xFFFFD21E);
+        envelope.z = 1.15f;
+        envelope.lineWidth = 2.0f;
+        currentTraces.push_back(std::move(envelope));
+    }
+}
+
 void TrackerMainUI::prepareMixerView()
 {
     samplerViewActive = false;
@@ -1190,6 +1253,47 @@ void TrackerMainUI::prepareSongView()
     overlayState.color = palette.textPrimary;
     overlayState.glowColor = palette.gridPlayhead;
     overlayState.glowStrength = 0.25f;
+}
+
+void TrackerMainUI::prepareHelpView()
+{
+  samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
+    samplerColumnWidths.clear();
+
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
+
+    const std::vector<std::array<std::string, 6>> helpRows = {
+        {"SPACE", "PLAY/STOP", "ARROWS", "MOVE", "ENTER", "ACT"},
+        {"BACK", "RESET/EXIT", "TAB", "STEP", "[ ]", "ADJUST"},
+        {"+/-", "ROWS", "E", "ARM", "R", "REWIND"},
+        {"1-7", "PAGES", "S+I", "INSERT", "S+K", "DELETE"},
+        {"S+H", "HELP", "S+UP/DN", "SELECT", "C+C", "COPY"},
+        {"C+V", "PASTE", "C+=", "SHIFT +", "C+-", "SHIFT -"},
+        {"S+S", "SOLO", "S+M", "MUTE", "S+E", "EXPLODE"},
+        {"Z X C", "CONTROL", "Q-P", "CHORDS", ", .", "OCTAVE"}
+    };
+
+    std::vector<std::vector<UIBox>> boxes(6, std::vector<UIBox>(helpRows.size()));
+    for (std::size_t row = 0; row < helpRows.size(); ++row)
+        for (std::size_t col = 0; col < boxes.size(); ++col)
+        {
+            boxes[col][row].kind = UIBox::Kind::TrackerCell;
+            boxes[col][row].text = helpRows[row][col];
+        }
+
+    updateCellStates(boxes, rowsInUI - 1, 6);
+    overlayState.text = "HELP";
+    overlayState.color = palette.textPrimary;
+    overlayState.glowColor = palette.gridPlayhead;
+    overlayState.glowStrength = 0.35f;
 }
 
 void TrackerMainUI::prepareResetConfirmationView()
@@ -1382,8 +1486,8 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
             cell.glowColor = samplerViewActive ? samplerPalette.glowActive : palette.gridPlayhead;
             cell.glow = glowValue;
             cell.depthScale = samplerViewActive ? getSamplerCellDepthScale(box) : getCellDepthScale(box);
-            cell.drawOutline = samplerViewActive ? box.isSelected : box.hasNote;
-            cell.outlineColor = palette.gridNote;
+            cell.drawOutline = samplerViewActive ? box.isSelected : (box.hasNote || box.isControlModeSequence);
+            cell.outlineColor = box.isControlModeSequence ? palette.sequenceControlModeOutline : palette.gridNote;
 
             cell.fillFraction = (!samplerViewActive && box.hasValueScale && !box.isDisabled)
                 ? box.valueNorm

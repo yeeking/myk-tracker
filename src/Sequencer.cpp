@@ -6,6 +6,50 @@
 #include <cmath>
 #include <limits>
 
+namespace
+{
+bool isExplodableNoteRow(const std::vector<double>& row, double fallbackCommand)
+{
+  if (row.size() <= Step::noteInd || row[Step::noteInd] <= 0.0 || row[Step::noteInd] > 127.0)
+    return false;
+
+  double command = row[Step::cmdInd];
+  if (std::abs(command) < std::numeric_limits<double>::epsilon())
+    command = fallbackCommand;
+  if (command < 0.0 || command >= static_cast<double>(CommandProcessor::countCommands()))
+    return false;
+
+  const auto type = static_cast<CommandType>(static_cast<std::size_t>(command));
+  return type == CommandType::MidiNote || type == CommandType::Log
+      || type == CommandType::Sampler || type == CommandType::WavetableSynth;
+}
+
+std::vector<double> makeExplodedNoteRow(const std::vector<double>& source, double fallbackCommand)
+{
+  std::vector<double> row(Step::maxInd + 1, 0.0);
+  double command = source.size() > Step::cmdInd ? source[Step::cmdInd] : 0.0;
+  if (std::abs(command) < std::numeric_limits<double>::epsilon())
+    command = fallbackCommand;
+
+  row[Step::cmdInd] = command;
+  row[Step::noteInd] = std::clamp(source[Step::noteInd], 1.0, 127.0);
+
+  const double velocity = source.size() > Step::velInd ? source[Step::velInd] : 0.0;
+  row[Step::velInd] = velocity <= 0.0 ? 64.0 : std::clamp(velocity, 1.0, 127.0);
+
+  const double duration = source.size() > Step::lengthInd ? source[Step::lengthInd] : 0.0;
+  row[Step::lengthInd] = duration <= 0.0 ? 1.0 : std::clamp(duration, 1.0, 8.0);
+  return row;
+}
+
+std::vector<double> makeEmptySequenceRow(double command)
+{
+  std::vector<double> row(Step::maxInd + 1, 0.0);
+  row[Step::cmdInd] = command;
+  return row;
+}
+}
+
 Step::Step() : rw_mutex{std::make_unique<std::shared_mutex>()}, active{true}
 
 {
@@ -47,6 +91,17 @@ std::string Step::toStringFlat(const SequenceReadOnly* sequenceContext) const
 {
   if (sequenceContext == nullptr)
     return "----";
+
+  const double commandValue = this->data[0][Step::cmdInd];
+  const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, commandValue)));
+  const auto traits = machineTraits(command);
+  if (traits.isControlCommand)
+  {
+    if (command == CommandType::FilterCutoff
+        && std::abs(this->data[0][Step::noteInd]) < std::numeric_limits<double>::epsilon())
+      return "----";
+    return CommandProcessor::getCommand(commandValue).shortName;
+  }
 
   if (std::abs(this->data[0][Step::noteInd]) < std::numeric_limits<double>::epsilon()){
     return "----";
@@ -136,8 +191,7 @@ void Step::setDataAt(std::size_t row, std::size_t col, double value)
   if (col == Step::cmdInd)
   {
     const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, value)));
-    if (command != CommandType::MidiNote && command != CommandType::Log
-        && command != CommandType::Sampler && command != CommandType::WavetableSynth)
+    if (!machineTraits(command).isStepCommandType)
       value = static_cast<double>(CommandType::MidiNote);
   }
   else if (col > Step::cmdInd)
@@ -204,11 +258,21 @@ bool Step::hasTriggerableEvent() const
 {
   for (const auto& row : data)
   {
-    if (row.size() <= Step::noteInd || row[Step::noteInd] <= 0.0)
+    if (row.size() <= Step::noteInd)
       continue;
     const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, row[Step::cmdInd])));
-    if (command == CommandType::MidiNote || command == CommandType::Log
-        || command == CommandType::Sampler || command == CommandType::WavetableSynth)
+    const auto traits = machineTraits(command);
+    if (!traits.isStepCommandType)
+      continue;
+    if (traits.isControlCommand)
+    {
+      if (command == CommandType::ToggleAux1 || command == CommandType::ToggleAux2)
+        return true;
+      if (command == CommandType::FilterCutoff && row[Step::noteInd] > 0.0)
+        return true;
+      continue;
+    }
+    if (row[Step::noteInd] > 0.0)
       return true;
   }
   return false;
@@ -240,8 +304,10 @@ Sequence::Sequence(Sequencer *_sequencer,
       rewindAtNextZeroTick{false},
       ticksElapsed{0},
       tickOfFour{0},
-       muted{false},
-        pendingQuarterBeatResync{std::make_unique<std::atomic<bool>>(false)},
+        muted{false},
+        solo{false},
+        controlMode{false},
+         pendingQuarterBeatResync{std::make_unique<std::atomic<bool>>(false)},
         triggerEventCount{std::make_unique<std::atomic<std::uint64_t>>(0)},
         rw_mutex{std::make_unique<std::shared_mutex>()}
 // , midiScaleToDrum{MachineUtilsAbs::getScaleMidiToDrumMidi()}
@@ -310,7 +376,7 @@ void Sequence::tick(bool trigger, bool isQuarterNoteBoundary)
     currentStep = head.positions[0];
 
     // Probability is a head-level gate. Selection still advances on a miss.
-    if (!trigger || muted || chance(head.random) >= head.config.probability)
+    if (!trigger || isPlaybackMuted() || chance(head.random) >= head.config.probability)
       continue;
     for (std::size_t position = 0; position < head.positionCount; ++position)
     {
@@ -780,7 +846,7 @@ void Sequence::selectPositions(ReadHeadState& head)
 
 SequenceReadOnly Sequence::getReadOnlyContext() const
 {
-  return SequenceReadOnly{machineType, machineId};
+  return SequenceReadOnly{machineType, machineId, controlMode};
 }
 
 void Sequence::setTranspose(double _transpose)
@@ -790,7 +856,7 @@ void Sequence::setTranspose(double _transpose)
 
 std::string Sequence::stepToStringFlat(std::size_t step)
 {
-  if (isMuted()) return "";
+  if (isPlaybackMuted()) return "";
   SequenceReadOnly context = getReadOnlyContext();
   return steps[step].toStringFlat(&context);
 }
@@ -810,6 +876,40 @@ void Sequence::reset()
     step.setDataAt(0, Step::cmdInd, machineType);
   }
 }
+
+void Sequence::explodeNotes()
+{
+  // The caller holds the sequencer write lock; this method must not lock again.
+  const std::size_t oldLength = currentLength;
+  std::vector<std::vector<double>> notes;
+  for (std::size_t step = 0; step < oldLength && step < steps.size(); ++step)
+  {
+    const auto data = steps[step].getData();
+    for (const auto& row : data)
+    {
+      if (isExplodableNoteRow(row, machineType))
+        notes.push_back(makeExplodedNoteRow(row, machineType));
+    }
+  }
+
+  const std::size_t newLength = std::max<std::size_t>(1, notes.size());
+  ensureEnoughStepsForLength(std::max(oldLength, newLength));
+  setLength(newLength);
+
+  for (std::size_t step = 0; step < std::max(oldLength, newLength); ++step)
+  {
+    if (step < notes.size())
+    {
+      steps[step].setData({ notes[step] });
+      steps[step].activate();
+    }
+    else
+    {
+      steps[step].setData({ makeEmptySequenceRow(machineType) });
+    }
+  }
+}
+
 std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(std::size_t step)
 {
   SequenceReadOnly context = getReadOnlyContext();
@@ -826,6 +926,44 @@ void Sequence::toggleMuteState()
 {
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   muted = !muted;
+}
+
+bool Sequence::isSolo() const
+{
+  return solo;
+}
+
+void Sequence::setSoloState(bool isSolo)
+{
+  solo = isSolo;
+}
+
+void Sequence::toggleSoloState()
+{
+  solo = !solo;
+}
+
+bool Sequence::isPlaybackMuted() const
+{
+  if (muted)
+    return true;
+  // Mute overrides solo: a muted soloed sequence remains silent.
+  return sequencer != nullptr && !solo && sequencer->isSoloModeActive();
+}
+
+bool Sequence::isControlMode() const
+{
+  return controlMode;
+}
+
+void Sequence::setControlMode(bool enabled)
+{
+  controlMode = enabled;
+}
+
+void Sequence::toggleControlMode()
+{
+  controlMode = !controlMode;
 }
 
 void Sequence::rewindAtNextZero()
@@ -856,7 +994,7 @@ void Sequence::resetForTransportStart()
 
 /////////////////////// Sequencer
 
-Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{true}, triggerOnTick{true}, stringUpdateRequested{false}
+Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{true}, triggerOnTick{true}, stringUpdateRequested{false}, soloModeActive{std::make_unique<std::atomic<bool>>(false)}
 {
   for (std::size_t i = 0; i < seqCount; ++i)
   {
@@ -910,7 +1048,7 @@ void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
 
 std::size_t Sequencer::howManySequences() const
 {
-  assert(sequences.size() < 128);
+  assert(sequences.size() <= maxSequences);
   return sequences.size();
 }
 std::size_t Sequencer::howManySteps(std::size_t sequence) const
@@ -999,6 +1137,35 @@ void Sequencer::extendSequence(std::size_t sequence)
   stringUpdateRequested = true;
 }
 
+bool Sequencer::insertSequence(std::size_t index, std::size_t length, double machineId, bool controlMode)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
+  if (sequences.size() >= maxSequences || index > sequences.size())
+    return false;
+
+  Sequence newSequence(this, std::max<std::size_t>(1, length));
+  newSequence.setMachineId(machineId);
+  newSequence.setControlMode(controlMode);
+  sequences.insert(sequences.begin() + static_cast<std::ptrdiff_t>(index), std::move(newSequence));
+  updateSoloModeActiveLocked();
+  stringUpdateRequested = true;
+  return true;
+}
+
+bool Sequencer::eraseSequence(std::size_t index)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+
+  if (index >= sequences.size() || sequences.size() <= 1)
+    return false;
+
+  sequences.erase(sequences.begin() + static_cast<std::ptrdiff_t>(index));
+  updateSoloModeActiveLocked();
+  stringUpdateRequested = true;
+  return true;
+}
+
 /** update the data stored at a step in the sequencer */
 void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<std::vector<double>> data)
 {
@@ -1011,7 +1178,12 @@ void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<
   {
     if (row.size() < Step::maxInd + 1)
       row.resize(Step::maxInd + 1, 0.0);
-    row[Step::cmdInd] = machineType;
+
+    const auto commandIndex = static_cast<std::size_t>(std::max(0.0, row[Step::cmdInd]));
+    const bool validCommand = commandIndex <= static_cast<std::size_t>(CommandType::FilterCutoff)
+        && machineTraits(static_cast<CommandType>(commandIndex)).isStepCommandType;
+    if (!validCommand)
+      row[Step::cmdInd] = machineType;
   }
   sequences[sequence].setStepData(step, data);
   // mark the display string grid stale so the UI rebuilds it on its next frame
@@ -1216,6 +1388,7 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
     confGrid[seq].push_back("POLY:" + std::to_string(head.polyphony));
     confGrid[seq].push_back("RHY:" + head.rhythm);
     confGrid[seq].push_back("P:" + Step::dblToString(head.probability, 2));
+    confGrid[seq].push_back(std::string("SEQ:") + (sequence->isControlMode() ? "CON" : "NOTE"));
   }    
   return confGrid;
 }
@@ -1225,6 +1398,85 @@ void Sequencer::toggleSequenceMute(std::size_t sequence)
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
   sequences[sequence].toggleMuteState();
   // muted sequences render empty cells, so the grid must be rebuilt
+  stringUpdateRequested = true;
+}
+
+void Sequencer::explodeSequence(std::size_t sequence)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (sequence >= sequences.size())
+    return;
+  sequences[sequence].explodeNotes();
+  stringUpdateRequested = true;
+}
+
+bool Sequencer::isSoloModeActive() const
+{
+  return soloModeActive != nullptr && soloModeActive->load(std::memory_order_relaxed);
+}
+
+void Sequencer::updateSoloModeActiveLocked()
+{
+  if (soloModeActive == nullptr)
+    return;
+  bool anySolo = false;
+  for (const auto& sequence : sequences)
+    if (sequence.isSolo())
+    {
+      anySolo = true;
+      break;
+    }
+  soloModeActive->store(anySolo, std::memory_order_relaxed);
+}
+
+void Sequencer::toggleSequenceSolo(std::size_t sequence)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (sequence >= sequences.size())
+    return;
+  sequences[sequence].toggleSoloState();
+  updateSoloModeActiveLocked();
+  // Soloed-out sequences render empty cells, so the grid must be rebuilt.
+  stringUpdateRequested = true;
+}
+
+void Sequencer::setSequenceSolo(std::size_t sequence, bool isSolo)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (sequence >= sequences.size())
+    return;
+  if (sequences[sequence].isSolo() != isSolo)
+    sequences[sequence].setSoloState(isSolo);
+  updateSoloModeActiveLocked();
+  stringUpdateRequested = true;
+}
+
+bool Sequencer::isSequenceControlMode(std::size_t sequence) const
+{
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  if (!assertSequence(sequence))
+    return false;
+  return sequences[sequence].isControlMode();
+}
+
+void Sequencer::setSequenceControlMode(std::size_t sequence, bool enabled)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (!assertSequence(sequence))
+    return;
+  if (sequences[sequence].isControlMode() != enabled)
+  {
+    sequences[sequence].setControlMode(enabled);
+    stringUpdateRequested = true;
+  }
+}
+
+void Sequencer::toggleSequenceControlMode(std::size_t sequence)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (!assertSequence(sequence))
+    return;
+  sequences[sequence].toggleControlMode();
   stringUpdateRequested = true;
 }
 
@@ -1244,6 +1496,7 @@ void Sequencer::setupSeqConfigSpecs()
   seqConfigSpecs[Sequence::polyphonyConfig] = Parameter("Polyphony", "POLY", 1, 5, 1, 3, -1);
   seqConfigSpecs[Sequence::rhythmConfig] = Parameter("Rhythm", "RHY", 0, 25, 1, 0, -1);
   seqConfigSpecs[Sequence::probabilityConfig] = Parameter("Probability", "P", 0, 1, 0.1, 1, -1, 2);
+  seqConfigSpecs[Sequence::sequenceModeConfig] = Parameter("Sequence mode", "SEQ", 0, 1, 1, 0, -1);
 }
 
 
@@ -1262,6 +1515,11 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex, std::
     return;
   }
   if (paramIndex == Sequence::headConfig) return;
+  if (paramIndex == Sequence::sequenceModeConfig)
+  {
+    sequence->toggleControlMode();
+    return;
+  }
   headIndex = std::min(headIndex, sequence->getReadHeadCount() - 1);
   auto config = sequence->getReadHeadConfig(headIndex);
   if (paramIndex == Sequence::tpsConfig) config.ticksPerStep = std::min<std::size_t>(16, config.ticksPerStep + 1);
@@ -1291,6 +1549,11 @@ void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex, std::
     return;
   }
   if (paramIndex == Sequence::headConfig) return;
+  if (paramIndex == Sequence::sequenceModeConfig)
+  {
+    sequence->toggleControlMode();
+    return;
+  }
   headIndex = std::min(headIndex, sequence->getReadHeadCount() - 1);
   auto config = sequence->getReadHeadConfig(headIndex);
   if (paramIndex == Sequence::tpsConfig) config.ticksPerStep = std::max<std::size_t>(1, config.ticksPerStep - 1);

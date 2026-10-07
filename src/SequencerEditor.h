@@ -111,6 +111,9 @@ class SequencerAbs{
     virtual std::vector<Parameter>& getSeqConfigSpecs() = 0;
     virtual void incrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex = 0) = 0;
     virtual void decrementSeqParam(std::size_t seq, std::size_t paramIndex, std::size_t headIndex = 0) = 0;
+    virtual bool isSequenceControlMode(std::size_t) const { return false; }
+    virtual void setSequenceControlMode(std::size_t, bool) {}
+    virtual void toggleSequenceControlMode(std::size_t) {}
     virtual void toggleStepActive(std::size_t sequence, std::size_t step) = 0;
 };
 
@@ -126,6 +129,7 @@ enum class SequencerEditorMode
   editingStep,
   machineConfig,
   mixer,
+  help,
   resetConfirmation
 };
 
@@ -147,6 +151,7 @@ enum class SequencerEditorPage
   sequenceConfig,
   machine,
   mixer,
+  help,
   resetConfirmation
 };
 
@@ -239,13 +244,21 @@ public:
   void gotoResetConfirmationPage();
   bool isResetConfirmationYesSelected() const;
   std::string getConfirmationPrompt() const;
+  void toggleHelpPage();
+  /** Insert a blank eight-step control sequence after the current sequence. */
+  bool insertSequenceToRight();
+  /** Delete the current sequence and shift later sequences left. */
+  bool deleteCurrentSequence();
 
   void click();
   void togglePlayback();
   void rewindTransport();
   void toggleArmCurrentSequence();
   void toggleMuteCurrentSequence();
+  void toggleSoloCurrentSequence();
+  void explodeCurrentSequence();
   bool handleChordKey(char key);
+  bool handleControlKey(char key);
   bool handleNoteKey(char key);
   bool enterSelectedMachineDetail();
   bool enterMachineDetailFromAnywhere();
@@ -347,6 +360,9 @@ private:
   Sequencer* getSequencerImpl() const;
   void requestStringRefresh();
   std::optional<double> lookupKeyboardMidiNote(char key) const;
+  bool currentSequenceControlMode() const;
+  bool currentStepIsControlCommand() const;
+  void enterControlCommand(CommandType command);
   void previewEnteredNote(double midiNote);
   void syncOctaveFromMidiNote(double midiNote);
   void clampStepCursorToCurrentStep();
@@ -354,6 +370,8 @@ private:
   std::vector<std::vector<UIBox>> buildMachineStackCells(std::size_t stackIndex);
   std::optional<CommandType> getSelectedStackMachineType() const;
   void leaveMachineDetail();
+  void gotoHelpPage();
+  void leaveHelpPage();
 
   void moveCursorLeftOnSongPage();
   void moveCursorLeftOnSequencePage();
@@ -435,6 +453,7 @@ private:
   size_t armedSequence;
 
   SequencerEditorMode editMode;
+  SequencerEditorMode pageBeforeHelp = SequencerEditorMode::selectingSeqAndStep;
   SequencerEditorSubMode editSubMode;
   double stepIncrement;
   double octave;

@@ -6,6 +6,7 @@
 
 #include <JuceHeader.h>
 
+#include "CurvedAdsr.h"
 #include "MachineInterface.h"
 #include "MachineUi.h"
 
@@ -52,7 +53,7 @@ public:
     /** Samples a waveform by index at the given 0..1 phase, for UI preview. */
     float sampleWaveformForUi(int waveformIndex, double phase) const;
     /** Current envelope settings and their display maxima, for UI preview. */
-    void getEnvelopeSettings(float& attack, float& decay, float& sustain, float& release,
+    void getEnvelopeSettings(float& attack, float& decay, float& sustain, float& release, float& bend,
                              float& maxAttack, float& maxDecay, float& maxRelease) const;
 
 private:
@@ -113,7 +114,7 @@ private:
         /** True while the voice is active. */
         bool active = false;
         /** ADSR envelope for the voice. */
-        juce::ADSR envelope;
+        CurvedAdsr envelope;
     };
 
     /** Number of samples per waveform table. */
@@ -202,6 +203,8 @@ private:
     float sustainLevel = 0.65f;
     /** ADSR release time in seconds. */
     float releaseSeconds = 0.2f;
+    /** Envelope curve bend: 0 = linear, positive = fast-then-slow, negative = slow-then-fast. */
+    float envelopeBend = 0.0f;
 
     /** Fills the static waveform lookup tables. */
     void initialiseTables();

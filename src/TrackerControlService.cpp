@@ -46,7 +46,10 @@ std::optional<CommandType> commandTypeFromName(const juce::String& name)
         { "distortion", CommandType::DistortionFx }, { "delay", CommandType::DelayFx },
         { "channel_strip", CommandType::ChannelStripFx }, { "aux_send_1", CommandType::AuxSend1Fx },
         { "aux_send_2", CommandType::AuxSend2Fx }, { "filter", CommandType::FilterFx },
-        { "filter_fx", CommandType::FilterFx }, { "log", CommandType::Log }
+        { "filter_fx", CommandType::FilterFx }, { "log", CommandType::Log },
+        { "toggle_aux_1", CommandType::ToggleAux1 }, { "taux1", CommandType::ToggleAux1 },
+        { "toggle_aux_2", CommandType::ToggleAux2 }, { "taux2", CommandType::ToggleAux2 },
+        { "filter_cutoff", CommandType::FilterCutoff }, { "coff", CommandType::FilterCutoff }
     };
     const auto lower = name.toLowerCase();
     for (const auto& [label, type] : types)
@@ -693,15 +696,45 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 else if (action == "toggle_active") sequencer->toggleStepActive(static_cast<std::size_t>(sequence), static_cast<std::size_t>(step));
                 else
                 {
+                    const auto previousCommandValue = event.size() > Step::cmdInd ? std::max(0.0, event[Step::cmdInd]) : 0.0;
+                    const auto previousCommandIndex = static_cast<std::size_t>(previousCommandValue);
+                    const auto previousCommand = previousCommandIndex <= static_cast<std::size_t>(CommandType::FilterCutoff)
+                        ? static_cast<CommandType>(previousCommandIndex)
+                        : CommandType::MidiNote;
+
                     if (hasArg(args, "command"))
                     {
                         const auto type = commandTypeFromName(stringArg(args, "command"));
                         if (!type) return fail("invalid_argument", "Unknown command type");
                         if (!machineTraits(*type).isStepCommandType)
-                            return fail("invalid_argument", "Step commands support midi, log, sampler, or wavetable_synth");
+                            return fail("invalid_argument", "command must be a step command");
+
                         event[Step::cmdInd] = static_cast<double>(*type);
+                        if (machineTraits(previousCommand).isControlCommand || machineTraits(*type).isControlCommand)
+                        {
+                            event[Step::noteInd] = 0.0;
+                            event[Step::velInd] = 0.0;
+                            event[Step::lengthInd] = 0.0;
+                            if (*type == CommandType::FilterCutoff && !hasArg(args, "note") && !hasArg(args, "cutoffHz"))
+                                event[Step::noteInd] = 2000.0;
+                        }
                     }
-                    if (hasArg(args, "note")) event[Step::noteInd] = juce::jlimit(0.0, 127.0, numberArg(args, "note"));
+
+                    const auto commandValue = event.size() > Step::cmdInd ? std::max(0.0, event[Step::cmdInd]) : 0.0;
+                    const auto commandIndex = static_cast<std::size_t>(commandValue);
+                    const auto effectiveCommand = commandIndex <= static_cast<std::size_t>(CommandType::FilterCutoff)
+                        ? static_cast<CommandType>(commandIndex)
+                        : CommandType::MidiNote;
+                    const auto traits = machineTraits(effectiveCommand);
+                    const double maxValue = effectiveCommand == CommandType::FilterCutoff ? 20000.0 : (traits.isControlCommand ? 0.0 : 127.0);
+
+                    if (hasArg(args, "cutoffHz"))
+                    {
+                        if (effectiveCommand != CommandType::FilterCutoff)
+                            return fail("invalid_argument", "cutoffHz requires a filter_cutoff command");
+                        event[Step::noteInd] = juce::jlimit(20.0, 20000.0, numberArg(args, "cutoffHz"));
+                    }
+                    if (hasArg(args, "note")) event[Step::noteInd] = juce::jlimit(0.0, maxValue, numberArg(args, "note"));
                     if (hasArg(args, "velocity")) event[Step::velInd] = juce::jlimit(0.0, 127.0, numberArg(args, "velocity"));
                     if (hasArg(args, "durationTicks")) event[Step::lengthInd] = juce::jlimit(0.0, 65535.0, numberArg(args, "durationTicks"));
                 }
@@ -777,6 +810,8 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         processor.allNotesOffForStack(static_cast<std::size_t>(stackId));
                 }
                 if (hasArg(args, "muted") && sequence->isMuted() != boolArg(args, "muted")) sequencer->toggleSequenceMute(static_cast<std::size_t>(sequenceIndex));
+                if (hasArg(args, "controlMode") && sequence->isControlMode() != boolArg(args, "controlMode"))
+                    sequencer->setSequenceControlMode(static_cast<std::size_t>(sequenceIndex), boolArg(args, "controlMode"));
                 if (hasArg(args, "armed")) { editor.setArmedSequence(static_cast<std::size_t>(sequenceIndex)); viewChanged = true; }
                 contentChanged = true;
                 break;
@@ -1147,6 +1182,56 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         handled = true;
                     }
                     else if (shift && key == 'c') { processor.setInternalClockEnabled(!processor.isInternalClockEnabled()); contentChanged = true; handled = true; }
+                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && (key == 's' || key == 'm'))
+                    {
+                        if (key == 's') editor.toggleSoloCurrentSequence();
+                        else editor.toggleMuteCurrentSequence();
+                        contentChanged = true;
+                        handled = true;
+                    }
+                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'e')
+                    {
+                        editor.explodeCurrentSequence();
+                        contentChanged = true;
+                        handled = true;
+                    }
+                    else if (!ctrl && shift && key == 'h')
+                    {
+                        editor.toggleHelpPage();
+                        viewChanged = true;
+                        handled = true;
+                    }
+                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'i')
+                    {
+                        const auto insertAt = editor.getCurrentSequence() + 1;
+                        if (editor.insertSequenceToRight())
+                        {
+                            if (sequenceSelection.active && sequenceSelection.sequence >= insertAt)
+                                ++sequenceSelection.sequence;
+                            contentChanged = true;
+                            handled = true;
+                        }
+                        else
+                            return fail("sequence_limit", "Cannot insert another sequence");
+                    }
+                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'k')
+                    {
+                        const auto deleted = editor.getCurrentSequence();
+                        if (editor.deleteCurrentSequence())
+                        {
+                            if (sequenceSelection.active)
+                            {
+                                if (sequenceSelection.sequence == deleted)
+                                    sequenceSelection.active = false;
+                                else if (sequenceSelection.sequence > deleted)
+                                    --sequenceSelection.sequence;
+                            }
+                            contentChanged = true;
+                            handled = true;
+                        }
+                        else
+                            return fail("sequence_limit", "Cannot delete the last sequence");
+                    }
                     else if (ctrl && (keyCode == 'r' || keyCode == 'R')) { editor.requestTrackerReset(); viewChanged = true; handled = true; }
                     else if (ctrl && (keyCode == 'q' || keyCode == 'Q')) { editor.requestApplicationQuit(); viewChanged = true; handled = true; }
                     // File browsers and text-entry machine pages get first use of
@@ -1165,7 +1250,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (keyCode == juce::KeyPress::spaceKey) { editor.togglePlayback(); handled = true; }
                     else if (keyCode == '5') { handled = editor.enterMachineDetailFromAnywhere(); viewChanged = handled; }
                     else if (keyCode >= '1' && keyCode <= '7') { handled = editor.selectPageShortcut(keyCode - '0'); viewChanged = handled; }
-                    else if (editor.handleChordKey(key) || editor.handleNoteKey(key)) { contentChanged = true; handled = true; }
+                    else if (editor.handleChordKey(key) || editor.handleControlKey(key) || editor.handleNoteKey(key)) { contentChanged = true; handled = true; }
                     else if (keyCode == juce::KeyPress::backspaceKey) { handled = editor.machineHandleTextBackspace(); if (!handled) { editor.resetAtCursor(); handled = true; } contentChanged = handled; }
                     else if (keyCode == juce::KeyPress::escapeKey) { handled = editor.dismissCurrentTransientUi(); viewChanged = handled; }
                     else if (keyCode == juce::KeyPress::returnKey) { editor.click(); contentChanged = true; handled = true; }
@@ -1173,7 +1258,6 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (keyCode == juce::KeyPress::downKey) { sequenceSelection.active = false; editor.moveCursorDown(); viewChanged = true; handled = true; }
                     else if (keyCode == juce::KeyPress::leftKey) { sequenceSelection.active = false; editor.moveCursorLeft(); viewChanged = true; handled = true; }
                     else if (keyCode == juce::KeyPress::rightKey) { sequenceSelection.active = false; editor.moveCursorRight(); viewChanged = true; handled = true; }
-                    else if (key == 'q') { editor.toggleMuteCurrentSequence(); contentChanged = true; handled = true; }
                     else if (key == 'e') { editor.toggleArmCurrentSequence(); viewChanged = true; handled = true; }
                     else if (key == 'r') { editor.rewindTransport(); handled = true; }
                     else if (key == '\t')
@@ -1221,6 +1305,15 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 else if (action == "reset") editor.resetAtCursor();
                 else if (action == "next_step") editor.nextStep();
                 else if (action == "mute") editor.toggleMuteCurrentSequence();
+                else if (action == "solo") editor.toggleSoloCurrentSequence();
+                else if (action == "explode") editor.explodeCurrentSequence();
+                else if (action == "control_mode")
+                {
+                    auto* sequencer = processor.getSequencer();
+                    if (sequencer == nullptr)
+                        return fail("not_found", "Sequencer does not exist");
+                    sequencer->toggleSequenceControlMode(editor.getCurrentSequence());
+                }
                 else if (action == "arm") editor.toggleArmCurrentSequence();
                 else if (action == "note") editor.enterDataAtCursor(numberArg(args, "value"));
                 else if (action == "page") editor.selectPageShortcut(intArg(args, "value"));

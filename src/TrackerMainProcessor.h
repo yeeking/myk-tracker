@@ -61,6 +61,8 @@ public:
     void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
     std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const override;
     void sendQueuedMessages(long tick) override; 
+    void toggleAuxSendForStack(unsigned short machineId, bool isAux1) override;
+    void setFilterCutoffHzForStack(unsigned short machineId, double cutoffHz) override;
     // the ClockAbs interface
     void setBPM(double bpm) override; 
     double getBPM() override; 
@@ -367,7 +369,7 @@ private:
     juce::var serializeSequencerState();
     /** retrieve state from var  */
     void restoreSequencerState(const juce::var& stateVar);
-    static std::unique_ptr<Sequencer> createDefaultSequenceSet();
+    static std::unique_ptr<Sequencer> createDefaultSequenceSet(std::size_t sequenceCount = 16, std::size_t sequenceLength = 8);
     void resetSongState();
     Sequencer* getViewedSequencerInternal();
     const Sequencer* getViewedSequencerInternal() const;

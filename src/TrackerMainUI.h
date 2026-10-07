@@ -87,7 +87,11 @@ private:
                          int machineId,
                          std::size_t stackIndex,
                          std::vector<float>& scopeSamples);
+    void appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
+                            std::size_t rows,
+                            const std::vector<float>& envelopeSamples);
     void prepareMixerView();
+    void prepareHelpView();
     void prepareResetConfirmationView();
     void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                           size_t rowsToDisplay,

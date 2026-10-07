@@ -7,6 +7,7 @@
 #include <JuceHeader.h>
 
 #include "AudioEffectMachine.h"
+#include "CurvedAdsr.h"
 #include "MachineUi.h"
 
 class FilterFxMachine final : public AudioEffectMachine
@@ -31,6 +32,12 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     /** Restores the filter settings from serialised state. */
     void setStateInformation(const void* data, int sizeInBytes) override;
+
+    /** Current envelope settings and their display maxima, for UI preview. */
+    void getEnvelopeSettings(float& attack, float& decay, float& sustain, float& release, float& bend,
+                             float& maxAttack, float& maxDecay, float& maxRelease) const;
+    /** Sets the cutoff-sweep top, clamped to the filter's valid range. */
+    void setCutoffHz(double hz);
 
 protected:
     /** Prepares filter and envelope sample-rate state without clearing transient state. */
@@ -58,6 +65,7 @@ private:
         float decaySeconds = 0.1f;
         float sustainLevel = 0.65f;
         float releaseSeconds = 0.2f;
+        float envelopeBend = 0.0f;
     };
 
     /** Protects settings shared between UI and audio threads. */
@@ -81,11 +89,13 @@ private:
     float decaySeconds = 0.1f;
     float sustainLevel = 0.65f;
     float releaseSeconds = 0.2f;
+    /** Envelope curve bend: 0 = linear, positive = fast-then-slow, negative = slow-then-fast. */
+    float envelopeBend = 0.0f;
 
     /** TPT state-variable filter, audio-thread only. */
     juce::dsp::StateVariableTPTFilter<float> filter;
     /** Cutoff-sweep envelope, audio-thread only, retriggers on each note. */
-    juce::ADSR envelope;
+    CurvedAdsr envelope;
     /** Pointer to the processor-owned per-stack note list for the current block. */
     const std::vector<MachineScheduledNote>* blockNotes = nullptr;
     /** Per-block attack/release plan, rebuilt each block (no RT allocation). */

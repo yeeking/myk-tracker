@@ -230,7 +230,7 @@ bool TrackerMainProcessor::isStackAssigned(std::size_t stackIndex)
         if (sequence == nullptr)
             continue;
 
-        if (sequence->isMuted())
+        if (sequence->isPlaybackMuted())
             continue;
 
         if (static_cast<std::size_t>(sequence->getMachineId()) == stackIndex)
@@ -255,9 +255,11 @@ const AudioEffectMachine* TrackerMainProcessor::getAudioEffectForStackType(const
     return static_cast<const AudioEffectMachine*> (getMachineForStackType(stack, type));
 }
 
-std::unique_ptr<Sequencer> TrackerMainProcessor::createDefaultSequenceSet()
+std::unique_ptr<Sequencer> TrackerMainProcessor::createDefaultSequenceSet(std::size_t sequenceCount, std::size_t sequenceLength)
 {
-    auto sequencer = std::make_unique<Sequencer>(16, 8);
+    sequenceCount = std::max<std::size_t>(1, std::min<std::size_t>(Sequencer::maxSequences, sequenceCount));
+    sequenceLength = std::max<std::size_t>(1, sequenceLength);
+    auto sequencer = std::make_unique<Sequencer>(sequenceCount, sequenceLength);
     sequencer->stop();
     for (std::size_t seqIndex = 0; seqIndex < sequencer->howManySequences(); ++seqIndex)
         if (auto* sequence = sequencer->getSequence(seqIndex))
@@ -1046,6 +1048,8 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
             if (seqEditor.getMixerRow() == 2) return isStackSolo(stack) ? "SOLO ON" : "SOLO OFF";
             return "GAIN " + juce::String(getStackGainDb(stack), 1);
         }
+        case SequencerEditorMode::help:
+            return "HELP";
         case SequencerEditorMode::resetConfirmation:
             return "RESET?";
     }
@@ -1757,6 +1761,9 @@ juce::String TrackerMainProcessor::getUiModeString() const
         case SequencerEditorMode::mixer:
             modeStr = "mixer";
             break;
+        case SequencerEditorMode::help:
+            modeStr = "help";
+            break;
         case SequencerEditorMode::resetConfirmation:
             modeStr = "reset";
             break;
@@ -1853,8 +1860,17 @@ juce::var TrackerMainProcessor::getUiStateForCurrentPage()
     switch (seqEditor.getEditMode())
     {
         case SequencerEditorMode::selectingSeqAndStep:
+        {
             state->setProperty("sequenceGrid", stringGridToVar(viewedSequencer->getSequenceAsGridOfStrings()));
+            juce::Array<juce::var> controlModes;
+            for (std::size_t sequenceIndex = 0; sequenceIndex < viewedSequencer->howManySequences(); ++sequenceIndex)
+            {
+                auto* sequence = viewedSequencer->getSequence(sequenceIndex);
+                controlModes.add(sequence != nullptr && sequence->isControlMode());
+            }
+            state->setProperty("sequenceControlModes", controlModes);
             break;
+        }
         case SequencerEditorMode::editingStep:
             state->setProperty("stepGrid", stringGridToVar(viewedSequencer->getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
             break;
@@ -1880,6 +1896,8 @@ juce::var TrackerMainProcessor::serializeSingleSequencer(const Sequencer& sequen
         seqObj->setProperty("length", static_cast<int>(length));
         seqObj->setProperty("type", static_cast<int>(seq->getType()));
         seqObj->setProperty("muted", seq->isMuted());
+        seqObj->setProperty("solo", seq->isSolo());
+        seqObj->setProperty("controlMode", seq->isControlMode());
         seqObj->setProperty("machineId", seq->getMachineId());
         seqObj->setProperty("machineType", seq->getMachineType());
         juce::Array<juce::var> readHeads;
@@ -2012,7 +2030,7 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
                                 continue;
                             // Persisted rows may hold stale or invalid command values.
                             if (commandType < 0
-                                || commandType > static_cast<int>(CommandType::FilterFx)
+                                || commandType > static_cast<int>(CommandType::FilterCutoff)
                                 || !machineTraits(static_cast<CommandType>(commandType)).isStepCommandType)
                                 row[Step::cmdInd] = static_cast<double>(CommandType::MidiNote);
                             if (row.size() == 6)
@@ -2046,6 +2064,14 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
         const bool mutedTarget = static_cast<bool>(seqObj.getProperty("muted", false));
         if (seq->isMuted() != mutedTarget)
             target.toggleSequenceMute(i);
+
+        const bool soloTarget = static_cast<bool>(seqObj.getProperty("solo", false));
+        if (seq->isSolo() != soloTarget)
+            target.setSequenceSolo(i, soloTarget);
+
+        const bool controlModeTarget = static_cast<bool>(seqObj.getProperty("controlMode", false));
+        if (seq->isControlMode() != controlModeTarget)
+            target.setSequenceControlMode(i, controlModeTarget);
     }
 }
 
@@ -2162,10 +2188,23 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     const auto sequenceSetsVar = stateVar.getProperty("sequenceSets", juce::var());
     if (sequenceSetsVar.isArray() && !sequenceSetsVar.getArray()->isEmpty())
     {
+        const auto savedSequenceCount = [](const juce::var& setVar) -> std::size_t
+        {
+            if (!setVar.isObject())
+                return 16;
+            const auto sequencesVar = setVar.getProperty("sequences", juce::var());
+            if (!sequencesVar.isArray())
+                return 16;
+            return static_cast<std::size_t>(juce::jlimit(
+                1,
+                static_cast<int>(Sequencer::maxSequences),
+                sequencesVar.getArray()->size()));
+        };
+
         sequenceSets.clear();
         for (const auto& sequenceSetVar : *sequenceSetsVar.getArray())
         {
-            auto sequenceSet = createDefaultSequenceSet();
+            auto sequenceSet = createDefaultSequenceSet(savedSequenceCount(sequenceSetVar));
             restoreSingleSequencer(*sequenceSet, sequenceSetVar);
             sequenceSets.push_back(std::move(sequenceSet));
         }
@@ -2938,6 +2977,33 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
                        velocity,
                        durInTicks);
 }
+void TrackerMainProcessor::toggleAuxSendForStack(unsigned short machineId, bool isAux1)
+{
+    // Executed from sequence step commands on the audio thread, so this must
+    // remain allocation-free and must not enter the UI or clock-listener path.
+    const auto stackIndex = static_cast<std::size_t>(machineId);
+    const auto auxType = isAux1 ? CommandType::AuxSend1Fx : CommandType::AuxSend2Fx;
+    const auto slotIndex = findMachineInStack(stackIndex, auxType);
+    if (!slotIndex.has_value())
+        return;
+    if (auto* slot = getMachineSlot(stackIndex, *slotIndex))
+    {
+        slot->enabled = !slot->enabled;
+        if (auto* stack = getMachineStack(stackIndex))
+            refreshStackProcessingState(*stack);
+    }
+}
+
+void TrackerMainProcessor::setFilterCutoffHzForStack(unsigned short machineId, double cutoffHz)
+{
+    // Executed from sequence step commands on the audio thread; the machine
+    // setter takes its short state mutex and clamps the persisted value range.
+    const auto stackIndex = static_cast<std::size_t>(machineId);
+    if (findMachineInStack(stackIndex, CommandType::FilterFx).has_value())
+        if (auto* stack = getMachineStack(stackIndex))
+            stack->filterFx->setCutoffHz(cutoffHz);
+}
+
 void TrackerMainProcessor::sendQueuedMessages(long tick)
 {
     juce::ignoreUnused(tick);

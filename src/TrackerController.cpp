@@ -42,6 +42,9 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
         case SequencerEditorMode::selectingSeqAndStep:
             viewMode = "Seq";
             break;
+        case SequencerEditorMode::help:
+            viewMode = "Help";
+            break;
         case SequencerEditorMode::resetConfirmation:
             viewMode = "Reset";
             break;

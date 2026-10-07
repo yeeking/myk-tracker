@@ -42,6 +42,14 @@ const std::vector<ChordShortcut> kChordShortcuts = {
   {'p', {0, 3, 7, 10, 14}}
 };
 
+bool isChordShortcutKey(char key)
+{
+  for (const auto& shortcut : kChordShortcuts)
+    if (shortcut.key == key)
+      return true;
+  return false;
+}
+
 bool showsStackSendLevel(CommandType type)
 {
   return machineTraits(type).isAudioEffect;
@@ -179,6 +187,7 @@ void SequencerEditor::resetCursor()
   currentSongRow = 0;
   currentSongCol = 0;
   editMode = SequencerEditorMode::selectingSeqAndStep;
+  pageBeforeHelp = SequencerEditorMode::selectingSeqAndStep;
   editSubMode = SequencerEditorSubMode::editCol1;
   stepIncrement = 0.5f;
   machineEditMode = false;
@@ -211,6 +220,8 @@ SequencerEditorPage SequencerEditor::getCurrentPage() const
     return SequencerEditorPage::machine;
   case SequencerEditorMode::mixer:
     return SequencerEditorPage::mixer;
+  case SequencerEditorMode::help:
+    return SequencerEditorPage::help;
   case SequencerEditorMode::resetConfirmation:
     return SequencerEditorPage::resetConfirmation;
   }
@@ -253,6 +264,9 @@ void SequencerEditor::selectPage(SequencerEditorPage page)
     break;
   case SequencerEditorPage::mixer:
     gotoMixerPage();
+    break;
+  case SequencerEditorPage::help:
+    gotoHelpPage();
     break;
   case SequencerEditorPage::resetConfirmation:
     gotoResetConfirmationPage();
@@ -309,6 +323,7 @@ void SequencerEditor::cycleEditMode()
     return;
   case SequencerEditorMode::machineConfig:
   case SequencerEditorMode::mixer:
+  case SequencerEditorMode::help:
     return;
   case SequencerEditorMode::resetConfirmation:
     return;
@@ -353,6 +368,8 @@ void SequencerEditor::cycleAtCursor()
   case SequencerEditorMode::editingStep:
     sequencer->toggleStepActive(currentSequence, currentStep);
     return;
+  case SequencerEditorMode::help:
+    return;
   case SequencerEditorMode::resetConfirmation:
     return;
   }
@@ -379,6 +396,8 @@ void SequencerEditor::click()
   case SequencerEditorPage::mixer:
     cycleAtCursor();
     break;
+  case SequencerEditorPage::help:
+    break;
   case SequencerEditorPage::resetConfirmation:
     clickOnResetConfirmationPage();
     break;
@@ -402,6 +421,9 @@ void SequencerEditor::resetAtCursor()
   case SequencerEditorPage::machine:
     break;
   case SequencerEditorPage::mixer:
+    break;
+  case SequencerEditorPage::help:
+    toggleHelpPage();
     break;
   case SequencerEditorPage::resetConfirmation:
     resetOnResetConfirmationPage();
@@ -434,6 +456,8 @@ void SequencerEditor::enterAtCursor()
     break;
   case SequencerEditorPage::mixer:
     gotoSequencePage();
+    break;
+  case SequencerEditorPage::help:
     break;
   case SequencerEditorPage::resetConfirmation:
     resetOnResetConfirmationPage();
@@ -537,6 +561,10 @@ void SequencerEditor::incrementOctave()
   {
     break;
   }
+  case SequencerEditorMode::help:
+  {
+    break;
+  }
   case SequencerEditorMode::resetConfirmation:
   {
     break;
@@ -584,6 +612,10 @@ void SequencerEditor::decrementOctave()
   }
   case SequencerEditorMode::machineConfig:
   case SequencerEditorMode::mixer:
+  {
+    break;
+  }
+  case SequencerEditorMode::help:
   {
     break;
   }
@@ -720,6 +752,7 @@ void SequencerEditor::moveCursorLeft()
   case SequencerEditorPage::sequenceConfig: moveCursorLeftOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorLeftOnMachinePage(); break;
   case SequencerEditorPage::mixer: if (mixerStack > 0) --mixerStack; break;
+  case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorLeftOnResetConfirmationPage(); break;
   }
 }
@@ -734,6 +767,7 @@ void SequencerEditor::moveCursorRight()
   case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorRightOnMachinePage(); break;
   case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerStack + 1 < machineHost->getMachineStackCount()) ++mixerStack; break;
+  case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorRightOnResetConfirmationPage(); break;
   }
 }
@@ -748,6 +782,7 @@ void SequencerEditor::moveCursorUp()
   case SequencerEditorPage::sequenceConfig: moveCursorUpOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorUpOnMachinePage(); break;
   case SequencerEditorPage::mixer: if (mixerRow > 0) --mixerRow; break;
+  case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorUpOnResetConfirmationPage(); break;
   }
 }
@@ -762,6 +797,7 @@ void SequencerEditor::moveCursorDown()
   case SequencerEditorPage::sequenceConfig: moveCursorDownOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorDownOnMachinePage(); break;
   case SequencerEditorPage::mixer: mixerRow = std::min<std::size_t>(10, mixerRow + 1); break;
+  case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorDownOnResetConfirmationPage(); break;
   }
 }
@@ -787,6 +823,8 @@ void SequencerEditor::addRow()
     break;
   case SequencerEditorPage::mixer:
     break;
+  case SequencerEditorPage::help:
+    break;
   case SequencerEditorPage::resetConfirmation:
     break;
   }
@@ -810,6 +848,8 @@ void SequencerEditor::removeRow()
     machineRemoveEntry();
     break;
   case SequencerEditorPage::mixer:
+    break;
+  case SequencerEditorPage::help:
     break;
   case SequencerEditorPage::resetConfirmation:
     break;
@@ -844,6 +884,8 @@ void SequencerEditor::incrementAtCursor()
       else if (mixerRow >= 3) machineHost->setStackGainDb(mixerStack, machineHost->getStackGainDb(mixerStack) + 1.0f);
     }
     break;
+  case SequencerEditorPage::help:
+    break;
   case SequencerEditorPage::resetConfirmation:
     break;
   }
@@ -875,6 +917,8 @@ void SequencerEditor::decrementAtCursor()
       else if (mixerRow == 2) machineHost->setStackSolo(mixerStack, false);
       else if (mixerRow >= 3) machineHost->setStackGainDb(mixerStack, machineHost->getStackGainDb(mixerStack) - 1.0f);
     }
+    break;
+  case SequencerEditorPage::help:
     break;
   case SequencerEditorPage::resetConfirmation:
     break;
@@ -1549,7 +1593,7 @@ void SequencerEditor::resetOnResetConfirmationPage()
 void SequencerEditor::incrementOnStepPage()
 {
   sequencer->incrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
-  if (currentStepCol == Step::noteInd)
+  if (currentStepCol == Step::noteInd && !currentStepIsControlCommand())
     syncOctaveFromMidiNote(sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol));
 }
 
@@ -1603,7 +1647,7 @@ void SequencerEditor::incrementOnMachinePage()
 void SequencerEditor::decrementOnStepPage()
 {
   sequencer->decrementStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol);
-  if (currentStepCol == Step::noteInd)
+  if (currentStepCol == Step::noteInd && !currentStepIsControlCommand())
     syncOctaveFromMidiNote(sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, currentStepCol));
 }
 
@@ -1854,6 +1898,94 @@ std::string SequencerEditor::getConfirmationPrompt() const
   return "CONFIRM?";
 }
 
+void SequencerEditor::gotoHelpPage()
+{
+  if (editMode == SequencerEditorMode::help)
+    return;
+
+  pageBeforeHelp = editMode;
+  dismissMachineTransientUiIfNeeded();
+  setEditMode(SequencerEditorMode::help);
+}
+
+void SequencerEditor::leaveHelpPage()
+{
+  if (editMode != SequencerEditorMode::help)
+    return;
+
+  const auto target = pageBeforeHelp == SequencerEditorMode::help
+      ? SequencerEditorMode::selectingSeqAndStep
+      : pageBeforeHelp;
+  pageBeforeHelp = SequencerEditorMode::selectingSeqAndStep;
+  setEditMode(target);
+}
+
+void SequencerEditor::toggleHelpPage()
+{
+  if (editMode == SequencerEditorMode::help)
+    leaveHelpPage();
+  else
+    gotoHelpPage();
+}
+
+bool SequencerEditor::insertSequenceToRight()
+{
+  auto* impl = getSequencerImpl();
+  if (impl == nullptr || sequencer == nullptr)
+    return false;
+
+  const std::size_t count = sequencer->howManySequences();
+  if (count == 0 || currentSequence >= count)
+    return false;
+
+  auto* source = sequencer->getSequence(currentSequence);
+  if (source == nullptr)
+    return false;
+
+  const std::size_t insertAt = currentSequence + 1;
+  if (!impl->insertSequence(insertAt, 8, source->getMachineId(), true))
+    return false;
+
+  if (armedSequence != SequencerAbs::notArmed && armedSequence >= insertAt)
+    ++armedSequence;
+
+  requestStringRefresh();
+  return true;
+}
+
+bool SequencerEditor::deleteCurrentSequence()
+{
+  auto* impl = getSequencerImpl();
+  if (impl == nullptr || sequencer == nullptr)
+    return false;
+
+  const std::size_t count = sequencer->howManySequences();
+  if (count <= 1 || currentSequence >= count)
+    return false;
+
+  const std::size_t deleted = currentSequence;
+  if (!impl->eraseSequence(deleted))
+    return false;
+
+  const std::size_t remaining = sequencer->howManySequences();
+  currentSequence = std::min(currentSequence, remaining - 1);
+
+  const std::size_t steps = sequencer->howManySteps(currentSequence);
+  if (steps == 0)
+    currentStep = 0;
+  else if (currentStep >= steps)
+    currentStep = steps - 1;
+
+  if (armedSequence == deleted)
+    unarmSequence();
+  else if (armedSequence != SequencerAbs::notArmed && armedSequence > deleted)
+    --armedSequence;
+
+  clampStepCursorToCurrentStep();
+  requestStringRefresh();
+  return true;
+}
+
 void SequencerEditor::togglePlayback()
 {
   if (songHost != nullptr)
@@ -1899,10 +2031,88 @@ void SequencerEditor::toggleMuteCurrentSequence()
     impl->toggleSequenceMute(getCurrentSequence());
 }
 
+void SequencerEditor::toggleSoloCurrentSequence()
+{
+  if (auto* impl = getSequencerImpl())
+    impl->toggleSequenceSolo(getCurrentSequence());
+}
+
+void SequencerEditor::explodeCurrentSequence()
+{
+  auto* impl = getSequencerImpl();
+  const auto sequence = getCurrentSequence();
+  if (impl == nullptr || sequencer == nullptr || sequence >= sequencer->howManySequences())
+    return;
+
+  impl->explodeSequence(sequence);
+
+  const auto length = sequencer->getSequence(sequence)->getLength();
+  currentStep = length == 0 ? 0 : std::min(currentStep, length - 1);
+  currentStepRow = 0;
+}
+
+bool SequencerEditor::currentSequenceControlMode() const
+{
+  return sequencer != nullptr && sequencer->isSequenceControlMode(currentSequence);
+}
+
+bool SequencerEditor::currentStepIsControlCommand() const
+{
+  if (sequencer == nullptr)
+    return false;
+
+  const double commandValue = sequencer->getStepDataAt(currentSequence, currentStep, currentStepRow, Step::cmdInd);
+  if (commandValue < 0.0)
+    return false;
+
+  const auto commandIndex = static_cast<std::size_t>(commandValue);
+  return commandIndex <= static_cast<std::size_t>(CommandType::FilterCutoff)
+      && machineTraits(static_cast<CommandType>(commandIndex)).isControlCommand;
+}
+
+void SequencerEditor::enterControlCommand(CommandType command)
+{
+  if (sequencer == nullptr)
+    return;
+
+  if (editMode == SequencerEditorMode::editingStep)
+    currentStepCol = Step::noteInd;
+  else if (editMode == SequencerEditorMode::selectingSeqAndStep)
+    currentStepRow = 0;
+  else
+    return;
+
+  auto data = sequencer->getStepData(currentSequence, currentStep);
+  normalizeEditableStepData(sequencer, currentSequence, currentStepRow, data);
+
+  auto& target = data[currentStepRow];
+  target[Step::cmdInd] = static_cast<double>(command);
+  target[Step::noteInd] = 0.0;
+  target[Step::velInd] = 0.0;
+  target[Step::lengthInd] = 0.0;
+
+  if (command == CommandType::FilterCutoff)
+  {
+    const auto commandSpec = CommandProcessor::getCommand(static_cast<double>(command));
+    if (!commandSpec.parameters.empty())
+      target[Step::noteInd] = commandSpec.parameters[0].defaultValue;
+  }
+
+  writeStepData(std::move(data));
+  requestStringRefresh();
+}
+
 bool SequencerEditor::handleChordKey(char key)
 {
-  if (getCurrentPage() != SequencerEditorPage::step)
+  const auto page = getCurrentPage();
+  if (page == SequencerEditorPage::help)
+    return true;
+
+  if (page != SequencerEditorPage::step)
     return false;
+
+  if (isChordShortcutKey(key) && currentSequenceControlMode())
+    return true;
 
   for (const auto& shortcut : kChordShortcuts)
   {
@@ -1913,20 +2123,54 @@ bool SequencerEditor::handleChordKey(char key)
   return false;
 }
 
+bool SequencerEditor::handleControlKey(char key)
+{
+  const auto page = getCurrentPage();
+  if (page == SequencerEditorPage::help)
+    return true;
+
+  if (page != SequencerEditorPage::sequence && page != SequencerEditorPage::step)
+    return false;
+
+  if (!currentSequenceControlMode())
+    return false;
+
+  std::optional<CommandType> command;
+  if (key == 'z')
+    command = CommandType::ToggleAux1;
+  else if (key == 'x')
+    command = CommandType::ToggleAux2;
+  else if (key == 'c')
+    command = CommandType::FilterCutoff;
+  else
+    return false;
+
+  enterControlCommand(*command);
+  return true;
+}
+
 bool SequencerEditor::handleNoteKey(char key)
 {
-  if (getCurrentPage() == SequencerEditorPage::resetConfirmation
-      || getCurrentPage() == SequencerEditorPage::song)
+  const auto page = getCurrentPage();
+  if (page == SequencerEditorPage::help)
+    return true;
+
+  if (page == SequencerEditorPage::resetConfirmation
+      || page == SequencerEditorPage::song)
     return false;
 
   const auto midiNote = lookupKeyboardMidiNote(key);
   if (!midiNote.has_value())
     return false;
 
+  if ((page == SequencerEditorPage::sequence || page == SequencerEditorPage::step)
+      && currentSequenceControlMode())
+    return true;
+
   const double note = midiNote.value() + (12 * getCurrentOctave());
   previewEnteredNote(note);
 
-  if (getCurrentPage() == SequencerEditorPage::machine)
+  if (page == SequencerEditorPage::machine)
     return machineInsertCurrentCell(note);
 
   enterStepData(midiNote.value(), Step::noteInd);

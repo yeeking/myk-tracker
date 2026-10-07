@@ -168,14 +168,71 @@ void CommandProcessor::initialiseCommands() {
     //         }
     // };
 
+    Command toggleAux1Command{
+            "ToggleAux1", "TAUX1", "Toggles the enabled state of the aux [1] send on the sequence's machine stack",
+            { Parameter("Aux", "-", 0, 0, 1, 0, Step::noteInd),
+              Parameter("Off", "-", 0, 0, 1, 0, Step::velInd),
+              Parameter("Off", "-", 0, 0, 1, 0, Step::lengthInd)},
+            Step::noteInd,
+            Step::noteInd,
+            Step::lengthInd,
+            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                assert(stepData->size() == Step::maxInd + 1);
+                assert(sequenceContext != nullptr);
+                assert(CommandData::machineUtils != nullptr);
+                CommandData::machineUtils->toggleAuxSendForStack(
+                    static_cast<unsigned short>(sequenceContext->machineId), true);
+            }
+    };
+    Command toggleAux2Command{
+            "ToggleAux2", "TAUX2", "Toggles the enabled state of the aux [2] send on the sequence's machine stack",
+            { Parameter("Aux", "-", 0, 0, 1, 0, Step::noteInd),
+              Parameter("Off", "-", 0, 0, 1, 0, Step::velInd),
+              Parameter("Off", "-", 0, 0, 1, 0, Step::lengthInd)},
+            Step::noteInd,
+            Step::noteInd,
+            Step::lengthInd,
+            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                assert(stepData->size() == Step::maxInd + 1);
+                assert(sequenceContext != nullptr);
+                assert(CommandData::machineUtils != nullptr);
+                CommandData::machineUtils->toggleAuxSendForStack(
+                    static_cast<unsigned short>(sequenceContext->machineId), false);
+            }
+    };
+    Command filterCutoffCommand{
+            "FilterCutoff", "COFF", "Sets the filter cutoff on the sequence's machine stack",
+            { Parameter("Cutoff", "VAL", 20, 20000, 50, 2000, Step::noteInd),
+              Parameter("Off", "-", 0, 0, 1, 0, Step::velInd),
+              Parameter("Off", "-", 0, 0, 1, 0, Step::lengthInd)},
+            Step::noteInd,
+            Step::noteInd,
+            Step::lengthInd,
+            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                assert(stepData->size() == Step::maxInd + 1);
+                assert(sequenceContext != nullptr);
+                assert(CommandData::machineUtils != nullptr);
+                const double cutoffHz = (*stepData)[Step::noteInd];
+                if (cutoffHz > 0.0)
+                    CommandData::machineUtils->setFilterCutoffHzForStack(
+                        static_cast<unsigned short>(sequenceContext->machineId), cutoffHz);
+            }
+    };
+
     CommandData::commands[midiNote.shortName] = midiNote;
     CommandData::commands[logCommand.shortName] = logCommand;
     CommandData::commands[samplerCommand.shortName] = samplerCommand;
     CommandData::commands[wavetableSynthCommand.shortName] = wavetableSynthCommand;
+    CommandData::commands[toggleAux1Command.shortName] = toggleAux1Command;
+    CommandData::commands[toggleAux2Command.shortName] = toggleAux2Command;
+    CommandData::commands[filterCutoffCommand.shortName] = filterCutoffCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::MidiNote)] = midiNote;
     CommandData::commandsDouble[static_cast<double>(CommandType::Log)] = logCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::Sampler)] = samplerCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::WavetableSynth)] = wavetableSynthCommand;
+    CommandData::commandsDouble[static_cast<double>(CommandType::ToggleAux1)] = toggleAux1Command;
+    CommandData::commandsDouble[static_cast<double>(CommandType::ToggleAux2)] = toggleAux2Command;
+    CommandData::commandsDouble[static_cast<double>(CommandType::FilterCutoff)] = filterCutoffCommand;
     // CommandData::commands[sample.shortName] = sample;
     // CommandData::commandsDouble[2] = sample;
 }
