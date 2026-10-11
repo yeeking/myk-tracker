@@ -91,6 +91,8 @@ public:
     void triggerFromWeb (int playerId);
     /** Sets the static gain of a player. */
     void setGainFromUI (int playerId, float gain);
+    /** Sets the fixed coarse and fine playback tuning of a player. */
+    void setTuningFromUI (int playerId, int coarseSemitones, int fineCents);
     /** Formats a note label for the sequencer view. */
     std::string describeNoteForSequencer (int midiNote) const;
     /** Returns true while the integrated file browser is open. */
@@ -138,6 +140,10 @@ private:
         int midiHigh = 127;
         /** Player gain displayed in the UI. */
         float gain = 1.0f;
+        /** Fixed playback offset in semitones. */
+        int coarseTuneSemitones = 0;
+        /** Fixed playback offset in cents. */
+        int fineTuneCents = 0;
         /** True when the player is currently active. */
         bool isPlaying = false;
         /** Player VU level in decibels. */
@@ -172,6 +178,8 @@ private:
     bool setMidiRange (int playerId, int low, int high);
     /** Sets the gain for a player. */
     bool setGain (int playerId, float gain);
+    /** Sets the fixed coarse and fine playback tuning for a player. */
+    bool setTuning (int playerId, int coarseSemitones, int fineCents);
     /** Triggers a player by id. */
     bool trigger (int playerId);
     /** Returns the waveform SVG for a player. */

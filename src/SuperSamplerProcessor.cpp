@@ -4,6 +4,7 @@
 #include "WaveformSVGRenderer.h"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <sstream>
 #include <thread>
 
@@ -35,6 +36,11 @@ std::string formatGain(float gain)
 {
     juce::String text = juce::String(gain, 2);
     return sanitizeLabel(text, 6);
+}
+
+std::string formatSignedTune(char prefix, int value)
+{
+    return std::string(1, prefix) + juce::String::formatted("%+03d", value).toStdString();
 }
 
 bool isSearchableBrowserCharacter(char character)
@@ -283,6 +289,10 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
         st.midiLow = static_cast<int>(playerObj->getProperty("midiLow"));
         st.midiHigh = static_cast<int>(playerObj->getProperty("midiHigh"));
         st.gain = static_cast<float>(double(playerObj->getProperty("gain")));
+        const auto coarseTune = playerObj->getProperty("coarseTuneSemitones");
+        const auto fineTune = playerObj->getProperty("fineTuneCents");
+        st.coarseTuneSemitones = coarseTune.isVoid() ? 0 : static_cast<int>(coarseTune);
+        st.fineTuneCents = fineTune.isVoid() ? 0 : static_cast<int>(fineTune);
         st.isPlaying = static_cast<bool>(playerObj->getProperty("isPlaying"));
         const auto vuVar = playerObj->getProperty("vuDb");
         st.vuDb = vuVar.isVoid() ? -60.0f : static_cast<float>(double(vuVar));
@@ -315,7 +325,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
     uiGlowLevels = std::move(nextGlow);
 
     const std::size_t rows = uiPlayers.size() + 1;
-    const std::size_t cols = 6;
+    const std::size_t cols = 8;
     if (rows == 0 || cols == 0)
         return { { UIBox{} } };
 
@@ -338,7 +348,11 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                 }
                 else
                 {
-                    cell.kind = UIBox::Kind::None;
+                    cell.kind = UIBox::Kind::TrackerCell;
+                    static constexpr std::array<const char*, 8> headings {
+                        "ADD", "TRIG", "LOW", "HIGH", "GAIN", "CRS", "FINE", "SAMP"
+                    };
+                    cell.text = headings[col];
                 }
             }
             else
@@ -400,6 +414,38 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                     };
                     break;
                 case 5:
+                    cell.kind = UIBox::Kind::SamplerValue;
+                    cell.text = formatSignedTune('C', player.coarseTuneSemitones);
+                    cell.onAdjust = [this, playerId, coarse = player.coarseTuneSemitones, fine = player.fineTuneCents](int direction)
+                    {
+                        setTuningFromUI(playerId, coarse + direction, fine);
+                    };
+                    cell.onInsert = [this, playerId, fine = player.fineTuneCents](double value)
+                    {
+                        setTuningFromUI(playerId, static_cast<int>(std::lround(value)), fine);
+                    };
+                    cell.onReset = [this, playerId, fine = player.fineTuneCents]()
+                    {
+                        setTuningFromUI(playerId, 0, fine);
+                    };
+                    break;
+                case 6:
+                    cell.kind = UIBox::Kind::SamplerValue;
+                    cell.text = formatSignedTune('F', player.fineTuneCents);
+                    cell.onAdjust = [this, playerId, coarse = player.coarseTuneSemitones, fine = player.fineTuneCents](int direction)
+                    {
+                        setTuningFromUI(playerId, coarse, fine + direction);
+                    };
+                    cell.onInsert = [this, playerId, coarse = player.coarseTuneSemitones](double value)
+                    {
+                        setTuningFromUI(playerId, coarse, static_cast<int>(std::lround(value)));
+                    };
+                    cell.onReset = [this, playerId, coarse = player.coarseTuneSemitones]()
+                    {
+                        setTuningFromUI(playerId, coarse, 0);
+                    };
+                    break;
+                case 7:
                     cell.kind = UIBox::Kind::SamplerWaveform;
                     if (!player.fileName.empty())
                         cell.text = sanitizeLabel(juce::String(player.fileName), 18);
@@ -616,6 +662,14 @@ void SuperSamplerProcessor::setGainFromUI (int playerId, float gain)
         broadcastMessage ("Failed to set gain for player " + juce::String (playerId));
 }
 
+void SuperSamplerProcessor::setTuningFromUI (int playerId, int coarseSemitones, int fineCents)
+{
+    if (setTuning (playerId, coarseSemitones, fineCents))
+        sendSamplerStateToUI();
+    else
+        broadcastMessage ("Failed to set tuning for player " + juce::String (playerId));
+}
+
 void SuperSamplerProcessor::sendSamplerStateToUI()
 {
     // DBG("sendSamplerStateToUI");
@@ -809,6 +863,8 @@ juce::var SuperSamplerProcessor::toVar() const
         obj->setProperty ("midiLow", st.midiLow);
         obj->setProperty ("midiHigh", st.midiHigh);
         obj->setProperty ("gain", st.gain);
+        obj->setProperty ("coarseTuneSemitones", st.coarseTuneSemitones);
+        obj->setProperty ("fineTuneCents", st.fineTuneCents);
         obj->setProperty ("isPlaying", st.isPlaying);
         obj->setProperty ("vuDb", st.vuDb);
         obj->setProperty ("status", st.status);
@@ -879,6 +935,17 @@ bool SuperSamplerProcessor::setGain (int playerId, float gain)
     return false;
 }
 
+bool SuperSamplerProcessor::setTuning (int playerId, int coarseSemitones, int fineCents)
+{
+    const std::lock_guard<std::mutex> lock (playerMutex);
+    if (auto* player = getPlayer (playerId))
+    {
+        player->setTuning (coarseSemitones, fineCents);
+        return true;
+    }
+    return false;
+}
+
 bool SuperSamplerProcessor::trigger (int playerId)
 {
     const std::lock_guard<std::mutex> lock (playerMutex);
@@ -930,6 +997,8 @@ juce::ValueTree SuperSamplerProcessor::exportToValueTree() const
         child.setProperty ("midiLow", st.midiLow, nullptr);
         child.setProperty ("midiHigh", st.midiHigh, nullptr);
         child.setProperty ("gain", st.gain, nullptr);
+        child.setProperty ("coarseTuneSemitones", st.coarseTuneSemitones, nullptr);
+        child.setProperty ("fineTuneCents", st.fineTuneCents, nullptr);
         child.setProperty ("filePath", st.filePath, nullptr);
         child.setProperty ("status", st.status, nullptr);
         root.addChild (child, -1, nullptr);
@@ -960,6 +1029,8 @@ void SuperSamplerProcessor::importFromValueTree (const juce::ValueTree& tree)
         p.state.midiLow = (int) child.getProperty ("midiLow", 36);
         p.state.midiHigh = (int) child.getProperty ("midiHigh", 60);
         p.state.gain = (float) child.getProperty ("gain", 1.0f);
+        p.state.coarseTuneSemitones = (int) child.getProperty ("coarseTuneSemitones", 0);
+        p.state.fineTuneCents = (int) child.getProperty ("fineTuneCents", 0);
         p.path = child.getProperty ("filePath").toString();
         pending.push_back (p);
     }
@@ -978,6 +1049,7 @@ void SuperSamplerProcessor::importFromValueTree (const juce::ValueTree& tree)
             auto player = std::make_unique<SuperSamplePlayer> (p.state.id);
             player->setMidiRange (p.state.midiLow, p.state.midiHigh);
             player->setGain (p.state.gain);
+            player->setTuning (p.state.coarseTuneSemitones, p.state.fineTuneCents);
             player->setFilePathAndStatus (p.path, p.path.isNotEmpty() ? "pending" : "empty");
 
             nextId = std::max (nextId, p.state.id + 1);

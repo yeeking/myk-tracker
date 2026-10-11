@@ -42,6 +42,8 @@ struct UIBox
     bool isArmed = false;
     /** True when the cell belongs to a control-mode sequence column. */
     bool isControlModeSequence = false;
+    /** True when the cell belongs to a soloed sequence column. */
+    bool isSoloSequence = false;
     /** True when the cell represents note-bearing content. */
     bool hasNote = false;
     /** True when `customFillArgb` should override normal fill colours. */

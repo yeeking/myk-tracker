@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -22,6 +23,8 @@ public:
         float glow = 0.0f;
         float depthScale = 1.0f;
         bool drawOutline = false;
+        /** OpenGL line width used when drawing this cell's outline. */
+        float outlineLineWidth = 3.0f;
         /** Horizontal parameter fill bar; -1 = no bar, otherwise [0,1]. */
         float fillFraction = -1.0f;
         /** Colour of the horizontal parameter fill bar (0xAARRGGBB). */
@@ -57,6 +60,10 @@ public:
         // so traces overlay the grid instead of hiding behind cell faces.
         float z = 1.15f;
         float lineWidth = 2.0f;
+        /** Stable identity for traces whose vertices can remain in a GPU buffer. */
+        std::string cacheId;
+        /** Incremented when the cached samples or their grid placement change. */
+        std::uint64_t cacheRevision = 0;
     };
 
     struct ZoomState
@@ -139,6 +146,18 @@ private:
         GLsizei indexCount = 0;
     };
 
+    struct CachedTraceBuffer
+    {
+        GLuint vbo = 0;
+        GLsizei vertexCount = 0;
+        std::uint64_t revision = 0;
+        float x0 = 0.0f;
+        float x1 = 0.0f;
+        float regionCenterY = 0.0f;
+        float amplitude = 0.0f;
+        float z = 0.0f;
+    };
+
     struct ViewportState
     {
         juce::Rectangle<int> bounds;
@@ -187,6 +206,7 @@ private:
     std::unique_ptr<TextShaderAttributes> textShaderAttributes;
     std::unique_ptr<TextShaderUniforms> textShaderUniforms;
     std::unordered_map<std::string, TextMesh> textMeshCache;
+    std::unordered_map<std::string, CachedTraceBuffer> cachedTraceBuffers;
     Segment14Geometry::Params textGeomParams{};
     Segment14Geometry textGeometry{ textGeomParams };
     GLuint vertexBuffer = 0;

@@ -128,6 +128,7 @@ struct SequenceReadHeadConfig
   std::size_t ticksPerStep = 4;
   SequenceReadMode mode = SequenceReadMode::linear;
   std::size_t polyphony = 3;
+  std::size_t octaves = 1;
   std::string rhythm = "1";
   double probability = 1.0;
 };
@@ -148,12 +149,14 @@ class Sequence{
     static constexpr std::size_t tpsConfig{3};
     static constexpr std::size_t modeConfig{4};
     static constexpr std::size_t polyphonyConfig{5};
-    static constexpr std::size_t rhythmConfig{6};
-    static constexpr std::size_t probabilityConfig{7};
-    static constexpr std::size_t sequenceModeConfig{8};
-    static constexpr std::size_t configCount{9};
+    static constexpr std::size_t octavesConfig{6};
+    static constexpr std::size_t rhythmConfig{7};
+    static constexpr std::size_t probabilityConfig{8};
+    static constexpr std::size_t sequenceModeConfig{9};
+    static constexpr std::size_t configCount{10};
     static constexpr std::size_t maxReadHeads{3};
     static constexpr std::size_t maxChordPolyphony{5};
+    static constexpr std::size_t maxOctaves{4};
      
     
 
@@ -272,6 +275,10 @@ class Sequence{
     void reset();
     /** replace the current sequence with one note per step, preserving step/row order */
     void explodeNotes();
+    /** regroup all notes into evenly sized, pitch-sorted chord steps */
+    void implodeNotes();
+    /** true when a stored step contains a valid note or control event */
+    bool stepHasTriggerableEvent(std::size_t step) const;
     /** set this step, row values to zero */
     void resetStepRow(std::size_t step, std::size_t row);
 
@@ -343,6 +350,7 @@ class Sequence{
       std::array<std::size_t, maxChordPolyphony> positions{};
       std::size_t positionCount = 0;
       std::mt19937 random { 0x4d594b31u };
+      std::mt19937 octaveRandom { 0x4d594b32u };
     };
     std::vector<ReadHeadState> readHeads;
     std::unique_ptr<std::atomic<bool>> pendingQuarterBeatResync;
@@ -479,6 +487,8 @@ class Sequencer : public SequencerAbs {
       void toggleSequenceMute(std::size_t sequence);
       /** explode the sent sequence into one note per step */
       void explodeSequence(std::size_t sequence);
+      /** regroup the sent sequence's notes into pitch-sorted chord steps */
+      void implodeSequence(std::size_t sequence);
       /** toggle solo state of the sent sequence */
       void toggleSequenceSolo(std::size_t sequence);
       /** set solo state of the sent sequence */
@@ -494,6 +504,7 @@ class Sequencer : public SequencerAbs {
       /** toggle activity state of specified step in specified sequence*/
       void toggleStepActive(std::size_t sequence, std::size_t step);
       bool isStepActive(std::size_t sequence, std::size_t step) const;
+      bool stepHasTriggerableEvent(std::size_t sequence, std::size_t step) const;
       void addStepListener();
       /** wipe the data from the sent sequence*/
       void resetSequence(std::size_t sequence);

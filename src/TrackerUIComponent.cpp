@@ -308,9 +308,9 @@ void TrackerUIComponent::initOpenGL(int width, int height)
                                            frontFaceEdgeIndices,
                                            GL_STATIC_DRAW);
 
-    // Polyline buffer for grid-space traces (oscilloscope / waveform previews).
-    // Data is uploaded each frame in renderTraces; the handle is created here so
-    // OpenGL resource lifetime stays inside the renderer callbacks.
+    // Dynamic polyline buffer for grid-space traces such as the oscilloscope.
+    // Static preview traces receive retained buffers lazily in renderTraces;
+    // every OpenGL handle is still owned by the renderer lifecycle.
     openGLContext->extensions.glGenBuffers(1, &traceVertexBuffer);
     openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, 0);
 
@@ -359,6 +359,10 @@ void TrackerUIComponent::shutdownOpenGL()
         traceVertexBuffer = 0;
         traceVertexCapacityBytes = 0;
     }
+    for (auto& entry : cachedTraceBuffers)
+        if (entry.second.vbo != 0)
+            openGLContext->extensions.glDeleteBuffers(1, &entry.second.vbo);
+    cachedTraceBuffers.clear();
 }
 
 void TrackerUIComponent::setViewportBounds(const juce::Rectangle<int>& bounds,
@@ -543,6 +547,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
     {
         juce::Matrix3D<float> modelMatrix;
         juce::Colour color;
+        float lineWidth = 3.0f;
     };
 
     std::vector<OutlineEntry> outlines;
@@ -672,7 +677,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
             }
 
             if (cell.drawOutline)
-                outlines.push_back(OutlineEntry{ modelMatrix, cell.outlineColor });
+                outlines.push_back(OutlineEntry{ modelMatrix, cell.outlineColor, cell.outlineLineWidth });
         }
         cursorX += cursorOffset;
     }
@@ -682,9 +687,6 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
         glDepthMask(GL_FALSE);
         glEnable(GL_POLYGON_OFFSET_LINE);
         glPolygonOffset(-2.0f, -2.0f);
-        // glLineWidth(1.8f);
-        glLineWidth(3.0f);
-        
         openGLContext->extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, frontEdgeIndexBuffer);
 
         if (shaderUniforms->ambientStrength != nullptr)
@@ -698,6 +700,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
 
         for (const auto& outline : outlines)
         {
+            glLineWidth(outline.lineWidth);
             if (shaderUniforms->modelMatrix != nullptr)
                 shaderUniforms->modelMatrix->setMatrix4(outline.modelMatrix.mat, 1, GL_FALSE);
 
@@ -809,30 +812,33 @@ void TrackerUIComponent::renderTraces(const juce::Matrix3D<float>& projectionMat
         shaderUniforms->cellGlow->set(0.0f);
 
     openGLContext->extensions.glUseProgram(shaderProgram->getProgramID());
-    openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, traceVertexBuffer);
     openGLContext->extensions.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
     const GLsizei stride = sizeof(Vertex);
-    if (shaderAttributes->position != nullptr)
+    const auto bindTraceBuffer = [this, stride](GLuint buffer)
     {
-        openGLContext->extensions.glVertexAttribPointer(shaderAttributes->position->attributeID,
-                                                        3,
-                                                        GL_FLOAT,
-                                                        GL_FALSE,
-                                                        stride,
-                                                        reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, position)));
-        openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->position->attributeID);
-    }
-    if (shaderAttributes->normal != nullptr)
-    {
-        openGLContext->extensions.glVertexAttribPointer(shaderAttributes->normal->attributeID,
-                                                        3,
-                                                        GL_FLOAT,
-                                                        GL_FALSE,
-                                                        stride,
-                                                        reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, normal)));
-        openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->normal->attributeID);
-    }
+        openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, buffer);
+        if (shaderAttributes->position != nullptr)
+        {
+            openGLContext->extensions.glVertexAttribPointer(shaderAttributes->position->attributeID,
+                                                            3,
+                                                            GL_FLOAT,
+                                                            GL_FALSE,
+                                                            stride,
+                                                            reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, position)));
+            openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->position->attributeID);
+        }
+        if (shaderAttributes->normal != nullptr)
+        {
+            openGLContext->extensions.glVertexAttribPointer(shaderAttributes->normal->attributeID,
+                                                            3,
+                                                            GL_FLOAT,
+                                                            GL_FALSE,
+                                                            stride,
+                                                            reinterpret_cast<const GLvoid*>(static_cast<const char*>(nullptr) + offsetof(Vertex, normal)));
+            openGLContext->extensions.glEnableVertexAttribArray(shaderAttributes->normal->attributeID);
+        }
+    };
 
     // Keep the line slightly inside the region so it does not touch cell edges.
     const float verticalPadding = 0.9f;
@@ -851,35 +857,74 @@ void TrackerUIComponent::renderTraces(const juce::Matrix3D<float>& projectionMat
         const float regionCenterY = 0.5f * (bandTopY + bandBottomY);
         const float amp = 0.5f * (bandTopY - bandBottomY) * verticalPadding;
 
-        std::vector<Vertex> vertices;
-        vertices.reserve(n);
-        for (size_t i = 0; i < n; ++i)
+        GLuint buffer = traceVertexBuffer;
+        GLsizei vertexCount = static_cast<GLsizei>(n);
+        bool uploadVertices = true;
+        CachedTraceBuffer* cachedBuffer = nullptr;
+        if (!trace.cacheId.empty())
         {
-            const float t = static_cast<float>(i) / static_cast<float>(n - 1);
-            const float x = x0 + (x1 - x0) * t;
-            const float s = juce::jlimit(-1.0f, 1.0f, trace.samples[i]);
-            // World +y is up: +1 must map to the top of the band so signals,
-            // waveform glyphs and the ADSR outline all read the right way up.
-            const float y = regionCenterY + s * amp;
-            vertices.push_back(Vertex{ { x, y, trace.z }, { 0.0f, 0.0f, 1.0f } });
+            cachedBuffer = &cachedTraceBuffers[trace.cacheId];
+            if (cachedBuffer->vbo == 0)
+                openGLContext->extensions.glGenBuffers(1, &cachedBuffer->vbo);
+            buffer = cachedBuffer->vbo;
+            uploadVertices = cachedBuffer->revision != trace.cacheRevision
+                || cachedBuffer->vertexCount != vertexCount
+                || std::abs(cachedBuffer->x0 - x0) > 0.000001f
+                || std::abs(cachedBuffer->x1 - x1) > 0.000001f
+                || std::abs(cachedBuffer->regionCenterY - regionCenterY) > 0.000001f
+                || std::abs(cachedBuffer->amplitude - amp) > 0.000001f
+                || std::abs(cachedBuffer->z - trace.z) > 0.000001f;
         }
 
-        const std::size_t traceBytes = vertices.size() * sizeof(Vertex);
-        if (traceBytes > traceVertexCapacityBytes)
+        if (uploadVertices)
         {
-            openGLContext->extensions.glBufferData(GL_ARRAY_BUFFER,
-                                                   static_cast<GLsizeiptr>(traceBytes),
-                                                   vertices.data(),
-                                                   GL_DYNAMIC_DRAW);
-            traceVertexCapacityBytes = traceBytes;
+            std::vector<Vertex> vertices;
+            vertices.reserve(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+                const float x = x0 + (x1 - x0) * t;
+                const float s = juce::jlimit(-1.0f, 1.0f, trace.samples[i]);
+                // World +y is up: +1 must map to the top of the band so signals,
+                // waveform glyphs and the ADSR outline all read the right way up.
+                const float y = regionCenterY + s * amp;
+                vertices.push_back(Vertex{ { x, y, trace.z }, { 0.0f, 0.0f, 1.0f } });
+            }
+
+            bindTraceBuffer(buffer);
+            const std::size_t traceBytes = vertices.size() * sizeof(Vertex);
+            if (cachedBuffer != nullptr)
+            {
+                openGLContext->extensions.glBufferData(GL_ARRAY_BUFFER,
+                                                       static_cast<GLsizeiptr>(traceBytes),
+                                                       vertices.data(),
+                                                       GL_STATIC_DRAW);
+                cachedBuffer->vertexCount = vertexCount;
+                cachedBuffer->revision = trace.cacheRevision;
+                cachedBuffer->x0 = x0;
+                cachedBuffer->x1 = x1;
+                cachedBuffer->regionCenterY = regionCenterY;
+                cachedBuffer->amplitude = amp;
+                cachedBuffer->z = trace.z;
+            }
+            else if (traceBytes > traceVertexCapacityBytes)
+            {
+                openGLContext->extensions.glBufferData(GL_ARRAY_BUFFER,
+                                                       static_cast<GLsizeiptr>(traceBytes),
+                                                       vertices.data(),
+                                                       GL_DYNAMIC_DRAW);
+                traceVertexCapacityBytes = traceBytes;
+            }
+            else
+            {
+                openGLContext->extensions.glBufferSubData(GL_ARRAY_BUFFER,
+                                                          0,
+                                                          static_cast<GLsizeiptr>(traceBytes),
+                                                          vertices.data());
+            }
         }
         else
-        {
-            openGLContext->extensions.glBufferSubData(GL_ARRAY_BUFFER,
-                                                      0,
-                                                      static_cast<GLsizeiptr>(traceBytes),
-                                                      vertices.data());
-        }
+            bindTraceBuffer(buffer);
 
         if (shaderUniforms->cellColor != nullptr)
             shaderUniforms->cellColor->set(trace.color.getFloatRed(),
@@ -890,7 +935,7 @@ void TrackerUIComponent::renderTraces(const juce::Matrix3D<float>& projectionMat
             shaderUniforms->glowColor->set(0.0f, 0.0f, 0.0f);
 
         glLineWidth(trace.lineWidth);
-        glDrawArrays(GL_LINE_STRIP, 0, static_cast<GLsizei>(vertices.size()));
+        glDrawArrays(GL_LINE_STRIP, 0, vertexCount);
     }
 
     glDepthMask(GL_TRUE);

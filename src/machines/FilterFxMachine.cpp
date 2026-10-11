@@ -5,7 +5,7 @@
 
 namespace
 {
-constexpr double kFilterStateVersion = 1.0;
+constexpr double kFilterStateVersion = 2.0;
 constexpr float kMaxAttackSeconds = 2.0f;
 constexpr float kMaxDecaySeconds = 2.0f;
 constexpr float kMaxReleaseSeconds = 3.0f;
@@ -25,6 +25,7 @@ void FilterFxMachine::prepareDsp(double sampleRate, int samplesPerBlock)
         : static_cast<juce::uint32>(512);
     spec.numChannels = 2;
     filter.prepare(spec);
+    secondFilter.prepare(spec);
     envelope.setSampleRate(currentSampleRate);
 }
 
@@ -33,7 +34,9 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
     juce::ignoreUnused(context);
     const std::lock_guard<std::mutex> lock(stateMutex);
 
-    std::vector<std::vector<UIBox>> boxes(2, std::vector<UIBox>(10));
+    // Two compact label/value blocks: filter controls on the left and the
+    // note-triggered envelope on the right.
+    std::vector<std::vector<UIBox>> boxes(4, std::vector<UIBox>(5));
 
     auto buildFloatCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
@@ -58,7 +61,21 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
 
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
     boxes[0][0].text = "MODE";
-    boxes[1][0] = buildToggleCell(&highPassMode, "LP", "HP");
+    boxes[1][0].isDisabled = false;
+    boxes[1][0].kind = UIBox::Kind::TrackerCell;
+    boxes[1][0].text = filterModeName(filterMode);
+    boxes[1][0].onAdjust = [this](int direction)
+    {
+        const std::lock_guard<std::mutex> guard(stateMutex);
+        const int modeCount = static_cast<int>(FilterMode::count);
+        int next = (static_cast<int>(filterMode) + direction) % modeCount;
+        if (next < 0)
+            next += modeCount;
+        filterMode = static_cast<FilterMode>(next);
+    };
+    boxes[1][0].hasValueScale = true;
+    boxes[1][0].valueNorm = static_cast<float>(filterMode)
+        / static_cast<float>(static_cast<int>(FilterMode::count) - 1);
 
     boxes[0][1].kind = UIBox::Kind::TrackerCell;
     boxes[0][1].text = "COFF";
@@ -76,25 +93,25 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
     boxes[0][4].text = "POL";
     boxes[1][4] = buildToggleCell(&positivePolarity, "NEG", "POS");
 
-    boxes[0][5].kind = UIBox::Kind::TrackerCell;
-    boxes[0][5].text = "A";
-    boxes[1][5] = buildFloatCell(&attackSeconds, 0.01f, 0.0f, kMaxAttackSeconds, 2);
+    boxes[2][0].kind = UIBox::Kind::TrackerCell;
+    boxes[2][0].text = "A";
+    boxes[3][0] = buildFloatCell(&attackSeconds, 0.01f, 0.0f, kMaxAttackSeconds, 2);
 
-    boxes[0][6].kind = UIBox::Kind::TrackerCell;
-    boxes[0][6].text = "D";
-    boxes[1][6] = buildFloatCell(&decaySeconds, 0.01f, 0.0f, kMaxDecaySeconds, 2);
+    boxes[2][1].kind = UIBox::Kind::TrackerCell;
+    boxes[2][1].text = "D";
+    boxes[3][1] = buildFloatCell(&decaySeconds, 0.01f, 0.0f, kMaxDecaySeconds, 2);
 
-    boxes[0][7].kind = UIBox::Kind::TrackerCell;
-    boxes[0][7].text = "S";
-    boxes[1][7] = buildFloatCell(&sustainLevel, 0.05f, 0.0f, 1.0f, 2);
+    boxes[2][2].kind = UIBox::Kind::TrackerCell;
+    boxes[2][2].text = "S";
+    boxes[3][2] = buildFloatCell(&sustainLevel, 0.05f, 0.0f, 1.0f, 2);
 
-    boxes[0][8].kind = UIBox::Kind::TrackerCell;
-    boxes[0][8].text = "R";
-    boxes[1][8] = buildFloatCell(&releaseSeconds, 0.01f, 0.0f, kMaxReleaseSeconds, 2);
+    boxes[2][3].kind = UIBox::Kind::TrackerCell;
+    boxes[2][3].text = "R";
+    boxes[3][3] = buildFloatCell(&releaseSeconds, 0.01f, 0.0f, kMaxReleaseSeconds, 2);
 
-    boxes[0][9].kind = UIBox::Kind::TrackerCell;
-    boxes[0][9].text = "BEND";
-    boxes[1][9] = buildFloatCell(&envelopeBend, 0.05f, kMinEnvelopeBend, kMaxEnvelopeBend, 2);
+    boxes[2][4].kind = UIBox::Kind::TrackerCell;
+    boxes[2][4].text = "BEND";
+    boxes[3][4] = buildFloatCell(&envelopeBend, 0.05f, kMinEnvelopeBend, kMaxEnvelopeBend, 2);
 
     return boxes;
 }
@@ -112,7 +129,7 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
         snap.resonance = resonance;
         snap.amount = amount;
         snap.positivePolarity = positivePolarity;
-        snap.highPassMode = highPassMode;
+        snap.mode = filterMode;
         snap.attackSeconds = attackSeconds;
         snap.decaySeconds = decaySeconds;
         snap.sustainLevel = sustainLevel;
@@ -185,10 +202,18 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
         * std::pow(top / static_cast<double>(kMinCutoffHz), 1.0 - static_cast<double>(snap.amount));
     const double sweepRatio = top / lowEnd;
 
-    filter.setType(snap.highPassMode
-        ? juce::dsp::StateVariableTPTFilterType::highpass
-        : juce::dsp::StateVariableTPTFilterType::lowpass);
+    const auto filterType = filterTypeForMode(snap.mode);
+    const bool useSecondStage = is24DbMode(snap.mode);
+    filter.setType(filterType);
+    secondFilter.setType(filterType);
     filter.setResonance(toFilterResonance(snap.resonance));
+    // Keep the extra stage neutral so RES has a comparable peak in both slopes.
+    secondFilter.setResonance(kFlatResonance);
+    if (useSecondStage != secondStageActive)
+    {
+        secondFilter.reset();
+        secondStageActive = useSecondStage;
+    }
 
     std::size_t cursor = 0;
     for (int sample = 0; sample < numSamples; ++sample)
@@ -215,9 +240,17 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
         const double t = snap.positivePolarity ? env : 1.0 - env;
         const double freq = lowEnd * std::pow(sweepRatio, t);
 
-        filter.setCutoffFrequency(static_cast<float>(juce::jlimit(static_cast<double>(kMinCutoffHz), maxFreq, freq)));
+        const float cutoff = static_cast<float>(juce::jlimit(static_cast<double>(kMinCutoffHz), maxFreq, freq));
+        filter.setCutoffFrequency(cutoff);
+        if (useSecondStage)
+            secondFilter.setCutoffFrequency(cutoff);
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-            buffer.setSample(channel, sample, filter.processSample(channel, buffer.getSample(channel, sample)));
+        {
+            const float stageOne = filter.processSample(channel, buffer.getSample(channel, sample));
+            buffer.setSample(channel, sample, useSecondStage
+                ? secondFilter.processSample(channel, stageOne)
+                : stageOne);
+        }
     }
 }
 
@@ -246,7 +279,7 @@ void FilterFxMachine::getStateInformation(juce::MemoryBlock& destData)
     const std::lock_guard<std::mutex> lock(stateMutex);
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
     root->setProperty("version", kFilterStateVersion);
-    root->setProperty("mode", highPassMode ? 1 : 0);
+    root->setProperty("mode", static_cast<int>(filterMode));
     root->setProperty("cutoff", cutoffHz);
     root->setProperty("resonance", resonance);
     root->setProperty("amount", amount);
@@ -268,7 +301,18 @@ void FilterFxMachine::setStateInformation(const void* data, int sizeInBytes)
 
     {
         const std::lock_guard<std::mutex> lock(stateMutex);
-        highPassMode = getBoolProperty(parsed, "mode", highPassMode);
+        const double version = static_cast<double>(parsed.getProperty("version", 0.0));
+        if (version < 2.0)
+        {
+            filterMode = getBoolProperty(parsed, "mode", false)
+                ? FilterMode::highpass12
+                : FilterMode::lowpass12;
+        }
+        else
+        {
+            filterMode = static_cast<FilterMode>(getIntProperty(parsed, "mode",
+                static_cast<int>(filterMode), 0, static_cast<int>(FilterMode::count) - 1));
+        }
         cutoffHz = getFloatProperty(parsed, "cutoff", cutoffHz, kMinCutoffHz, kMaxCutoffHz);
         resonance = getFloatProperty(parsed, "resonance", resonance, 0.0f, 1.0f);
         amount = getFloatProperty(parsed, "amount", amount, 0.0f, 1.0f);
@@ -307,15 +351,59 @@ void FilterFxMachine::setCutoffHz(double hz)
 
 float FilterFxMachine::toFilterResonance(float resonanceControl)
 {
-    // RES 0 is a plain 12 dB/oct filter (no peak); RES 1 approaches the TPT
-    // stability limit for a strongly peaked resonance.
-    return kFlatResonance + juce::jlimit(0.0f, 1.0f, resonanceControl) * (kMaxResonance - kFlatResonance);
+    // Exponential mapping gives the upper half of RES a pronounced musical
+    // peak while retaining useful resolution around the flat response.
+    const float normalized = juce::jlimit(0.0f, 1.0f, resonanceControl);
+    return kFlatResonance * std::pow(kMaxResonance / kFlatResonance, normalized);
+}
+
+const char* FilterFxMachine::filterModeName(FilterMode mode)
+{
+    switch (mode)
+    {
+        case FilterMode::lowpass12: return "LP12";
+        case FilterMode::lowpass24: return "LP24";
+        case FilterMode::bandpass12: return "BP12";
+        case FilterMode::bandpass24: return "BP24";
+        case FilterMode::highpass12: return "HP12";
+        case FilterMode::highpass24: return "HP24";
+        case FilterMode::count: break;
+    }
+    return "LP12";
+}
+
+juce::dsp::StateVariableTPTFilterType FilterFxMachine::filterTypeForMode(FilterMode mode)
+{
+    switch (mode)
+    {
+        case FilterMode::lowpass12:
+        case FilterMode::lowpass24:
+            return juce::dsp::StateVariableTPTFilterType::lowpass;
+        case FilterMode::bandpass12:
+        case FilterMode::bandpass24:
+            return juce::dsp::StateVariableTPTFilterType::bandpass;
+        case FilterMode::highpass12:
+        case FilterMode::highpass24:
+            return juce::dsp::StateVariableTPTFilterType::highpass;
+        case FilterMode::count:
+            break;
+    }
+    return juce::dsp::StateVariableTPTFilterType::lowpass;
+}
+
+bool FilterFxMachine::is24DbMode(FilterMode mode)
+{
+    return mode == FilterMode::lowpass24
+        || mode == FilterMode::bandpass24
+        || mode == FilterMode::highpass24;
 }
 
 void FilterFxMachine::clearTransientState()
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
     filter.reset();
+    secondFilter.reset();
+    secondStageActive = false;
     envelope.reset();
     planEvents.clear();
     carryReleases.clear();

@@ -115,6 +115,7 @@ class SequencerAbs{
     virtual void setSequenceControlMode(std::size_t, bool) {}
     virtual void toggleSequenceControlMode(std::size_t) {}
     virtual void toggleStepActive(std::size_t sequence, std::size_t step) = 0;
+    virtual bool stepHasTriggerableEvent(std::size_t, std::size_t) const { return false; }
 };
 
 /**
@@ -221,6 +222,8 @@ public:
   void moveCursorRight();
   /** add one to current step */
   void nextStep();
+  /** move to the next populated step, wrapping within the current sequence */
+  bool nextNonEmptyStep();
   /** Increase the octave offset applied when entering notes  */
   void incrementOctave();
   /** decrease the octave offset applied when entering notes  */
@@ -256,7 +259,10 @@ public:
   void toggleArmCurrentSequence();
   void toggleMuteCurrentSequence();
   void toggleSoloCurrentSequence();
+  void toggleMuteCurrentMixerStack();
+  void toggleSoloCurrentMixerStack();
   void explodeCurrentSequence();
+  void implodeCurrentSequence();
   bool handleChordKey(char key);
   bool handleControlKey(char key);
   bool handleNoteKey(char key);
@@ -268,6 +274,8 @@ public:
   /** Slot selected by the current machine-detail page, when one is open. */
   std::optional<std::size_t> getFocusedMachineDetailSlot() const;
   bool machineWantsExclusiveKeyboardInput() const;
+  /** True only for a sampler-detail LOW or HIGH cell with numeric insertion. */
+  bool isCurrentSamplerRangeCell() const;
   void requestTrackerReset();
   void requestApplicationQuit();
 

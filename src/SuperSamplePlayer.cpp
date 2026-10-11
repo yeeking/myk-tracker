@@ -89,6 +89,13 @@ void SuperSamplePlayer::setGain (float g) noexcept
     state.gain = juce::jlimit (0.0f, 2.0f, g);
 }
 
+void SuperSamplePlayer::setTuning (int coarseSemitones, int fineCents) noexcept
+{
+    state.coarseTuneSemitones = juce::jlimit (-36, 36, coarseSemitones);
+    state.fineTuneCents = juce::jlimit (-99, 99, fineCents);
+    updatePlaybackRatio();
+}
+
 void SuperSamplePlayer::setFilePathAndStatus (const juce::String& path, const juce::String& statusLabel, const juce::String& displayName)
 {
     state.filePath = path;
@@ -268,5 +275,8 @@ void SuperSamplePlayer::updatePlaybackRatio() noexcept
 {
     const double safeOutputRate = outputSampleRate > 0.0 ? outputSampleRate : 44100.0;
     const double safeSourceRate = sourceSampleRate > 0.0 ? sourceSampleRate : safeOutputRate;
-    playbackRatio = safeSourceRate / safeOutputRate;
+    const double semitones = static_cast<double> (state.coarseTuneSemitones)
+        + static_cast<double> (state.fineTuneCents) / 100.0;
+    const double tuningMultiplier = std::exp2 (semitones / 12.0);
+    playbackRatio = (safeSourceRate / safeOutputRate) * tuningMultiplier;
 }

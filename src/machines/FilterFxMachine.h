@@ -44,6 +44,17 @@ protected:
     void prepareDsp(double sampleRate, int samplesPerBlock) override;
 
 private:
+    enum class FilterMode
+    {
+        lowpass12 = 0,
+        lowpass24,
+        bandpass12,
+        bandpass24,
+        highpass12,
+        highpass24,
+        count
+    };
+
     /** Per-sample plan entry built from the block's scheduled notes. */
     struct PlanEvent
     {
@@ -60,7 +71,7 @@ private:
         float resonance = 0.0f;
         float amount = 0.5f;
         bool positivePolarity = true;
-        bool highPassMode = false;
+        FilterMode mode = FilterMode::lowpass12;
         float attackSeconds = 0.05f;
         float decaySeconds = 0.1f;
         float sustainLevel = 0.65f;
@@ -82,8 +93,8 @@ private:
     float amount = 0.5f;
     /** True: attack sweeps low->high; false: attack sweeps high->low. */
     bool positivePolarity = true;
-    /** Filter mode: low-pass or high-pass. */
-    bool highPassMode = false;
+    /** Filter response and slope selected by the MODE cell. */
+    FilterMode filterMode = FilterMode::lowpass12;
     /** Envelope times in seconds, applied to the cutoff sweep. */
     float attackSeconds = 0.05f;
     float decaySeconds = 0.1f;
@@ -92,8 +103,12 @@ private:
     /** Envelope curve bend: 0 = linear, positive = fast-then-slow, negative = slow-then-fast. */
     float envelopeBend = 0.0f;
 
-    /** TPT state-variable filter, audio-thread only. */
+    /** First TPT stage, used by every mode. */
     juce::dsp::StateVariableTPTFilter<float> filter;
+    /** Second TPT stage, enabled by the 24 dB/octave modes. */
+    juce::dsp::StateVariableTPTFilter<float> secondFilter;
+    /** Audio-thread-only flag used to clear the second stage when it enters the path. */
+    bool secondStageActive = false;
     /** Cutoff-sweep envelope, audio-thread only, retriggers on each note. */
     CurvedAdsr envelope;
     /** Pointer to the processor-owned per-stack note list for the current block. */
@@ -109,9 +124,12 @@ private:
     static constexpr float kMaxCutoffHz = 20000.0f;
     /** TPT resonance coefficient for a plain 12 dB/oct filter (no peak). */
     static constexpr float kFlatResonance = 0.7071068f;
-    /** Maximum TPT resonance coefficient (below the stability limit of 2). */
-    static constexpr float kMaxResonance = 1.9f;
+    /** Maximum TPT resonance coefficient used at the top of the RES range. */
+    static constexpr float kMaxResonance = 6.0f;
 
     /** Maps the 0..1 resonance control to the TPT filter coefficient. */
     static float toFilterResonance(float resonanceControl);
+    static const char* filterModeName(FilterMode mode);
+    static juce::dsp::StateVariableTPTFilterType filterTypeForMode(FilterMode mode);
+    static bool is24DbMode(FilterMode mode);
 };

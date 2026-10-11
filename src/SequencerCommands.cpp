@@ -1,5 +1,6 @@
 // CommandRegistry.cpp
 #include "SequencerCommands.h"
+#include <algorithm>
 #include <stdexcept>
 #include <iostream>
 #include <assert.h>
@@ -34,6 +35,14 @@ namespace CommandData {
     // we need access to it for 
     // some of the lambdas
     ClockAbs* masterClock = nullptr;
+}
+
+unsigned short playbackNote(const std::vector<double>& stepData,
+                            const SequenceReadOnly* sequenceContext)
+{
+    const auto sourceNote = stepData[Step::noteInd];
+    const auto offset = sequenceContext != nullptr ? sequenceContext->noteTransposeSemitones : 0;
+    return static_cast<unsigned short>(std::clamp(static_cast<int>(sourceNote) + offset, 0, 127));
 }
 
 
@@ -83,7 +92,7 @@ void CommandProcessor::initialiseCommands() {
                     CommandData::machineUtils->sendMessageToMachine(
                         static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
                         static_cast<unsigned short> (sequenceContext->machineId),
-                        static_cast<unsigned short> ((*stepData)[Step::noteInd]),
+                        playbackNote(*stepData, sequenceContext),
                         static_cast<unsigned short> ((*stepData)[Step::velInd]),
                         static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
                 }
@@ -125,7 +134,7 @@ void CommandProcessor::initialiseCommands() {
                 CommandData::machineUtils->sendMessageToMachine(
                     static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
                     static_cast<unsigned short> (sequenceContext->machineId),
-                    static_cast<unsigned short> ((*stepData)[Step::noteInd]),
+                    playbackNote(*stepData, sequenceContext),
                     static_cast<unsigned short> ((*stepData)[Step::velInd]),
                     static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
             }
@@ -144,7 +153,7 @@ void CommandProcessor::initialiseCommands() {
                 CommandData::machineUtils->sendMessageToMachine(
                     CommandType::WavetableSynth,
                     static_cast<unsigned short> (sequenceContext->machineId),
-                    static_cast<unsigned short> ((*stepData)[Step::noteInd]),
+                    playbackNote(*stepData, sequenceContext),
                     static_cast<unsigned short> ((*stepData)[Step::velInd]),
                     static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
             }

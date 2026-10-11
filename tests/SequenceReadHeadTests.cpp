@@ -67,6 +67,7 @@ int main()
     for (std::size_t step = 0; step < 8; ++step) putNote(sequence, step, 60.0 + step);
     require(sequence.getReadHeadCount() == 1, "default sequence has one head");
     require(sequence.getReadHeadConfig(0).mode == SequenceReadMode::linear, "default head is linear");
+    require(sequence.getReadHeadConfig(0).octaves == 1, "default head has one octave layer");
 
     sequence.resetReadHeads(true);
     sequence.tick(true);
@@ -310,6 +311,131 @@ int main()
     require(actionSequencer.howManySequences() == 3, "a second editor delete removes one sequence");
     require(actionEditor.getArmedSequence() == 1,
             "editor delete shifts a later armed sequence left");
+
+    Sequencer keyboardSequencer(1, 4);
+    keyboardSequencer.stop();
+    putNote(*keyboardSequencer.getSequence(0), 0, 60.0);
+    SequencerEditor keyboardEditor(&keyboardSequencer);
+    machines.notes.clear();
+    require(keyboardEditor.handleChordKey('q'), "sequence-page chord key is handled");
+    const auto sequenceChord = keyboardSequencer.getStepData(0, 0);
+    require(sequenceChord.size() == 3 && sequenceChord[0][Step::noteInd] == 60.0
+                && sequenceChord[1][Step::noteInd] == 64.0 && sequenceChord[2][Step::noteInd] == 67.0,
+            "sequence-page chord key writes the expected major chord");
+    require(machines.notes.size() == 3, "sequence-page chord auditions while stopped");
+
+    keyboardEditor.gotoMixerPage();
+    const auto beforePreview = keyboardSequencer.getStepData(0, 0);
+    machines.notes.clear();
+    require(keyboardEditor.handleNoteKey('z'), "mixer-page piano key is handled");
+    require(keyboardEditor.handleChordKey('q'), "mixer-page chord key is handled");
+    require(keyboardSequencer.getStepData(0, 0) == beforePreview,
+            "mixer-page musical keys do not mutate sequence data");
+    require(machines.notes.size() == 4, "mixer-page note and chord audition while stopped");
+    keyboardSequencer.play();
+    machines.notes.clear();
+    require(keyboardEditor.handleNoteKey('x'), "playing mixer-page piano key is swallowed");
+    require(machines.notes.empty(), "preview remains suppressed while playing");
+
+    Sequencer navigationSequencer(1, 4);
+    SequencerEditor navigationEditor(&navigationSequencer);
+    putNote(*navigationSequencer.getSequence(0), 1, 65.0);
+    navigationSequencer.toggleStepActive(0, 1);
+    navigationSequencer.setStepData(0, 3,
+        {{ static_cast<double>(CommandType::FilterCutoff), 1000.0, 0.0, 0.0 }});
+    navigationEditor.setCurrentStep(0);
+    require(navigationEditor.nextNonEmptyStep() && navigationEditor.getCurrentStep() == 1,
+            "next populated step includes inactive note data");
+    require(navigationEditor.nextNonEmptyStep() && navigationEditor.getCurrentStep() == 3,
+            "next populated step includes control commands");
+    navigationSequencer.resetSequence(0);
+    navigationEditor.setCurrentStep(2);
+    require(navigationEditor.nextNonEmptyStep() && navigationEditor.getCurrentStep() == 2,
+            "next populated step leaves the cursor when every step is empty");
+
+    Sequence octaveSequence(nullptr, 1, 0);
+    octaveSequence.setStepData(0, {
+        { static_cast<double>(CommandType::MidiNote), 60.0, 100.0, 1.0 },
+        { static_cast<double>(CommandType::MidiNote), 64.0, 100.0, 1.0 }
+    });
+    auto octaveHead = octaveSequence.getReadHeadConfig(0);
+    octaveHead.ticksPerStep = 1;
+    octaveHead.octaves = 3;
+    octaveSequence.setReadHeadConfig(0, octaveHead);
+    machines.notes.clear();
+    octaveSequence.resetReadHeads(true);
+    for (int tick = 0; tick < 12; ++tick) octaveSequence.tick(true);
+    require(machines.notes.size() == 24, "octave head triggers every row in each step");
+    for (std::size_t index = 0; index < machines.notes.size(); index += 2)
+    {
+        const auto offset = static_cast<int>(machines.notes[index]) - 60;
+        require((offset == 0 || offset == 12 || offset == 24)
+                    && static_cast<int>(machines.notes[index + 1]) - 64 == offset,
+                "one random octave layer is shared by every note row in a step");
+    }
+    octaveHead.octaves = 0;
+    octaveSequence.setReadHeadConfig(0, octaveHead);
+    require(octaveSequence.getReadHeadConfig(0).octaves == 1, "octave range clamps to one");
+    octaveHead.octaves = 99;
+    octaveSequence.setReadHeadConfig(0, octaveHead);
+    require(octaveSequence.getReadHeadConfig(0).octaves == Sequence::maxOctaves, "octave range clamps to four");
+
+    Sequence clampedOctaveSequence(nullptr, 1, 0);
+    clampedOctaveSequence.setStepData(0,
+        {{ static_cast<double>(CommandType::MidiNote), 127.0, 100.0, 1.0 }});
+    auto clampedHead = clampedOctaveSequence.getReadHeadConfig(0);
+    clampedHead.ticksPerStep = 1;
+    clampedHead.octaves = 4;
+    clampedOctaveSequence.setReadHeadConfig(0, clampedHead);
+    machines.notes.clear();
+    clampedOctaveSequence.resetReadHeads(true);
+    for (int tick = 0; tick < 4; ++tick) clampedOctaveSequence.tick(true);
+    require(std::all_of(machines.notes.begin(), machines.notes.end(), [] (unsigned short note) { return note == 127; }),
+            "octave playback clamps high MIDI notes to 127");
+
+    Sequence octaveControlSequence(nullptr, 1, 0);
+    octaveControlSequence.setControlMode(true);
+    octaveControlSequence.setStepData(0,
+        {{ static_cast<double>(CommandType::FilterCutoff), 1234.0, 0.0, 0.0 }});
+    auto controlOctaveHead = octaveControlSequence.getReadHeadConfig(0);
+    controlOctaveHead.ticksPerStep = 1;
+    controlOctaveHead.octaves = 4;
+    octaveControlSequence.setReadHeadConfig(0, controlOctaveHead);
+    machines.cutoffs.clear();
+    octaveControlSequence.resetReadHeads(true);
+    octaveControlSequence.tick(true);
+    require(machines.cutoffs == std::vector<std::pair<unsigned short, double>>{{0, 1234.0}},
+            "octave playback does not transpose control commands");
+
+    Sequence implodeSequence(nullptr, 8, 0);
+    for (std::size_t step = 0; step < 7; ++step)
+        putNote(implodeSequence, step, 66.0 - static_cast<double>(step));
+    implodeSequence.implodeNotes();
+    require(implodeSequence.getLength() == 2, "seven notes implode into two chord steps");
+    const auto firstChord = implodeSequence.getStepData(0);
+    const auto secondChord = implodeSequence.getStepData(1);
+    require(firstChord.size() == 4 && secondChord.size() == 3,
+            "implode distributes seven notes as four and three");
+    require(firstChord[0][Step::noteInd] == 60.0 && firstChord[1][Step::noteInd] == 62.0
+                && firstChord[2][Step::noteInd] == 64.0 && firstChord[3][Step::noteInd] == 66.0
+                && secondChord[0][Step::noteInd] == 61.0 && secondChord[1][Step::noteInd] == 63.0
+                && secondChord[2][Step::noteInd] == 65.0,
+            "implode stable-sorts then distributes notes round-robin");
+
+    for (const auto& expected : std::vector<std::pair<std::size_t, std::size_t>>{{6, 2}, {8, 2}, {9, 3}, {12, 4}})
+    {
+        Sequence sizedImplode(nullptr, expected.first, 0);
+        for (std::size_t step = 0; step < expected.first; ++step)
+            putNote(sizedImplode, step, 48.0 + static_cast<double>(step));
+        sizedImplode.implodeNotes();
+        require(sizedImplode.getLength() == expected.second,
+                "implode creates the expected number of chord steps");
+    }
+
+    Sequence emptyImplode(nullptr, 4, 0);
+    emptyImplode.implodeNotes();
+    require(emptyImplode.getLength() == 1 && !emptyImplode.stepHasTriggerableEvent(0),
+            "imploding an empty sequence leaves one blank step");
 
     return 0;
 }

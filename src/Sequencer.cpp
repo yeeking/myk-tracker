@@ -384,7 +384,13 @@ void Sequence::tick(bool trigger, bool isQuarterNoteBoundary)
       if (stepIndex < steps.size() && steps[stepIndex].isActive()
           && steps[stepIndex].hasTriggerableEvent())
       {
-        steps[stepIndex].trigger(steps[stepIndex].howManyDataRows(), &context);
+        auto triggerContext = context;
+        if (head.config.octaves > 1)
+        {
+          std::uniform_int_distribution<int> octaveLayer(0, static_cast<int>(head.config.octaves - 1));
+          triggerContext.noteTransposeSemitones = 12 * octaveLayer(head.octaveRandom);
+        }
+        steps[stepIndex].trigger(steps[stepIndex].howManyDataRows(), &triggerContext);
         anyStepTriggered = true;
       }
     }
@@ -676,6 +682,7 @@ bool Sequence::setReadHeadConfig(std::size_t head, const SequenceReadHeadConfig&
   auto config = requested;
   config.ticksPerStep = std::max<std::size_t>(1, std::min<std::size_t>(16, config.ticksPerStep));
   config.polyphony = std::max<std::size_t>(1, std::min<std::size_t>(maxChordPolyphony, config.polyphony));
+  config.octaves = std::max<std::size_t>(1, std::min<std::size_t>(maxOctaves, config.octaves));
   config.probability = std::max(0.0, std::min(1.0, config.probability));
   const auto& presets = getRhythmPresets();
   if (std::find(presets.begin(), presets.end(), config.rhythm) == presets.end())
@@ -773,6 +780,7 @@ void Sequence::resetReadHeads(bool immediate)
   for (std::size_t index = 0; index < readHeads.size(); ++index)
   {
     readHeads[index].random.seed(0x4d594b31u + static_cast<std::uint32_t>(index * 0x9e3779b9u));
+    readHeads[index].octaveRandom.seed(0x4f435431u + static_cast<std::uint32_t>(index * 0x9e3779b9u));
     resetReadHeadRuntime(readHeads[index], immediate);
   }
   ticksElapsed = readHeads.empty() ? 0 : readHeads.front().ticksElapsed;
@@ -846,7 +854,7 @@ void Sequence::selectPositions(ReadHeadState& head)
 
 SequenceReadOnly Sequence::getReadOnlyContext() const
 {
-  return SequenceReadOnly{machineType, machineId, controlMode};
+  return SequenceReadOnly{machineType, machineId, controlMode, 0};
 }
 
 void Sequence::setTranspose(double _transpose)
@@ -908,6 +916,50 @@ void Sequence::explodeNotes()
       steps[step].setData({ makeEmptySequenceRow(machineType) });
     }
   }
+}
+
+void Sequence::implodeNotes()
+{
+  // The caller holds the sequencer write lock; this method must not lock again.
+  const std::size_t oldLength = currentLength;
+  std::vector<std::vector<double>> notes;
+  for (std::size_t step = 0; step < oldLength && step < steps.size(); ++step)
+  {
+    const auto data = steps[step].getData();
+    for (const auto& row : data)
+      if (isExplodableNoteRow(row, machineType))
+        notes.push_back(makeExplodedNoteRow(row, machineType));
+  }
+
+  std::stable_sort(notes.begin(), notes.end(), [] (const auto& lhs, const auto& rhs)
+  {
+    return lhs[Step::noteInd] < rhs[Step::noteInd];
+  });
+
+  const std::size_t chordCount = notes.empty()
+      ? 1u
+      : std::max<std::size_t>(1, notes.size() / 3u);
+  std::vector<std::vector<std::vector<double>>> chords(chordCount);
+  for (std::size_t noteIndex = 0; noteIndex < notes.size(); ++noteIndex)
+    chords[noteIndex % chordCount].push_back(notes[noteIndex]);
+
+  ensureEnoughStepsForLength(std::max(oldLength, chordCount));
+  setLength(chordCount);
+  for (std::size_t step = 0; step < std::max(oldLength, chordCount); ++step)
+  {
+    if (step < chords.size() && !chords[step].empty())
+    {
+      steps[step].setData(chords[step]);
+      steps[step].activate();
+    }
+    else
+      steps[step].setData({ makeEmptySequenceRow(machineType) });
+  }
+}
+
+bool Sequence::stepHasTriggerableEvent(std::size_t step) const
+{
+  return step < currentLength && step < steps.size() && steps[step].hasTriggerableEvent();
 }
 
 std::vector<std::vector<std::string>> Sequence::stepAsGridOfStrings(std::size_t step)
@@ -1247,6 +1299,11 @@ bool Sequencer::isStepActive(std::size_t sequence, std::size_t step) const
     // return false;
   return sequences[sequence].isStepActive(step);
 }
+bool Sequencer::stepHasTriggerableEvent(std::size_t sequence, std::size_t step) const
+{
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  return assertSeqAndStep(sequence, step) && sequences[sequence].stepHasTriggerableEvent(step);
+}
 void Sequencer::addStepListener()
 {
 }
@@ -1386,6 +1443,7 @@ std::vector<std::vector<std::string>> Sequencer::getSequenceConfigsAsGridOfStrin
     confGrid[seq].push_back("TPS:" + std::to_string(head.ticksPerStep));
     confGrid[seq].push_back("MODE:" + std::string(Sequence::readModeName(head.mode)));
     confGrid[seq].push_back("POLY:" + std::to_string(head.polyphony));
+    confGrid[seq].push_back("OCT:" + std::to_string(head.octaves));
     confGrid[seq].push_back("RHY:" + head.rhythm);
     confGrid[seq].push_back("P:" + Step::dblToString(head.probability, 2));
     confGrid[seq].push_back(std::string("SEQ:") + (sequence->isControlMode() ? "CON" : "NOTE"));
@@ -1407,6 +1465,15 @@ void Sequencer::explodeSequence(std::size_t sequence)
   if (sequence >= sequences.size())
     return;
   sequences[sequence].explodeNotes();
+  stringUpdateRequested = true;
+}
+
+void Sequencer::implodeSequence(std::size_t sequence)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (sequence >= sequences.size())
+    return;
+  sequences[sequence].implodeNotes();
   stringUpdateRequested = true;
 }
 
@@ -1494,6 +1561,7 @@ void Sequencer::setupSeqConfigSpecs()
   seqConfigSpecs[Sequence::tpsConfig] = Parameter("Ticks per step", "TPS", 1, 16, 1, 4, -1);
   seqConfigSpecs[Sequence::modeConfig] = Parameter("Mode", "MODE", 0, 2, 1, 0, -1);
   seqConfigSpecs[Sequence::polyphonyConfig] = Parameter("Polyphony", "POLY", 1, 5, 1, 3, -1);
+  seqConfigSpecs[Sequence::octavesConfig] = Parameter("Octaves", "OCT", 1, 4, 1, 1, -1);
   seqConfigSpecs[Sequence::rhythmConfig] = Parameter("Rhythm", "RHY", 0, 25, 1, 0, -1);
   seqConfigSpecs[Sequence::probabilityConfig] = Parameter("Probability", "P", 0, 1, 0.1, 1, -1, 2);
   seqConfigSpecs[Sequence::sequenceModeConfig] = Parameter("Sequence mode", "SEQ", 0, 1, 1, 0, -1);
@@ -1525,6 +1593,7 @@ void Sequencer::incrementSeqParam(std::size_t seq, std::size_t paramIndex, std::
   if (paramIndex == Sequence::tpsConfig) config.ticksPerStep = std::min<std::size_t>(16, config.ticksPerStep + 1);
   else if (paramIndex == Sequence::modeConfig) config.mode = static_cast<SequenceReadMode>((static_cast<int>(config.mode) + 1) % 3);
   else if (paramIndex == Sequence::polyphonyConfig) config.polyphony = std::min(Sequence::maxChordPolyphony, config.polyphony + 1);
+  else if (paramIndex == Sequence::octavesConfig) config.octaves = std::min(Sequence::maxOctaves, config.octaves + 1);
   else if (paramIndex == Sequence::rhythmConfig)
   {
     const auto& presets = Sequence::getRhythmPresets();
@@ -1559,6 +1628,7 @@ void Sequencer::decrementSeqParam(std::size_t seq, std::size_t paramIndex, std::
   if (paramIndex == Sequence::tpsConfig) config.ticksPerStep = std::max<std::size_t>(1, config.ticksPerStep - 1);
   else if (paramIndex == Sequence::modeConfig) config.mode = static_cast<SequenceReadMode>((static_cast<int>(config.mode) + 2) % 3);
   else if (paramIndex == Sequence::polyphonyConfig) config.polyphony = std::max<std::size_t>(1, config.polyphony - 1);
+  else if (paramIndex == Sequence::octavesConfig) config.octaves = std::max<std::size_t>(1, config.octaves - 1);
   else if (paramIndex == Sequence::rhythmConfig)
   {
     const auto& presets = Sequence::getRhythmPresets();

@@ -1790,10 +1790,12 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("selectedHead", static_cast<int>(seqEditor.getCurrentConfigHead()));
 
     juce::Array<juce::var> playHeads;
+    juce::Array<juce::var> sequenceSoloStates;
     if (viewedSequencer != nullptr)
     {
         for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
         {
+            sequenceSoloStates.add(viewedSequencer->getSequence(col)->isSolo());
             const auto heads = viewedSequencer->getSequence(col)->getReadHeadSnapshots();
             for (std::size_t headIndex = 0; headIndex < heads.size(); ++headIndex)
                 for (const auto position : heads[headIndex].positions)
@@ -1807,6 +1809,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
         }
     }
     state->setProperty("playHeads", playHeads);
+    state->setProperty("sequenceSoloStates", sequenceSoloStates);
 }
 
 juce::var TrackerMainProcessor::getUiState()
@@ -1837,6 +1840,7 @@ juce::var TrackerMainProcessor::getUiState()
         item->setProperty("ticksPerStep", static_cast<int>(head.config.ticksPerStep));
         item->setProperty("mode", Sequence::readModeName(head.config.mode));
         item->setProperty("polyphony", static_cast<int>(head.config.polyphony));
+        item->setProperty("octaves", static_cast<int>(head.config.octaves));
         item->setProperty("rhythm", juce::String(head.config.rhythm));
         item->setProperty("probability", head.config.probability);
         juce::Array<juce::var> positions;
@@ -1908,6 +1912,7 @@ juce::var TrackerMainProcessor::serializeSingleSequencer(const Sequencer& sequen
             headObj->setProperty("ticksPerStep", static_cast<int>(head.ticksPerStep));
             headObj->setProperty("mode", Sequence::readModeName(head.mode));
             headObj->setProperty("polyphony", static_cast<int>(head.polyphony));
+            headObj->setProperty("octaves", static_cast<int>(head.octaves));
             headObj->setProperty("rhythm", juce::String(head.rhythm));
             headObj->setProperty("probability", head.probability);
             readHeads.add(headObj.get());
@@ -1978,6 +1983,7 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
                 SequenceReadMode mode{};
                 if (Sequence::parseReadMode(headVar.getProperty("mode", "linear").toString().toStdString(), mode)) config.mode = mode;
                 config.polyphony = static_cast<std::size_t>(static_cast<int>(headVar.getProperty("polyphony", 3)));
+                config.octaves = static_cast<std::size_t>(static_cast<int>(headVar.getProperty("octaves", 1)));
                 config.rhythm = headVar.getProperty("rhythm", "1").toString().toStdString();
                 config.probability = static_cast<double>(headVar.getProperty("probability", 1.0));
                 seq->setReadHeadConfig(headIndex, config);

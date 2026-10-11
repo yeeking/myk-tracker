@@ -13,6 +13,29 @@
 class WavetableSynthMachine final : public MachineInterface
 {
 public:
+    static constexpr std::size_t kUiWaveStepCapacity = 6;
+
+    /** Coherent snapshot of the settings needed to build the static UI previews. */
+    struct UiPreviewState
+    {
+        int waveStepCount = 0;
+        std::array<int, kUiWaveStepCapacity> waveforms {};
+        int subWaveStepCount = 0;
+        std::array<int, kUiWaveStepCapacity> subWaveforms {};
+        int subOctaveOffset = 0;
+        float attack = 0.0f;
+        float decay = 0.0f;
+        float sustain = 0.0f;
+        float release = 0.0f;
+        float bend = 0.0f;
+        float maxAttack = 0.0f;
+        float maxDecay = 0.0f;
+        float maxRelease = 0.0f;
+
+        bool operator==(const UiPreviewState& other) const;
+        bool operator!=(const UiPreviewState& other) const { return !(*this == other); }
+    };
+
     /** Creates the wavetable synth and initialises its tables. */
     WavetableSynthMachine();
 
@@ -55,6 +78,8 @@ public:
     /** Current envelope settings and their display maxima, for UI preview. */
     void getEnvelopeSettings(float& attack, float& decay, float& sustain, float& release, float& bend,
                              float& maxAttack, float& maxDecay, float& maxRelease) const;
+    /** Returns all waveform and envelope preview settings under one state lock. */
+    UiPreviewState getUiPreviewState() const;
 
 private:
     /** Available base waveforms for wavetable morphing. Indices are persisted
@@ -124,7 +149,7 @@ private:
     /** Fixed number of polyphonic voices. */
     static constexpr int kVoiceCount = 8;
     /** Maximum number of wavetable steps in the morph sequence. */
-    static constexpr int kMaxWaveSteps = 6;
+    static constexpr int kMaxWaveSteps = static_cast<int>(kUiWaveStepCapacity);
 
     /** Precomputed waveform tables. */
     std::array<std::array<float, kTableSize>, kWaveformCount> tables {};

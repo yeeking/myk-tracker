@@ -698,6 +698,11 @@ void SequencerEditor::enterDataAtCursor(double inValue)
       head.ticksPerStep = static_cast<std::size_t>(tps);
       sequence->setReadHeadConfig(currentConfigHead, head);
     }
+    else if (currentSeqParam == Sequence::octavesConfig){
+      auto head = sequence->getReadHeadConfig(currentConfigHead);
+      head.octaves = static_cast<std::size_t>(juce::jlimit(1, static_cast<int>(Sequence::maxOctaves), static_cast<int>(inValue)));
+      sequence->setReadHeadConfig(currentConfigHead, head);
+    }
     else if (currentSeqParam == Sequence::probabilityConfig){
       double prob = inValue;
       if (prob < 0) prob = 0;
@@ -738,6 +743,26 @@ void SequencerEditor::nextStep()
   {
     currentStep = sequencer->howManySteps(currentSequence) - 1;
   }
+}
+
+bool SequencerEditor::nextNonEmptyStep()
+{
+  if (sequencer == nullptr)
+    return false;
+  const auto count = sequencer->howManySteps(currentSequence);
+  if (count == 0)
+    return false;
+  const auto start = currentStep % count;
+  for (std::size_t offset = 1; offset <= count; ++offset)
+  {
+    const auto candidate = (start + offset) % count;
+    if (sequencer->stepHasTriggerableEvent(currentSequence, candidate))
+    {
+      currentStep = candidate;
+      return true;
+    }
+  }
+  return true;
 }
 /** moves the editor cursor right - so move to next sequence/ next data field if editing step
  */
@@ -1778,8 +1803,6 @@ void SequencerEditor::previewEnteredNote(double midiNote)
     auto data = sequence->getStepData(stepIndex);
     const size_t safeRow = rowIndex < data.size() ? rowIndex : 0;
 
-    if (getCurrentPage() == SequencerEditorPage::machine)
-      machineInsertCurrentCell(midiNote);
     auto context = sequence->getReadOnlyContext();
     bool useDefaults = data.empty();
     if (data.empty())
@@ -2037,6 +2060,18 @@ void SequencerEditor::toggleSoloCurrentSequence()
     impl->toggleSequenceSolo(getCurrentSequence());
 }
 
+void SequencerEditor::toggleMuteCurrentMixerStack()
+{
+  if (machineHost != nullptr)
+    machineHost->setStackMuted(mixerStack, !machineHost->isStackMuted(mixerStack));
+}
+
+void SequencerEditor::toggleSoloCurrentMixerStack()
+{
+  if (machineHost != nullptr)
+    machineHost->setStackSolo(mixerStack, !machineHost->isStackSolo(mixerStack));
+}
+
 void SequencerEditor::explodeCurrentSequence()
 {
   auto* impl = getSequencerImpl();
@@ -2046,6 +2081,19 @@ void SequencerEditor::explodeCurrentSequence()
 
   impl->explodeSequence(sequence);
 
+  const auto length = sequencer->getSequence(sequence)->getLength();
+  currentStep = length == 0 ? 0 : std::min(currentStep, length - 1);
+  currentStepRow = 0;
+}
+
+void SequencerEditor::implodeCurrentSequence()
+{
+  auto* impl = getSequencerImpl();
+  const auto sequence = getCurrentSequence();
+  if (impl == nullptr || sequencer == nullptr || sequence >= sequencer->howManySequences())
+    return;
+
+  impl->implodeSequence(sequence);
   const auto length = sequencer->getSequence(sequence)->getLength();
   currentStep = length == 0 ? 0 : std::min(currentStep, length - 1);
   currentStepRow = 0;
@@ -2108,10 +2156,11 @@ bool SequencerEditor::handleChordKey(char key)
   if (page == SequencerEditorPage::help)
     return true;
 
-  if (page != SequencerEditorPage::step)
+  if (page == SequencerEditorPage::resetConfirmation)
     return false;
 
-  if (isChordShortcutKey(key) && currentSequenceControlMode())
+  const bool editingSequence = page == SequencerEditorPage::sequence || page == SequencerEditorPage::step;
+  if (editingSequence && isChordShortcutKey(key) && currentSequenceControlMode())
     return true;
 
   for (const auto& shortcut : kChordShortcuts)
@@ -2155,8 +2204,7 @@ bool SequencerEditor::handleNoteKey(char key)
   if (page == SequencerEditorPage::help)
     return true;
 
-  if (page == SequencerEditorPage::resetConfirmation
-      || page == SequencerEditorPage::song)
+  if (page == SequencerEditorPage::resetConfirmation)
     return false;
 
   const auto midiNote = lookupKeyboardMidiNote(key);
@@ -2168,18 +2216,33 @@ bool SequencerEditor::handleNoteKey(char key)
     return true;
 
   const double note = midiNote.value() + (12 * getCurrentOctave());
-  previewEnteredNote(note);
-
-  if (page == SequencerEditorPage::machine)
+  // LOW/HIGH are the deliberate machine-page exception: piano keys set the
+  // selected sampler player's MIDI range instead of merely auditioning.
+  if (page == SequencerEditorPage::machine && isCurrentSamplerRangeCell())
     return machineInsertCurrentCell(note);
 
-  enterStepData(midiNote.value(), Step::noteInd);
+  previewEnteredNote(note);
+
+  if (page == SequencerEditorPage::sequence || page == SequencerEditorPage::step)
+    enterStepData(midiNote.value(), Step::noteInd);
   return true;
+}
+
+bool SequencerEditor::isCurrentSamplerRangeCell() const
+{
+  const auto type = getFocusedMachineDetailType();
+  if (!type.has_value() || type.value() != CommandType::Sampler)
+    return false;
+  if (machineCursorCol != 2 && machineCursorCol != 3)
+    return false;
+  if (machineCursorCol >= machineCells.size() || machineCursorRow >= machineCells[machineCursorCol].size())
+    return false;
+  return machineCells[machineCursorCol][machineCursorRow].onInsert != nullptr;
 }
 
 bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
 {
-  if (editMode != SequencerEditorMode::editingStep || intervals.empty())
+  if (sequencer == nullptr || intervals.empty())
     return false;
 
   auto data = sequencer->getStepData(currentSequence, currentStep);
@@ -2230,9 +2293,12 @@ bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
     }
   }
 
-  writeStepData(std::move(chordRows));
-  clampStepCursorToCurrentStep();
-  requestStringRefresh();
+  if (editMode == SequencerEditorMode::editingStep || editMode == SequencerEditorMode::selectingSeqAndStep)
+  {
+    writeStepData(std::move(chordRows));
+    clampStepCursorToCurrentStep();
+    requestStringRefresh();
+  }
   return true;
 }
 

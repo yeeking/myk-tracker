@@ -9,6 +9,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
+#include <cstdint>
+#include <unordered_map>
 #include "TrackerMainProcessor.h"
 #include "TrackerControlService.h"
 // #include "StringTable.h"
@@ -89,7 +92,9 @@ private:
                          std::vector<float>& scopeSamples);
     void appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
                             std::size_t rows,
-                            const std::vector<float>& envelopeSamples);
+                            const std::vector<float>& envelopeSamples,
+                            const std::string& traceCacheId = {},
+                            std::uint64_t traceCacheRevision = 0);
     void prepareMixerView();
     void prepareHelpView();
     void prepareResetConfirmationView();
@@ -147,6 +152,22 @@ private:
     std::vector<float> samplerColumnWidths;
     /** Polylines drawn over the current grid (machine-page scope band). */
     std::vector<TrackerUIComponent::Trace> currentTraces;
+    struct WavetablePreviewCache
+    {
+        bool valid = false;
+        WavetableSynthMachine::UiPreviewState state;
+        std::vector<TrackerUIComponent::Trace> traces;
+        std::uint64_t revision = 0;
+    };
+    struct EnvelopePreviewCache
+    {
+        bool valid = false;
+        std::array<float, 8> settings {};
+        std::vector<float> samples;
+        std::uint64_t revision = 0;
+    };
+    std::unordered_map<int, WavetablePreviewCache> wavetablePreviewCaches;
+    std::unordered_map<int, EnvelopePreviewCache> filterEnvelopePreviewCaches;
     /** Scale applied to the live scope snapshot by the auto-calibration. */
     float scopeCalScale = 1.0f;
     /** Target scale the auto-calibration eases toward. */

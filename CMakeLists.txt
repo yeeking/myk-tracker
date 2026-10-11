@@ -140,4 +140,19 @@ if (BUILD_TESTING)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
     add_test(NAME sequence-read-head-tests COMMAND sequence-read-head-tests)
+
+    juce_add_console_app(sampler-tuning-tests PRODUCT_NAME "Sampler Tuning Tests")
+    juce_generate_juce_header(sampler-tuning-tests)
+    target_sources(sampler-tuning-tests PRIVATE
+        tests/SamplerTuningTests.cpp
+        src/SuperSamplePlayer.cpp
+        src/SuperSamplerProcessor.cpp)
+    target_include_directories(sampler-tuning-tests PRIVATE src)
+    target_compile_features(sampler-tuning-tests PRIVATE cxx_std_17)
+    target_compile_definitions(sampler-tuning-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JucePlugin_Name="SamplerTuningTests")
+    target_link_libraries(sampler-tuning-tests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME sampler-tuning-tests COMMAND sampler-tuning-tests)
 endif()

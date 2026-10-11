@@ -18,6 +18,10 @@ public:
         int midiHigh { 60 };  // default C4
         /** Static gain applied to playback from this player. */
         float gain { 1.0f };
+        /** Fixed playback offset in semitones, clamped to -36 through +36. */
+        int coarseTuneSemitones { 0 };
+        /** Fixed playback offset in cents, clamped to -99 through +99. */
+        int fineTuneCents { 0 };
         /** True while the player is actively playing its buffer. */
         bool isPlaying { false };
         /** Most recent block VU reading in decibels. */
@@ -42,6 +46,8 @@ public:
     void setMidiRange (int low, int high) noexcept;
     /** Sets the static gain multiplier for this player. */
     void setGain (float g) noexcept;
+    /** Sets the fixed coarse/fine playback tuning for this player. */
+    void setTuning (int coarseSemitones, int fineCents) noexcept;
     /** Updates the file metadata and status shown in the UI. */
     void setFilePathAndStatus (const juce::String& path, const juce::String& statusLabel, const juce::String& displayName = {});
     /** Returns the current UI-facing player state. */
@@ -74,6 +80,8 @@ public:
     void endBlock() noexcept;
     /** Returns the last computed block VU value in decibels. */
     float getLastVuDb() const noexcept { return lastVuDb; }
+    /** Returns the cached source samples consumed per output sample. */
+    double getPlaybackRatio() const noexcept { return playbackRatio; }
 
 private:
     /** Adds a sample to the running VU calculation. */

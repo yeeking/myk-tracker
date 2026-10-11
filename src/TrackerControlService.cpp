@@ -778,6 +778,13 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     if (value < 1 || value > 5) return fail("invalid_argument", "polyphony must be between 1 and 5");
                     head.polyphony = static_cast<std::size_t>(value);
                 }
+                if (hasArg(args, "octaves"))
+                {
+                    const int value = intArg(args, "octaves");
+                    if (value < 1 || value > static_cast<int>(Sequence::maxOctaves))
+                        return fail("invalid_argument", "octaves must be between 1 and 4");
+                    head.octaves = static_cast<std::size_t>(value);
+                }
                 if (hasArg(args, "rhythm")) head.rhythm = stringArg(args, "rhythm").toStdString();
                 if (std::find(Sequence::getRhythmPresets().begin(), Sequence::getRhythmPresets().end(), head.rhythm) == Sequence::getRhythmPresets().end())
                     return fail("invalid_argument", "rhythm must be a non-zero binary pattern of one to four bits");
@@ -1182,9 +1189,17 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         handled = true;
                     }
                     else if (shift && key == 'c') { processor.setInternalClockEnabled(!processor.isInternalClockEnabled()); contentChanged = true; handled = true; }
-                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && (key == 's' || key == 'm'))
+                    else if (!ctrl && shift
+                             && (editor.getCurrentPage() == SequencerEditorPage::sequence
+                                 || editor.getCurrentPage() == SequencerEditorPage::mixer)
+                             && (key == 's' || key == 'm'))
                     {
-                        if (key == 's') editor.toggleSoloCurrentSequence();
+                        if (editor.getCurrentPage() == SequencerEditorPage::mixer)
+                        {
+                            if (key == 's') editor.toggleSoloCurrentMixerStack();
+                            else editor.toggleMuteCurrentMixerStack();
+                        }
+                        else if (key == 's') editor.toggleSoloCurrentSequence();
                         else editor.toggleMuteCurrentSequence();
                         contentChanged = true;
                         handled = true;
@@ -1192,6 +1207,12 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'e')
                     {
                         editor.explodeCurrentSequence();
+                        contentChanged = true;
+                        handled = true;
+                    }
+                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'g')
+                    {
+                        editor.implodeCurrentSequence();
                         contentChanged = true;
                         handled = true;
                     }
@@ -1250,7 +1271,15 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (keyCode == juce::KeyPress::spaceKey) { editor.togglePlayback(); handled = true; }
                     else if (keyCode == '5') { handled = editor.enterMachineDetailFromAnywhere(); viewChanged = handled; }
                     else if (keyCode >= '1' && keyCode <= '7') { handled = editor.selectPageShortcut(keyCode - '0'); viewChanged = handled; }
-                    else if (editor.handleChordKey(key) || editor.handleControlKey(key) || editor.handleNoteKey(key)) { contentChanged = true; handled = true; }
+                    else if (editor.handleChordKey(key) || editor.handleControlKey(key) || editor.handleNoteKey(key))
+                    {
+                        const auto page = editor.getCurrentPage();
+                        const bool samplerRangeInput = page == SequencerEditorPage::machine
+                            && editor.isCurrentSamplerRangeCell();
+                        contentChanged = page == SequencerEditorPage::sequence
+                            || page == SequencerEditorPage::step || samplerRangeInput;
+                        handled = true;
+                    }
                     else if (keyCode == juce::KeyPress::backspaceKey) { handled = editor.machineHandleTextBackspace(); if (!handled) { editor.resetAtCursor(); handled = true; } contentChanged = handled; }
                     else if (keyCode == juce::KeyPress::escapeKey) { handled = editor.dismissCurrentTransientUi(); viewChanged = handled; }
                     else if (keyCode == juce::KeyPress::returnKey) { editor.click(); contentChanged = true; handled = true; }
@@ -1258,22 +1287,13 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (keyCode == juce::KeyPress::downKey) { sequenceSelection.active = false; editor.moveCursorDown(); viewChanged = true; handled = true; }
                     else if (keyCode == juce::KeyPress::leftKey) { sequenceSelection.active = false; editor.moveCursorLeft(); viewChanged = true; handled = true; }
                     else if (keyCode == juce::KeyPress::rightKey) { sequenceSelection.active = false; editor.moveCursorRight(); viewChanged = true; handled = true; }
-                    else if (key == 'e') { editor.toggleArmCurrentSequence(); viewChanged = true; handled = true; }
                     else if (key == 'r') { editor.rewindTransport(); handled = true; }
                     else if (key == '\t')
                     {
                         if (editor.isEditingMachineDetail())
                             handled = editor.cycleMachineDetailNext();
                         else if (editor.getCurrentPage() == SequencerEditorPage::step)
-                        {
-                            const auto* sequencer = processor.getSequencer();
-                            const auto count = sequencer != nullptr ? sequencer->howManySteps(editor.getCurrentSequence()) : 0u;
-                            if (count > 0 && editor.getCurrentStep() + 1u >= count)
-                                editor.setCurrentStep(0);
-                            else
-                                editor.nextStep();
-                            handled = count > 0;
-                        }
+                            handled = editor.nextNonEmptyStep();
                         else
                         {
                             editor.nextStep();
@@ -1307,6 +1327,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 else if (action == "mute") editor.toggleMuteCurrentSequence();
                 else if (action == "solo") editor.toggleSoloCurrentSequence();
                 else if (action == "explode") editor.explodeCurrentSequence();
+                else if (action == "implode") editor.implodeCurrentSequence();
                 else if (action == "control_mode")
                 {
                     auto* sequencer = processor.getSequencer();

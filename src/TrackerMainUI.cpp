@@ -554,6 +554,19 @@ void TrackerMainUI::prepareSequenceView()
               cell.isControlModeSequence = true;
       }
   }
+  const auto soloStates = ui.getProperty("sequenceSoloStates", juce::var());
+  if (soloStates.isArray())
+  {
+      const auto& soloStateArray = *soloStates.getArray();
+      for (int sequenceIndex = 0; sequenceIndex < soloStateArray.size()
+           && static_cast<std::size_t>(sequenceIndex) < boxes.size(); ++sequenceIndex)
+      {
+          if (!static_cast<bool>(soloStateArray[sequenceIndex]))
+              continue;
+          for (auto& cell : boxes[static_cast<std::size_t>(sequenceIndex)])
+              cell.isSoloSequence = true;
+      }
+  }
   const std::array<juce::Colour, 3> headColours { juce::Colours::red, juce::Colours::cyan, juce::Colours::magenta };
   for (const auto& headCell : headCells)
   {
@@ -760,8 +773,8 @@ void TrackerMainUI::prepareMachineConfigView()
             samplerColumnWidths[col] = columnWidth;
             hasCustomWidths = hasCustomWidths || columnWidth > 1.0f;
         }
-        if (!hasCustomWidths && samplerColumnWidths.size() == 6)
-            samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
+        if (!hasCustomWidths && samplerColumnWidths.size() == 8)
+            samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
 
         TrackerUIComponent::Style style;
         style.background = samplerPalette.background;
@@ -816,86 +829,104 @@ void TrackerMainUI::prepareMachineConfigView()
         if (auto* synth = dynamic_cast<WavetableSynthMachine*>(
                 audioProcessor.getMachine(CommandType::WavetableSynth, static_cast<std::size_t>(machineId))))
         {
-            constexpr int kGlyphSamples = 32;
-            const int stepCount = synth->getWaveStepCount();
-            for (int step = 0; step < stepCount; ++step)
+            const auto previewState = synth->getUiPreviewState();
+            auto& previewCache = wavetablePreviewCaches[machineId];
+            if (!previewCache.valid || previewCache.state != previewState)
             {
-                const float rowTop = static_cast<float>(step + 5);
-                if (rowTop + 1.0f > static_cast<float>(rows))
-                    break;
-                TrackerUIComponent::Trace glyph;
-                glyph.colStart = 0.0f;
-                glyph.colEnd = 1.0f;
-                glyph.rowTop = rowTop;
-                glyph.rowBottom = rowTop + 1.0f;
-                glyph.samples.resize(static_cast<std::size_t>(kGlyphSamples));
-                const int waveformIndex = synth->getWaveStepWaveform(step);
-                for (int i = 0; i < kGlyphSamples; ++i)
-                    glyph.samples[static_cast<std::size_t>(i)] =
-                        synth->sampleWaveformForUi(waveformIndex,
-                                                    static_cast<double>(i) / static_cast<double>(kGlyphSamples - 1));
-                glyph.color = juce::Colour(0xFF29E0FF);
-                glyph.z = 1.15f;
-                glyph.lineWidth = 2.0f;
-                currentTraces.push_back(std::move(glyph));
+                previewCache.valid = true;
+                previewCache.state = previewState;
+                ++previewCache.revision;
+                previewCache.traces.clear();
+                previewCache.traces.reserve(static_cast<std::size_t>(
+                    previewState.waveStepCount + previewState.subWaveStepCount + 1));
+
+                constexpr int kGlyphSamples = 32;
+                for (int step = 0; step < previewState.waveStepCount; ++step)
+                {
+                    const float rowTop = static_cast<float>(step + 5);
+                    if (rowTop + 1.0f > static_cast<float>(rows))
+                        break;
+                    TrackerUIComponent::Trace glyph;
+                    glyph.colStart = 0.0f;
+                    glyph.colEnd = 1.0f;
+                    glyph.rowTop = rowTop;
+                    glyph.rowBottom = rowTop + 1.0f;
+                    glyph.samples.resize(static_cast<std::size_t>(kGlyphSamples));
+                    const int waveformIndex = previewState.waveforms[static_cast<std::size_t>(step)];
+                    for (int i = 0; i < kGlyphSamples; ++i)
+                        glyph.samples[static_cast<std::size_t>(i)] =
+                            synth->sampleWaveformForUi(waveformIndex,
+                                                      static_cast<double>(i) / static_cast<double>(kGlyphSamples - 1));
+                    glyph.color = juce::Colour(0xFF29E0FF);
+                    glyph.z = 1.15f;
+                    glyph.lineWidth = 2.0f;
+                    glyph.cacheId = "wavetable/" + std::to_string(machineId)
+                        + "/main/" + std::to_string(step);
+                    glyph.cacheRevision = previewCache.revision;
+                    previewCache.traces.push_back(std::move(glyph));
+                }
+
+                // Sub-osc previews: one trace per sub wave step row, beside the
+                // main oscillator's. The tint tends toward red as the sub's
+                // octave offset drops.
+                constexpr juce::uint32 subTints[] = {
+                    0xFFFF5A5A, // -3
+                    0xFFFF9E4A, // -2
+                    0xFFE8E24A, // -1
+                    0xFF8CE84A, //  0
+                    0xFF4AE87A, // +1
+                    0xFF3DE8C8, // +2
+                    0xFF29A0FF  // +3
+                };
+                const juce::Colour subTint(subTints[static_cast<std::size_t>(
+                    juce::jlimit(-3, 3, previewState.subOctaveOffset) + 3)]);
+                for (int step = 0; step < previewState.subWaveStepCount; ++step)
+                {
+                    const float rowTop = static_cast<float>(step + 5);
+                    if (rowTop + 1.0f > static_cast<float>(rows))
+                        break;
+                    TrackerUIComponent::Trace glyph;
+                    glyph.colStart = 2.0f;
+                    glyph.colEnd = 3.0f;
+                    glyph.rowTop = rowTop;
+                    glyph.rowBottom = rowTop + 1.0f;
+                    glyph.samples.resize(static_cast<std::size_t>(kGlyphSamples));
+                    const int waveformIndex = previewState.subWaveforms[static_cast<std::size_t>(step)];
+                    for (int i = 0; i < kGlyphSamples; ++i)
+                        glyph.samples[static_cast<std::size_t>(i)] =
+                            synth->sampleWaveformForUi(waveformIndex,
+                                                      static_cast<double>(i) / static_cast<double>(kGlyphSamples - 1));
+                    glyph.color = subTint;
+                    glyph.z = 1.15f;
+                    glyph.lineWidth = 2.0f;
+                    glyph.cacheId = "wavetable/" + std::to_string(machineId)
+                        + "/sub/" + std::to_string(step);
+                    glyph.cacheRevision = previewCache.revision;
+                    previewCache.traces.push_back(std::move(glyph));
+                }
+
+                TrackerUIComponent::Trace envelope;
+                envelope.colStart = 4.0f;
+                envelope.colEnd = 6.0f;
+                envelope.rowTop = 1.0f;
+                envelope.rowBottom = 5.0f;
+                constexpr int kEnvSamples = 48;
+                envelope.samples.resize(static_cast<std::size_t>(kEnvSamples));
+                CurvedAdsr::fillTraceSamples(envelope.samples,
+                                             previewState.attack, previewState.decay,
+                                             previewState.sustain, previewState.release,
+                                             previewState.bend, previewState.maxAttack,
+                                             previewState.maxDecay, previewState.maxRelease);
+                envelope.color = juce::Colour(0xFFFFD21E);
+                envelope.z = 1.15f;
+                envelope.lineWidth = 2.0f;
+                envelope.cacheId = "wavetable/" + std::to_string(machineId) + "/envelope";
+                envelope.cacheRevision = previewCache.revision;
+                previewCache.traces.push_back(std::move(envelope));
             }
 
-            // Sub-osc previews: one trace per sub wave step row, beside the
-            // main oscillator's. The tint tends toward red as the sub's
-            // octave offset drops.
-            constexpr juce::uint32 subTints[] = {
-                0xFFFF5A5A, // -3
-                0xFFFF9E4A, // -2
-                0xFFE8E24A, // -1
-                0xFF8CE84A, //  0
-                0xFF4AE87A, // +1
-                0xFF3DE8C8, // +2
-                0xFF29A0FF  // +3
-            };
-            const int subOctave = synth->getSubOctaveOffset();
-            const juce::Colour subTint(subTints[
-                static_cast<std::size_t>(juce::jlimit(-3, 3, subOctave) + 3)]);
-            const int subStepCount = synth->getSubWaveStepCount();
-            for (int step = 0; step < subStepCount; ++step)
-            {
-                const float rowTop = static_cast<float>(step + 5);
-                if (rowTop + 1.0f > static_cast<float>(rows))
-                    break;
-                TrackerUIComponent::Trace glyph;
-                glyph.colStart = 2.0f;
-                glyph.colEnd = 3.0f;
-                glyph.rowTop = rowTop;
-                glyph.rowBottom = rowTop + 1.0f;
-                glyph.samples.resize(static_cast<std::size_t>(kGlyphSamples));
-                const int waveformIndex = synth->getSubWaveStepWaveform(step);
-                for (int i = 0; i < kGlyphSamples; ++i)
-                    glyph.samples[static_cast<std::size_t>(i)] =
-                        synth->sampleWaveformForUi(waveformIndex,
-                                                    static_cast<double>(i) / static_cast<double>(kGlyphSamples - 1));
-                glyph.color = subTint;
-                glyph.z = 1.15f;
-                glyph.lineWidth = 2.0f;
-                currentTraces.push_back(std::move(glyph));
-            }
-
-            float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f, bend = 0.0f;
-            float maxAttack = 2.0f, maxDecay = 2.0f, maxRelease = 3.0f;
-            synth->getEnvelopeSettings(attack, decay, sustain, release, bend, maxAttack, maxDecay, maxRelease);
-
-            TrackerUIComponent::Trace envelope;
-            envelope.colStart = 4.0f;
-            envelope.colEnd = 6.0f;
-            envelope.rowTop = 1.0f;
-            envelope.rowBottom = 5.0f;
-            constexpr int kEnvSamples = 48;
-            envelope.samples.resize(static_cast<std::size_t>(kEnvSamples));
-            CurvedAdsr::fillTraceSamples(envelope.samples,
-                                         attack, decay, sustain, release, bend,
-                                         maxAttack, maxDecay, maxRelease);
-            envelope.color = juce::Colour(0xFFFFD21E);
-            envelope.z = 1.15f;
-            envelope.lineWidth = 2.0f;
-            currentTraces.push_back(std::move(envelope));
+            currentTraces.insert(currentTraces.end(),
+                                 previewCache.traces.begin(), previewCache.traces.end());
         }
 
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [wavetable synth]";
@@ -922,18 +953,27 @@ void TrackerMainUI::prepareMachineConfigView()
         std::size_t rowsBeforeScope = baseRows;
         if (detail == CommandType::FilterFx)
         {
-            std::vector<float> envelopeSamples(48);
+            auto& previewCache = filterEnvelopePreviewCaches[machineId];
+            std::array<float, 8> settings {};
             if (auto* filter = dynamic_cast<FilterFxMachine*>(
                     audioProcessor.getMachine(CommandType::FilterFx, static_cast<std::size_t>(machineId))))
             {
-                float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f, bend = 0.0f;
-                float maxAttack = 2.0f, maxDecay = 2.0f, maxRelease = 3.0f;
-                filter->getEnvelopeSettings(attack, decay, sustain, release, bend, maxAttack, maxDecay, maxRelease);
-                CurvedAdsr::fillTraceSamples(envelopeSamples,
-                                             attack, decay, sustain, release, bend,
-                                             maxAttack, maxDecay, maxRelease);
+                filter->getEnvelopeSettings(settings[0], settings[1], settings[2], settings[3],
+                                            settings[4], settings[5], settings[6], settings[7]);
             }
-            appendEnvelopeBand(machineBoxes, baseRows, envelopeSamples);
+            if (!previewCache.valid || previewCache.settings != settings)
+            {
+                previewCache.valid = true;
+                previewCache.settings = settings;
+                ++previewCache.revision;
+                previewCache.samples.resize(48);
+                CurvedAdsr::fillTraceSamples(previewCache.samples,
+                                             settings[0], settings[1], settings[2], settings[3],
+                                             settings[4], settings[5], settings[6], settings[7]);
+            }
+            appendEnvelopeBand(machineBoxes, baseRows, previewCache.samples,
+                               "filter/" + std::to_string(machineId) + "/envelope",
+                               previewCache.revision);
             rowsBeforeScope += 2;
         }
 
@@ -1093,7 +1133,9 @@ void TrackerMainUI::appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
 
 void TrackerMainUI::appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
                                        std::size_t rows,
-                                       const std::vector<float>& envelopeSamples)
+                                       const std::vector<float>& envelopeSamples,
+                                       const std::string& traceCacheId,
+                                       std::uint64_t traceCacheRevision)
 {
     const std::size_t cols = boxes.size();
     if (cols == 0)
@@ -1127,6 +1169,8 @@ void TrackerMainUI::appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
         envelope.color = juce::Colour(0xFFFFD21E);
         envelope.z = 1.15f;
         envelope.lineWidth = 2.0f;
+        envelope.cacheId = traceCacheId;
+        envelope.cacheRevision = traceCacheRevision;
         currentTraces.push_back(std::move(envelope));
     }
 }
@@ -1273,11 +1317,11 @@ void TrackerMainUI::prepareHelpView()
     const std::vector<std::array<std::string, 6>> helpRows = {
         {"SPACE", "PLAY/STOP", "ARROWS", "MOVE", "ENTER", "ACT"},
         {"BACK", "RESET/EXIT", "TAB", "STEP", "[ ]", "ADJUST"},
-        {"+/-", "ROWS", "E", "ARM", "R", "REWIND"},
+        {"+/-", "ROWS", "S+C", "CLOCK", "R", "REWIND"},
         {"1-7", "PAGES", "S+I", "INSERT", "S+K", "DELETE"},
         {"S+H", "HELP", "S+UP/DN", "SELECT", "C+C", "COPY"},
         {"C+V", "PASTE", "C+=", "SHIFT +", "C+-", "SHIFT -"},
-        {"S+S", "SOLO", "S+M", "MUTE", "S+E", "EXPLODE"},
+        {"S+S", "SOLO", "S+M", "MUTE", "S+E/G", "XPL/IMP"},
         {"Z X C", "CONTROL", "Q-P", "CHORDS", ", .", "OCTAVE"}
     };
 
@@ -1486,8 +1530,11 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
             cell.glowColor = samplerViewActive ? samplerPalette.glowActive : palette.gridPlayhead;
             cell.glow = glowValue;
             cell.depthScale = samplerViewActive ? getSamplerCellDepthScale(box) : getCellDepthScale(box);
-            cell.drawOutline = samplerViewActive ? box.isSelected : (box.hasNote || box.isControlModeSequence);
-            cell.outlineColor = box.isControlModeSequence ? palette.sequenceControlModeOutline : palette.gridNote;
+            cell.drawOutline = samplerViewActive ? box.isSelected
+                : (box.hasNote || box.isControlModeSequence || box.isSoloSequence);
+            cell.outlineColor = box.isSoloSequence ? juce::Colours::yellow
+                : box.isControlModeSequence ? palette.sequenceControlModeOutline : palette.gridNote;
+            cell.outlineLineWidth = box.isSoloSequence ? 5.0f : 3.0f;
 
             cell.fillFraction = (!samplerViewActive && box.hasValueScale && !box.isDisabled)
                 ? box.valueNorm
@@ -1527,12 +1574,10 @@ juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
     // normal selected/empty fills.
     if (cell.isSelected)
         return PaletteDefaults::cursor.fill;
-    if (cell.useCustomFillColour)
-        return juce::Colour(cell.customFillArgb);
-    if (cell.isArmed)
-        return palette.statusOk;
 
-    return palette.gridEmpty;
+    auto colour = cell.useCustomFillColour ? juce::Colour(cell.customFillArgb)
+        : cell.isArmed ? palette.statusOk : palette.gridEmpty;
+    return colour;
 }
 
 juce::Colour TrackerMainUI::getTextColour(const UIBox& cell) const
@@ -1856,10 +1901,6 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                     handled = true;
                     break;
                     
-                case 'e':
-                    seqEditor->toggleArmCurrentSequence();
-                    handled = true;
-                    break;
                 case 'r':
                     seqEditor->rewindTransport();
                     handled = true;

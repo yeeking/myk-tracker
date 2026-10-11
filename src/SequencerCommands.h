@@ -36,6 +36,8 @@ struct SequenceReadOnly {
     double machineType;
     double machineId;
     bool controlMode = false;
+    /** Per-trigger playback offset; stored sequence rows remain unchanged. */
+    int noteTransposeSemitones = 0;
 };
 
 /** Commands are the main things that are executed by the sequencer when triggering a step 

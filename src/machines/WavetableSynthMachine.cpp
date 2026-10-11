@@ -20,6 +20,28 @@ constexpr float kMinDetuneCents = -50.0f;
 constexpr float kMaxDetuneCents = 50.0f;
 constexpr float kMinEnvelopeBend = -2.0f;
 constexpr float kMaxEnvelopeBend = 2.0f;
+
+bool samePreviewValue(float lhs, float rhs)
+{
+    return std::abs(lhs - rhs) < 0.000001f;
+}
+}
+
+bool WavetableSynthMachine::UiPreviewState::operator==(const UiPreviewState& other) const
+{
+    return waveStepCount == other.waveStepCount
+        && waveforms == other.waveforms
+        && subWaveStepCount == other.subWaveStepCount
+        && subWaveforms == other.subWaveforms
+        && subOctaveOffset == other.subOctaveOffset
+        && samePreviewValue(attack, other.attack)
+        && samePreviewValue(decay, other.decay)
+        && samePreviewValue(sustain, other.sustain)
+        && samePreviewValue(release, other.release)
+        && samePreviewValue(bend, other.bend)
+        && samePreviewValue(maxAttack, other.maxAttack)
+        && samePreviewValue(maxDecay, other.maxDecay)
+        && samePreviewValue(maxRelease, other.maxRelease);
 }
 
 WavetableSynthMachine::WavetableSynthMachine()
@@ -444,8 +466,7 @@ float WavetableSynthMachine::sampleWaveformForUi(int waveformIndex, double phase
 {
     if (waveformIndex < 0 || waveformIndex >= static_cast<int>(Waveform::count))
         return 0.0f;
-    // Waveform tables are immutable after construction; the lock only keeps the
-    // step selection coherent with concurrent UI edits.
+    // Waveform tables are immutable after construction, so sampling needs no lock.
     return sampleWaveform(static_cast<Waveform>(waveformIndex), phase);
 }
 
@@ -463,6 +484,29 @@ void WavetableSynthMachine::getEnvelopeSettings(float& attack, float& decay, flo
     maxAttack = kMaxAttackSeconds;
     maxDecay = kMaxDecaySeconds;
     maxRelease = kMaxReleaseSeconds;
+}
+
+WavetableSynthMachine::UiPreviewState WavetableSynthMachine::getUiPreviewState() const
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    UiPreviewState state;
+    state.waveStepCount = waveStepCount;
+    state.subWaveStepCount = subWaveStepCount;
+    state.subOctaveOffset = subOctaveOffset;
+    for (std::size_t i = 0; i < kUiWaveStepCapacity; ++i)
+    {
+        state.waveforms[i] = static_cast<int>(waveSteps[i]);
+        state.subWaveforms[i] = static_cast<int>(subWaveSteps[i]);
+    }
+    state.attack = attackSeconds;
+    state.decay = decaySeconds;
+    state.sustain = sustainLevel;
+    state.release = releaseSeconds;
+    state.bend = envelopeBend;
+    state.maxAttack = kMaxAttackSeconds;
+    state.maxDecay = kMaxDecaySeconds;
+    state.maxRelease = kMaxReleaseSeconds;
+    return state;
 }
 
 bool WavetableSynthMachine::handleIncomingNote(unsigned short note,
