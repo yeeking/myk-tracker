@@ -1196,12 +1196,19 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     {
                         if (editor.getCurrentPage() == SequencerEditorPage::mixer)
                         {
-                            if (key == 's') editor.toggleSoloCurrentMixerStack();
-                            else editor.toggleMuteCurrentMixerStack();
+                            if (!editor.isMixerMasterSelected())
+                            {
+                                if (key == 's') editor.toggleSoloCurrentMixerStack();
+                                else editor.toggleMuteCurrentMixerStack();
+                                contentChanged = true;
+                            }
                         }
-                        else if (key == 's') editor.toggleSoloCurrentSequence();
-                        else editor.toggleMuteCurrentSequence();
-                        contentChanged = true;
+                        else
+                        {
+                            if (key == 's') editor.toggleSoloCurrentSequence();
+                            else editor.toggleMuteCurrentSequence();
+                            contentChanged = true;
+                        }
                         handled = true;
                     }
                     else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'e')

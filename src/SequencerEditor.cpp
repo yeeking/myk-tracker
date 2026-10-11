@@ -195,6 +195,8 @@ void SequencerEditor::resetCursor()
   machineEditRow = 0;
   machineCursorRow = 0;
   machineCursorCol = 0;
+  mixerColumn = 0;
+  mixerRow = 0;
   machineStackDetailMode = false;
   machineSelectedStackSlot = 0;
 }
@@ -349,8 +351,10 @@ void SequencerEditor::cycleAtCursor()
   case SequencerEditorMode::mixer:
     if (machineHost != nullptr)
     {
-      if (mixerRow == 1) machineHost->setStackMuted(mixerStack, !machineHost->isStackMuted(mixerStack));
-      else if (mixerRow == 2) machineHost->setStackSolo(mixerStack, !machineHost->isStackSolo(mixerStack));
+      const auto stack = getSelectedMixerStack();
+      if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, !machineHost->isStackMuted(*stack));
+      else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, !machineHost->isStackSolo(*stack));
+      else if (!stack && mixerRow == 2) machineHost->toggleMasterRecording();
     }
     break;
 
@@ -776,7 +780,7 @@ void SequencerEditor::moveCursorLeft()
   case SequencerEditorPage::step: moveCursorLeftOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorLeftOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorLeftOnMachinePage(); break;
-  case SequencerEditorPage::mixer: if (mixerStack > 0) --mixerStack; break;
+  case SequencerEditorPage::mixer: if (mixerColumn > 0) --mixerColumn; break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorLeftOnResetConfirmationPage(); break;
   }
@@ -791,7 +795,7 @@ void SequencerEditor::moveCursorRight()
   case SequencerEditorPage::step: moveCursorRightOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorRightOnMachinePage(); break;
-  case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerStack + 1 < machineHost->getMachineStackCount()) ++mixerStack; break;
+  case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerColumn < machineHost->getMachineStackCount()) ++mixerColumn; break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorRightOnResetConfirmationPage(); break;
   }
@@ -904,9 +908,12 @@ void SequencerEditor::incrementAtCursor()
   case SequencerEditorPage::mixer:
     if (machineHost != nullptr)
     {
-      if (mixerRow == 1) machineHost->setStackMuted(mixerStack, true);
-      else if (mixerRow == 2) machineHost->setStackSolo(mixerStack, true);
-      else if (mixerRow >= 3) machineHost->setStackGainDb(mixerStack, machineHost->getStackGainDb(mixerStack) + 1.0f);
+      const auto stack = getSelectedMixerStack();
+      if (!stack && (mixerRow == 1 || mixerRow >= 3))
+        machineHost->setMasterGainDb(machineHost->getMasterGainDb() + 1.0f);
+      else if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, true);
+      else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, true);
+      else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) + 1.0f);
     }
     break;
   case SequencerEditorPage::help:
@@ -938,9 +945,12 @@ void SequencerEditor::decrementAtCursor()
   case SequencerEditorPage::mixer:
     if (machineHost != nullptr)
     {
-      if (mixerRow == 1) machineHost->setStackMuted(mixerStack, false);
-      else if (mixerRow == 2) machineHost->setStackSolo(mixerStack, false);
-      else if (mixerRow >= 3) machineHost->setStackGainDb(mixerStack, machineHost->getStackGainDb(mixerStack) - 1.0f);
+      const auto stack = getSelectedMixerStack();
+      if (!stack && (mixerRow == 1 || mixerRow >= 3))
+        machineHost->setMasterGainDb(machineHost->getMasterGainDb() - 1.0f);
+      else if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, false);
+      else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, false);
+      else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) - 1.0f);
     }
     break;
   case SequencerEditorPage::help:
@@ -1878,8 +1888,8 @@ void SequencerEditor::gotoMixerPage()
 {
   dismissMachineTransientUiIfNeeded();
   setEditMode(SequencerEditorMode::mixer);
-  if (machineHost != nullptr && machineHost->getMachineStackCount() > 0)
-    mixerStack = std::min(mixerStack, machineHost->getMachineStackCount() - 1);
+  if (machineHost != nullptr)
+    mixerColumn = std::min(mixerColumn, machineHost->getMachineStackCount());
   mixerRow = std::min<std::size_t>(10, mixerRow);
 }
 
@@ -2062,14 +2072,16 @@ void SequencerEditor::toggleSoloCurrentSequence()
 
 void SequencerEditor::toggleMuteCurrentMixerStack()
 {
-  if (machineHost != nullptr)
-    machineHost->setStackMuted(mixerStack, !machineHost->isStackMuted(mixerStack));
+  const auto stack = getSelectedMixerStack();
+  if (machineHost != nullptr && stack)
+    machineHost->setStackMuted(*stack, !machineHost->isStackMuted(*stack));
 }
 
 void SequencerEditor::toggleSoloCurrentMixerStack()
 {
-  if (machineHost != nullptr)
-    machineHost->setStackSolo(mixerStack, !machineHost->isStackSolo(mixerStack));
+  const auto stack = getSelectedMixerStack();
+  if (machineHost != nullptr && stack)
+    machineHost->setStackSolo(*stack, !machineHost->isStackSolo(*stack));
 }
 
 void SequencerEditor::explodeCurrentSequence()

@@ -2,13 +2,17 @@
 
 #include "ClockAbs.h"
 #include "MachineUtilsAbs.h"
+#include "MixerState.h"
 #include "Sequencer.h"
 #include "SequencerCommands.h"
 #include "SequencerEditor.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <set>
 
 namespace
@@ -35,6 +39,49 @@ struct TestMachines final : MachineUtilsAbs
     std::vector<unsigned short> notes;
     std::vector<std::pair<unsigned short, bool>> auxToggles;
     std::vector<std::pair<unsigned short, double>> cutoffs;
+};
+
+struct TestMachineHost final : MachineHost
+{
+    std::size_t getMachineCount(CommandType) const override { return 0; }
+    MachineInterface* getMachine(CommandType, std::size_t) override { return nullptr; }
+    const MachineInterface* getMachine(CommandType, std::size_t) const override { return nullptr; }
+    std::size_t getMachineStackCount() const override { return muted.size(); }
+    std::vector<CommandType> getMachineStackTypes(std::size_t) const override { return {}; }
+    void addMachineToStack(std::size_t) override {}
+    void removeMachineFromStack(std::size_t, std::size_t) override {}
+    void cycleMachineTypeInStack(std::size_t, std::size_t, int) override {}
+    void moveMachineInStack(std::size_t, std::size_t, int) override {}
+    bool isMachineEnabledInStack(std::size_t, std::size_t) const override { return false; }
+    void toggleMachineEnabledInStack(std::size_t, std::size_t) override {}
+    float getMachineSendLevelDbInStack(std::size_t, std::size_t) const override { return 0.0f; }
+    void adjustMachineSendLevelDbInStack(std::size_t, std::size_t, int) override {}
+    bool machineHasReturnLevelInStack(std::size_t, std::size_t) const override { return false; }
+    float getMachineReturnLevelDbInStack(std::size_t, std::size_t) const override { return 0.0f; }
+    void adjustMachineReturnLevelDbInStack(std::size_t, std::size_t, int) override {}
+    float getStackMeterLevel(std::size_t stack) const override { return meters[stack]; }
+    float getStackGainDb(std::size_t stack) const override { return gains[stack]; }
+    void setStackGainDb(std::size_t stack, float gainDb) override { gains[stack] = gainDb; }
+    float getMasterMeterLevel(std::size_t channel) const override { return masterMeters[channel]; }
+    float getMasterGainDb() const override { return masterGain; }
+    void setMasterGainDb(float gainDb) override { masterGain = MixerState::clampMasterGainDb(gainDb); }
+    bool isMasterRecording() const override { return masterRecording; }
+    bool toggleMasterRecording() override { masterRecording = !masterRecording; return masterRecording; }
+    bool isStackMuted(std::size_t stack) const override { return muted[stack]; }
+    bool isStackSolo(std::size_t stack) const override { return solo[stack]; }
+    void setStackMuted(std::size_t stack, bool value) override { muted[stack] = value; }
+    void setStackSolo(std::size_t stack, bool value) override { solo[stack] = value; }
+    void silenceStack(std::size_t) override {}
+    int getStackMidiOutputChannel(std::size_t) const override { return 1; }
+    void adjustStackMidiOutputChannel(std::size_t, int) override {}
+
+    std::vector<bool> muted { false, false };
+    std::vector<bool> solo { false, false };
+    std::vector<float> meters { 0.0f, 0.0f };
+    std::vector<float> gains { 0.0f, 0.0f };
+    std::array<float, 2> masterMeters { 0.0f, 0.0f };
+    float masterGain = 0.0f;
+    bool masterRecording = false;
 };
 
 void require(bool condition, const char* message)
@@ -436,6 +483,58 @@ int main()
     emptyImplode.implodeNotes();
     require(emptyImplode.getLength() == 1 && !emptyImplode.stepHasTriggerableEvent(0),
             "imploding an empty sequence leaves one blank step");
+
+    const auto ownSolo = MixerState::getSequencePresentation(true, false, false, false);
+    require(ownSolo.stackAudible && ownSolo.soloOutline,
+            "sequence solo remains visible when no stack override is active");
+    const auto stackMuted = MixerState::getSequencePresentation(true, true, false, false);
+    require(!stackMuted.stackAudible && !stackMuted.soloOutline,
+            "stack mute overrides sequence solo presentation");
+    const auto nonSoloedStack = MixerState::getSequencePresentation(true, false, false, true);
+    require(!nonSoloedStack.stackAudible && !nonSoloedStack.soloOutline,
+            "global stack solo hides sequences routed to non-soloed stacks");
+    const auto mutedSoloedStack = MixerState::getSequencePresentation(false, true, true, true);
+    require(!mutedSoloedStack.stackAudible && mutedSoloedStack.soloOutline,
+            "a muted soloed stack stays silent but keeps its yellow outline");
+
+    require(MixerState::clampMasterGainDb(-100.0f) == -48.0f
+                && MixerState::clampMasterGainDb(100.0f) == 6.0f
+                && MixerState::clampMasterGainDb(std::numeric_limits<float>::infinity()) == 0.0f,
+            "master gain clamps to the mixer range");
+    require(std::abs(MixerState::masterGainToLinear(0.0f) - 1.0f) < 0.0001f,
+            "zero dB master gain is unity");
+    require(std::abs(MixerState::masterGainToLinear(6.0f) - 1.995262f) < 0.0001f
+                && std::abs(MixerState::masterGainToLinear(-6.0f) - 0.501187f) < 0.0001f,
+            "positive and negative master gain use decibel scaling");
+
+    Sequencer mixerSequencer(1, 4);
+    SequencerEditor mixerEditor(&mixerSequencer);
+    TestMachineHost mixerHost;
+    mixerEditor.setMachineHost(&mixerHost);
+    mixerEditor.gotoMixerPage();
+    require(mixerEditor.isMixerMasterSelected(), "mixer opens with the master column selected");
+    mixerEditor.moveCursorDown();
+    mixerEditor.incrementAtCursor();
+    require(mixerHost.masterGain == 1.0f, "master gain row adjusts by one decibel");
+    mixerEditor.moveCursorDown();
+    mixerEditor.cycleAtCursor();
+    require(mixerHost.masterRecording, "activating the master R cell starts recording");
+    mixerEditor.cycleAtCursor();
+    require(!mixerHost.masterRecording, "activating the master R cell again stops recording");
+    mixerEditor.moveCursorDown();
+    mixerEditor.decrementAtCursor();
+    require(mixerHost.masterGain == 0.0f, "master fader rows adjust master gain");
+    mixerEditor.toggleMuteCurrentMixerStack();
+    mixerEditor.toggleSoloCurrentMixerStack();
+    require(!mixerHost.muted[0] && !mixerHost.solo[0],
+            "mixer mute and solo shortcuts do nothing on master");
+    mixerEditor.moveCursorRight();
+    require(mixerEditor.getSelectedMixerStack() == std::optional<std::size_t>(0),
+            "first stack retains stack id zero after the master insertion");
+    mixerEditor.toggleMuteCurrentMixerStack();
+    mixerEditor.toggleSoloCurrentMixerStack();
+    require(mixerHost.muted[0] && mixerHost.solo[0],
+            "mixer shortcuts edit the selected stack's canonical mute and solo state");
 
     return 0;
 }

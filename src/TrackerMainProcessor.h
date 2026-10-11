@@ -136,6 +136,11 @@ public:
     float getStackMeterLevel(std::size_t stackIndex) const override;
     float getStackGainDb(std::size_t stackIndex) const override;
     void setStackGainDb(std::size_t stackIndex, float gainDb) override;
+    float getMasterMeterLevel(std::size_t channel) const override;
+    float getMasterGainDb() const override;
+    void setMasterGainDb(float gainDb) override;
+    bool isMasterRecording() const override;
+    bool toggleMasterRecording() override;
     bool isStackMuted(std::size_t stackIndex) const override;
     bool isStackSolo(std::size_t stackIndex) const override;
     void setStackMuted(std::size_t stackIndex, bool muted) override;
@@ -329,6 +334,22 @@ private:
     std::vector<MachineStack> machineStacks;
     SharedAuxBus auxBus1;
     SharedAuxBus auxBus2;
+    float masterGainDb = 0.0f;
+    float masterGainLinear = 1.0f;
+    std::array<float, 2> masterMeterLevels { 0.0f, 0.0f };
+    struct RecordingSession
+    {
+        ~RecordingSession()
+        {
+            writer.reset();
+            thread.stopThread(2000);
+        }
+
+        juce::TimeSliceThread thread { "MYK Tracker WAV Writer" };
+        std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
+    };
+    std::shared_ptr<RecordingSession> recordingSession;
+    std::atomic<juce::AudioFormatWriter::ThreadedWriter*> activeRecordingWriter { nullptr };
     std::mutex audioMutex;
     std::atomic<bool> processing { false };
     juce::MidiBuffer emptyMidiBuffer;
@@ -413,6 +434,8 @@ private:
     void queueZoomCommand(float delta, float normalizedX, float normalizedY);
     void initialiseOsc();
     void initialiseMachines();
+    bool startMasterRecording();
+    void stopMasterRecording(bool deferFlush = false);
     void configureClockListeners();
     void removeClockListeners();
     void updateClockedMachineActivity();

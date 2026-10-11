@@ -42,18 +42,25 @@ struct UIBox
     bool isArmed = false;
     /** True when the cell belongs to a control-mode sequence column. */
     bool isControlModeSequence = false;
-    /** True when the cell belongs to a soloed sequence column. */
-    bool isSoloSequence = false;
+    /** True when the cell belongs to a soloed sequence or mixer channel. */
+    bool isSoloChannel = false;
     /** True when the cell represents note-bearing content. */
     bool hasNote = false;
     /** True when `customFillArgb` should override normal fill colours. */
     bool useCustomFillColour = false;
     /** True when `customTextArgb` should override normal text colours. */
     bool useCustomTextColour = false;
+    /** True when custom colours must remain visible under the cursor. */
+    bool customColoursOverrideSelection = false;
     /** ARGB fill colour override. */
     std::uint32_t customFillArgb = 0;
     /** ARGB text colour override. */
     std::uint32_t customTextArgb = 0;
+    /** Draw independent left/right meter rails inside this cell. */
+    bool drawStereoMeter = false;
+    bool stereoMeterLeftActive = false;
+    bool stereoMeterRightActive = false;
+    std::uint32_t stereoMeterArgb = 0;
     /** True when `valueNorm` describes a parameter value for the fill bar. */
     bool hasValueScale = false;
     /** Normalised parameter value in [0,1] shown by the horizontal fill bar. */

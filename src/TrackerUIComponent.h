@@ -29,6 +29,11 @@ public:
         float fillFraction = -1.0f;
         /** Colour of the horizontal parameter fill bar (0xAARRGGBB). */
         juce::Colour barColour { 0x595929E0 };
+        /** Two narrow vertical meter rails rendered inside the cell. */
+        bool drawStereoMeter = false;
+        bool stereoMeterLeftActive = false;
+        bool stereoMeterRightActive = false;
+        juce::Colour stereoMeterColour { juce::Colours::green };
     };
 
     using CellGrid = std::vector<std::vector<CellState>>;
@@ -101,6 +106,7 @@ public:
 
     void setViewportBounds(const juce::Rectangle<int>& bounds, int componentHeight, float renderingScale);
     void setStyle(const Style& style);
+    void setGlowPulseEnabled(bool enabled);
     void setCellSize(float width, float height);
     void setTraces(const std::vector<Trace>& traces);
 

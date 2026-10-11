@@ -10,6 +10,7 @@
 #include "TrackerMainProcessor.h"
 #include "TrackerControlService.h"
 #include "TrackerMainUI.h"
+#include "MixerState.h"
 #include <algorithm>
 #include <cmath>
 
@@ -77,6 +78,13 @@ float measureBufferRms(const juce::AudioBuffer<float>& buffer)
         return 0.0f;
 
     return static_cast<float>(std::sqrt(sumSquares / static_cast<double>(sampleCount)));
+}
+
+float measureChannelRms(const juce::AudioBuffer<float>& buffer, int channel)
+{
+    if (channel < 0 || channel >= buffer.getNumChannels() || buffer.getNumSamples() == 0)
+        return 0.0f;
+    return buffer.getRMSLevel(channel, 0, buffer.getNumSamples());
 }
 
 float linearToMeterNormalised(float linearLevel)
@@ -767,6 +775,7 @@ TrackerMainProcessor::TrackerMainProcessor()
 
 TrackerMainProcessor::~TrackerMainProcessor()
 {
+    stopMasterRecording();
     removeClockListeners();
     oscReceiver.removeListener(this);
     oscReceiver.disconnect();
@@ -864,6 +873,8 @@ void TrackerMainProcessor::initialiseMachines()
     auxBus2.id = 2;
     auxBus1.machine = std::make_unique<AuxReverbMachine>(juce::Reverb::Parameters{ 0.72f, 0.35f, 0.28f, 0.0f, 1.0f, 0.0f });
     auxBus2.machine = std::make_unique<AuxReverbMachine>(juce::Reverb::Parameters{ 0.42f, 0.55f, 0.22f, 0.0f, 0.75f, 0.0f });
+    setMasterGainDb(0.0f);
+    masterMeterLevels.fill(0.0f);
     for (auto& stack : machineStacks)
     {
         stack.sampler = std::make_unique<SuperSamplerProcessor>();
@@ -1043,10 +1054,16 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
         }
         case SequencerEditorMode::mixer:
         {
-            const auto stack = seqEditor.getMixerStack();
-            if (seqEditor.getMixerRow() == 1) return isStackMuted(stack) ? "MUTE ON" : "MUTE OFF";
-            if (seqEditor.getMixerRow() == 2) return isStackSolo(stack) ? "SOLO ON" : "SOLO OFF";
-            return "GAIN " + juce::String(getStackGainDb(stack), 1);
+            const auto stack = seqEditor.getSelectedMixerStack();
+            if (!stack)
+            {
+                if (seqEditor.getMixerRow() == 0) return "MASTER";
+                if (seqEditor.getMixerRow() == 2) return isMasterRecording() ? "RECORDING ON" : "RECORDING OFF";
+                return "MASTER GAIN " + juce::String(getMasterGainDb(), 1);
+            }
+            if (seqEditor.getMixerRow() == 1) return isStackMuted(*stack) ? "MUTE ON" : "MUTE OFF";
+            if (seqEditor.getMixerRow() == 2) return isStackSolo(*stack) ? "SOLO ON" : "SOLO OFF";
+            return "GAIN " + juce::String(getStackGainDb(*stack), 1);
         }
         case SequencerEditorMode::help:
             return "HELP";
@@ -1179,6 +1196,7 @@ void TrackerMainProcessor::copyStackScope(std::size_t stackIndex, std::vector<fl
 //==============================================================================
 void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    stopMasterRecording();
     const double activeSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     const double activeBpm = getBPM();
     samplesPerTick = static_cast<unsigned int> (juce::jmax (1, static_cast<int> (std::lround (activeSampleRate * (60.0 / activeBpm) / 8.0))));
@@ -1188,6 +1206,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     auxBus2.inputBuffer.setSize(2, preparedBlockSize);
     auxBus1.inputBuffer.clear();
     auxBus2.inputBuffer.clear();
+    masterMeterLevels.fill(0.0f);
     if (auxBus1.machine != nullptr)
         auxBus1.machine->prepareToPlay(sampleRate, samplesPerBlock);
     if (auxBus2.machine != nullptr)
@@ -1225,6 +1244,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
 void TrackerMainProcessor::releaseResources()
 {
+    stopMasterRecording();
     // When playback stops, you can use this as an opportunity to free up any
     // spare memory, etc.
     if (auxBus1.machine != nullptr)
@@ -1249,6 +1269,7 @@ void TrackerMainProcessor::releaseResources()
     wavetableEvents.scratch.clear();
     filterEvents.scratch.clear();
     emptyMidiBuffer.clear();
+    masterMeterLevels.fill(0.0f);
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -1657,6 +1678,31 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     processAuxReturn(auxBus1);
     processAuxReturn(auxBus2);
+
+    const float outputGainLinear = masterGainLinear;
+    if (std::abs(masterGainDb) > 0.0001f)
+        buffer.applyGain(outputGainLinear);
+
+    for (std::size_t channel = 0; channel < masterMeterLevels.size(); ++channel)
+    {
+        const int sourceChannel = buffer.getNumChannels() > 1
+            ? static_cast<int>(channel)
+            : 0;
+        const float target = linearToMeterNormalised(measureChannelRms(buffer, sourceChannel));
+        const float smoothing = target > masterMeterLevels[channel] ? 0.65f : 0.12f;
+        masterMeterLevels[channel] += (target - masterMeterLevels[channel]) * smoothing;
+        masterMeterLevels[channel] = juce::jlimit(0.0f, 1.0f, masterMeterLevels[channel]);
+    }
+
+    if (auto* writer = activeRecordingWriter.load(std::memory_order_acquire);
+        writer != nullptr && buffer.getNumChannels() > 0 && buffer.getNumSamples() > 0)
+    {
+        const float* stereoChannels[] {
+            buffer.getReadPointer(0),
+            buffer.getReadPointer(buffer.getNumChannels() > 1 ? 1 : 0)
+        };
+        writer->write(stereoChannels, buffer.getNumSamples());
+    }
     processing.store(false, std::memory_order_release);
 }
 
@@ -1785,18 +1831,39 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol()));
     state->setProperty("armedSequence", static_cast<int>(seqEditor.getArmedSequence()));
     state->setProperty("currentSeqParam", static_cast<int>(seqEditor.getCurrentSeqParam()));
-    state->setProperty("mixerStack", static_cast<int>(seqEditor.getMixerStack()));
+    state->setProperty("mixerColumn", static_cast<int>(seqEditor.getMixerColumn()));
+    const auto selectedMixerStack = seqEditor.getSelectedMixerStack();
+    state->setProperty("mixerStack", selectedMixerStack ? static_cast<int>(*selectedMixerStack) : -1);
+    state->setProperty("mixerMasterSelected", !selectedMixerStack.has_value());
     state->setProperty("mixerRow", static_cast<int>(seqEditor.getMixerRow()));
+    state->setProperty("masterRecording", isMasterRecording());
+    state->setProperty("masterMeterLeft", masterMeterLevels[0]);
+    state->setProperty("masterMeterRight", masterMeterLevels[1]);
     state->setProperty("selectedHead", static_cast<int>(seqEditor.getCurrentConfigHead()));
 
     juce::Array<juce::var> playHeads;
     juce::Array<juce::var> sequenceSoloStates;
+    juce::Array<juce::var> sequenceEffectiveSoloStates;
+    juce::Array<juce::var> sequenceStackAudibleStates;
+    const bool anyStackSolo = std::any_of(machineStacks.begin(), machineStacks.end(),
+                                          [] (const auto& stack) { return stack.solo; });
     if (viewedSequencer != nullptr)
     {
         for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
         {
-            sequenceSoloStates.add(viewedSequencer->getSequence(col)->isSolo());
-            const auto heads = viewedSequencer->getSequence(col)->getReadHeadSnapshots();
+            const auto* sequence = viewedSequencer->getSequence(col);
+            const bool sequenceSolo = sequence->isSolo();
+            sequenceSoloStates.add(sequenceSolo);
+            const auto stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
+            const auto* stack = getMachineStack(stackIndex);
+            const auto presentation = MixerState::getSequencePresentation(
+                sequenceSolo,
+                stack != nullptr && stack->muted,
+                stack != nullptr && stack->solo,
+                anyStackSolo);
+            sequenceEffectiveSoloStates.add(presentation.soloOutline);
+            sequenceStackAudibleStates.add(presentation.stackAudible);
+            const auto heads = sequence->getReadHeadSnapshots();
             for (std::size_t headIndex = 0; headIndex < heads.size(); ++headIndex)
                 for (const auto position : heads[headIndex].positions)
                 {
@@ -1810,6 +1877,8 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     }
     state->setProperty("playHeads", playHeads);
     state->setProperty("sequenceSoloStates", sequenceSoloStates);
+    state->setProperty("sequenceEffectiveSoloStates", sequenceEffectiveSoloStates);
+    state->setProperty("sequenceStackAudibleStates", sequenceStackAudibleStates);
 }
 
 juce::var TrackerMainProcessor::getUiState()
@@ -2089,6 +2158,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     // against, so persist the tracker-owned clock settings alongside them.
     root->setProperty("bpm", getBPM());
     root->setProperty("internalClockEnabled", isInternalClockEnabled());
+    root->setProperty("masterGainDb", masterGainDb);
     juce::Array<juce::var> sequenceSetStates;
     for (const auto& sequenceSet : sequenceSets)
         if (sequenceSet != nullptr)
@@ -2188,6 +2258,8 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     if (restoredBpm > 0.0)
         setBPM(restoredBpm);
     setInternalClockEnabled(static_cast<bool>(stateVar.getProperty("internalClockEnabled", isInternalClockEnabled())));
+    setMasterGainDb(static_cast<float>(stateVar.getProperty("masterGainDb", 0.0f)));
+    masterMeterLevels.fill(0.0f);
 
     resetSongState();
 
@@ -2726,6 +2798,96 @@ float TrackerMainProcessor::getStackGainDb(std::size_t stackIndex) const
     if (const auto* stack = getMachineStack(stackIndex))
         return stack->gainDb;
     return 0.0f;
+}
+
+float TrackerMainProcessor::getMasterMeterLevel(std::size_t channel) const
+{
+    return channel < masterMeterLevels.size() ? masterMeterLevels[channel] : 0.0f;
+}
+
+float TrackerMainProcessor::getMasterGainDb() const
+{
+    return masterGainDb;
+}
+
+void TrackerMainProcessor::setMasterGainDb(float gainDb)
+{
+    masterGainDb = MixerState::clampMasterGainDb(gainDb);
+    masterGainLinear = MixerState::masterGainToLinear(masterGainDb);
+}
+
+bool TrackerMainProcessor::isMasterRecording() const
+{
+    return activeRecordingWriter.load(std::memory_order_acquire) != nullptr;
+}
+
+bool TrackerMainProcessor::startMasterRecording()
+{
+    stopMasterRecording();
+
+    const double activeSampleRate = getSampleRate();
+    if (activeSampleRate <= 0.0)
+        return false;
+
+    auto recordingDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                  .getChildFile("MYK Tracker Recordings");
+    if (const auto result = recordingDirectory.createDirectory(); result.failed())
+        return false;
+
+    const auto timestamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
+    const auto outputFile = recordingDirectory.getNonexistentChildFile(
+        "MYK Tracker Recording " + timestamp, ".wav", false);
+    std::unique_ptr<juce::OutputStream> outputStream { outputFile.createOutputStream() };
+    if (outputStream == nullptr)
+        return false;
+
+    juce::WavAudioFormat wavFormat;
+    using WriterOptions = juce::AudioFormatWriterOptions;
+    auto writer = wavFormat.createWriterFor(
+        outputStream,
+        WriterOptions{}.withSampleRate(activeSampleRate)
+                       .withNumChannels(2)
+                       .withBitsPerSample(24));
+    if (writer == nullptr)
+        return false;
+
+    auto newSession = std::make_shared<RecordingSession>();
+    if (!newSession->thread.startThread())
+        return false;
+    const int fifoSamples = juce::jmax(32768, static_cast<int>(std::lround(activeSampleRate * 2.0)));
+    newSession->writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(
+        writer.release(), newSession->thread, fifoSamples);
+    newSession->writer->setFlushInterval(juce::jmax(1, static_cast<int>(std::lround(activeSampleRate))));
+    recordingSession = std::move(newSession);
+    activeRecordingWriter.store(recordingSession->writer.get(), std::memory_order_release);
+    return true;
+}
+
+void TrackerMainProcessor::stopMasterRecording(bool deferFlush)
+{
+    activeRecordingWriter.store(nullptr, std::memory_order_release);
+    if (deferFlush && recordingSession != nullptr
+        && juce::MessageManager::getInstanceWithoutCreating() != nullptr)
+    {
+        auto sessionToClose = std::move(recordingSession);
+        if (juce::MessageManager::callAsync([sessionToClose]() {}))
+            return;
+        recordingSession = std::move(sessionToClose);
+    }
+    recordingSession.reset();
+}
+
+bool TrackerMainProcessor::toggleMasterRecording()
+{
+    if (isMasterRecording())
+    {
+        // Clearing the active pointer stops the audio thread immediately. Let
+        // the message thread finish flushing the WAV after the editor's audio
+        // exclusivity guard has been released.
+        stopMasterRecording(true);
+        return false;
+    }
+    return startMasterRecording();
 }
 
 void TrackerMainProcessor::setStackGainDb(std::size_t stackIndex, float gainDb)

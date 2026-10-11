@@ -22,12 +22,12 @@ leaving the sustain level unchanged.
 ## Main Pages
 
 - `Song` page: arrange sequence sets into a song and choose how many beats each row runs before switching.
-- `Sequence` page: browse sequences and steps, mute/solo tracks, and move around the current pattern. A pattern can hold from 1 to 128 sequences. Control-mode sequences are marked with a bright violet column outline and soloed sequences receive a faint yellow tint. When one or more sequences are soloed, the others render empty and stay silent; mute still overrides solo. `Shift+E` explodes the current sequence into one note per step; `Shift+G` implodes its note events into pitch-sorted chord steps.
+- `Sequence` page: browse sequences and steps, mute/solo tracks, and move around the current pattern. A pattern can hold from 1 to 128 sequences. Control-mode sequences are marked with a bright violet column outline and soloed sequences receive a thick yellow outline. Sequence mute/solo is independent of Mixer stack mute/solo, but this page shows their effective result: a muted stack or a non-soloed stack while another stack is soloed renders its routed sequences empty, while every sequence routed to a soloed stack gets the yellow outline. A muted sequence on a soloed stack remains silent and outlined. Removing the stack override reveals the preserved sequence settings. `Shift+E` explodes the current sequence into one note per step; `Shift+G` implodes its note events into pitch-sorted chord steps.
 - `Step` page: edit the command rows inside a single step: command, note, velocity, and duration. A sequence in control mode can store `TAUX1`, `TAUX2`, or `COFF` events that operate the sequence's machine stack during playback.
 - `Machine` page: inspect and configure the machine stack for the current track, including instruments and effects. SEND/RETURN levels render as horizontal fill bars scaled to their level, and the scope band under the grid shows the stack output with an auto-calibrating vertical scale.
 - `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing. Scaled parameters render as horizontal fill bars showing their normalized position. SAMPLER rows include fixed `CRS` tuning (-36 to +36 semitones) and `FINE` tuning (-99 to +99 cents); `+12` doubles playback speed and `-12` halves it. WAVE draws waveform glyphs and the current ADSR curve over the ENV columns; FILTER places its mode/cutoff controls on the left, ADSR controls on the right, and draws the current ADSR curve in an ENV band. The bottom of the grid carries the same stack-output scope band (with auto-calibrating vertical scale) shown on the Machine page.
 - `Sequence Config` page: edit `SEND`, sequence mode (`SEQ:NOTE` / `SEQ:CON`), read-head count/selection, TPS, traversal mode, chord polyphony, octave range (`OCT`), rhythm, and head probability. `OCT` randomly chooses a zero-to-three-octave upward transpose for each triggered step. Control mode switches step entry from notes to `TAUX1`, `TAUX2`, and `COFF` events without rewriting existing step data. Up to three independently timed heads may read the same sequence. A faint column flash briefly marks a sequence when its read head triggers active steps during playback.
-- `Mixer` page: edit the 16 machine stacks' mute, solo, gain, and post-mute meters. Multiple soloed stacks remain audible together.
+- `Mixer` page: edit the 16 machine stacks' independent mute, solo, gain, and post-mute meters. Soloed stack columns use the same thick yellow outline as the Sequence page, and multiple soloed stacks remain audible together. The far-left `MASTER` column controls persistent output gain from -48 to +6 dB and has separate left/right post-gain meter rails covering stack audio, aux returns, and host/input audio. Activate its `R` cell to start or stop recording; it lights red while a stereo 24-bit WAV is streamed at the current device/host sample rate into `MYK Tracker Recordings` inside the platform-standard Documents folder.
 - `Help` page: show the main keyboard shortcuts. `Shift+H` toggles the page, `Backspace` returns to the previous page, and page shortcut keys also leave Help.
 - `Reset / Quit` confirmation page: confirm tracker reset and, in standalone builds, quit.
 
@@ -41,15 +41,15 @@ leaving the sustain level unchanged.
 - `5`: open Machine Detail from anywhere, or cycle to the next machine detail while already in Machine page detail view.
 - `6`: go to Sequence Config page.
 - `7`: go to Mixer page.
-- `Enter`: activate/click the current item.
+- `Enter`: activate/click the current item, including the Mixer master `R` recording toggle.
 - `Esc`: dismiss the current transient UI if a machine owns one.
 - `Arrow keys`: move the editor cursor.
 - `Page Up` / `Page Down`: jump by larger row amounts on the Machine page.
 - `Tab`: next populated step (wrapping on the Step page), or next
   machine detail when already editing a machine detail view.
 - `Backspace`: reset or clear the current item. On machine pages, this first tries the machine-specific clear action.
-- `Shift+M` on the Sequence page: mute/unmute the current sequence; on Mixer, mute/unmute the selected stack.
-- `Shift+S` on the Sequence page: solo/unsolo the current sequence; on Mixer, solo/unsolo the selected stack.
+- `Shift+M` on the Sequence page: mute/unmute the current sequence; on Mixer, mute/unmute the selected stack. It does nothing while `MASTER` is selected.
+- `Shift+S` on the Sequence page: solo/unsolo the current sequence; on Mixer, solo/unsolo the selected stack. It does nothing while `MASTER` is selected.
 - `Shift+E` on the Sequence page: explode the current sequence into one note per step, growing or shrinking the sequence to fit the collected notes.
 - `Shift+G` on the Sequence page: implode the current sequence's notes into evenly distributed, pitch-sorted chord steps.
 - `Shift+I` on the Sequence page: insert a blank eight-step control-mode sequence to the right of the current sequence, using the same machine stack.
@@ -58,7 +58,7 @@ leaving the sustain level unchanged.
 - `r`: rewind transport.
 - `-`: remove a row or entry where supported.
 - `=`: add a row or entry where supported.
-- `[` / `]`: decrement/increment the current value.
+- `[` / `]`: decrement/increment the current value. On the Mixer master gain or fader rows this changes master gain by 1 dB.
 - `,` / `.`: octave down / octave up for note entry.
 - `_` / `+`: decrease / increase BPM by 1.
 - Piano note keys: enter notes using the current octave on Sequence and Step pages; elsewhere they audition without changing tracker data while stopped.

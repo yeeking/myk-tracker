@@ -379,6 +379,11 @@ void TrackerUIComponent::setStyle(const Style& newStyle)
     style = newStyle;
 }
 
+void TrackerUIComponent::setGlowPulseEnabled(bool enabled)
+{
+    style.glowPulseEnabled = enabled;
+}
+
 void TrackerUIComponent::setCellSize(float width, float height)
 {
     cellWidth = width;
@@ -674,6 +679,45 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
                 if (shaderUniforms->ambientStrength != nullptr)
                     shaderUniforms->ambientStrength->set(1.0f);
                 glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
+            }
+
+            if (cell.drawStereoMeter)
+            {
+                const float railWidth = width * 0.18f;
+                const float railHeight = cellHeight * 0.62f;
+                for (int channel = 0; channel < 2; ++channel)
+                {
+                    const bool active = channel == 0
+                        ? cell.stereoMeterLeftActive
+                        : cell.stereoMeterRightActive;
+                    const float railX = centerX + (channel == 0 ? -width * 0.18f : width * 0.18f);
+                    const auto railPosition = juce::Vector3D<float>(
+                        railX,
+                        startY - static_cast<float>(row) * stepY,
+                        depth + 0.009f);
+                    const auto railMatrix = getModelMatrix(
+                        railPosition,
+                        juce::Vector3D<float>(railWidth, railHeight, 0.012f));
+                    const auto railColour = active
+                        ? cell.stereoMeterColour
+                        : cell.stereoMeterColour.darker(0.9f);
+                    if (shaderUniforms->modelMatrix != nullptr)
+                        shaderUniforms->modelMatrix->setMatrix4(railMatrix.mat, 1, GL_FALSE);
+                    if (shaderUniforms->cellColor != nullptr)
+                        shaderUniforms->cellColor->set(railColour.getFloatRed(),
+                                                       railColour.getFloatGreen(),
+                                                       railColour.getFloatBlue(),
+                                                       railColour.getFloatAlpha());
+                    if (shaderUniforms->glowColor != nullptr)
+                        shaderUniforms->glowColor->set(0.0f, 0.0f, 0.0f);
+                    if (shaderUniforms->cellGlow != nullptr)
+                        shaderUniforms->cellGlow->set(active ? 0.35f : 0.0f);
+                    if (shaderUniforms->lightColor != nullptr)
+                        shaderUniforms->lightColor->set(0.0f, 0.0f, 0.0f);
+                    if (shaderUniforms->ambientStrength != nullptr)
+                        shaderUniforms->ambientStrength->set(1.0f);
+                    glDrawElements(GL_TRIANGLES, cubeIndexCount, GL_UNSIGNED_INT, nullptr);
+                }
             }
 
             if (cell.drawOutline)

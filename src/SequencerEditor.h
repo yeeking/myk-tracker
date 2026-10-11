@@ -50,6 +50,11 @@ public:
   virtual float getStackMeterLevel(std::size_t stackIndex) const = 0;
   virtual float getStackGainDb(std::size_t stackIndex) const = 0;
   virtual void setStackGainDb(std::size_t stackIndex, float gainDb) = 0;
+  virtual float getMasterMeterLevel(std::size_t channel) const = 0;
+  virtual float getMasterGainDb() const = 0;
+  virtual void setMasterGainDb(float gainDb) = 0;
+  virtual bool isMasterRecording() const = 0;
+  virtual bool toggleMasterRecording() = 0;
   virtual bool isStackMuted(std::size_t stackIndex) const = 0;
   virtual bool isStackSolo(std::size_t stackIndex) const = 0;
   virtual void setStackMuted(std::size_t stackIndex, bool muted) = 0;
@@ -334,7 +339,13 @@ public:
   /** which seq param index are we editing? */
   size_t getCurrentSeqParam() const; 
   std::size_t getCurrentConfigHead() const { return currentConfigHead; }
-  std::size_t getMixerStack() const { return mixerStack; }
+  /** Mixer display column: zero is master, one and above map to stack column - 1. */
+  std::size_t getMixerColumn() const { return mixerColumn; }
+  bool isMixerMasterSelected() const { return mixerColumn == 0; }
+  std::optional<std::size_t> getSelectedMixerStack() const
+  {
+    return mixerColumn == 0 ? std::nullopt : std::optional<std::size_t>(mixerColumn - 1);
+  }
   std::size_t getMixerRow() const { return mixerRow; }
   std::size_t getCurrentSongRow() const;
   std::size_t getCurrentSongCol() const;
@@ -451,7 +462,7 @@ private:
   /** which sequence param are you editing?*/
   size_t currentSeqParam; 
   std::size_t currentConfigHead = 0;
-  std::size_t mixerStack = 0;
+  std::size_t mixerColumn = 0;
   std::size_t mixerRow = 0;
   /** which song row is selected on the song page */
   std::size_t currentSongRow;
