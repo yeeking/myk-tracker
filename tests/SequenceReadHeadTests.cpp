@@ -71,7 +71,7 @@ struct TestMachineHost final : MachineHost
     bool isStackSolo(std::size_t stack) const override { return solo[stack]; }
     void setStackMuted(std::size_t stack, bool value) override { muted[stack] = value; }
     void setStackSolo(std::size_t stack, bool value) override { solo[stack] = value; }
-    void silenceStack(std::size_t) override {}
+    void silenceStack(std::size_t stack) override { silencedStacks.push_back(stack); }
     int getStackMidiOutputChannel(std::size_t) const override { return 1; }
     void adjustStackMidiOutputChannel(std::size_t, int) override {}
 
@@ -82,6 +82,7 @@ struct TestMachineHost final : MachineHost
     std::array<float, 2> masterMeters { 0.0f, 0.0f };
     float masterGain = 0.0f;
     bool masterRecording = false;
+    std::vector<std::size_t> silencedStacks;
 };
 
 void require(bool condition, const char* message)
@@ -379,10 +380,62 @@ int main()
     require(keyboardSequencer.getStepData(0, 0) == beforePreview,
             "mixer-page musical keys do not mutate sequence data");
     require(machines.notes.size() == 4, "mixer-page note and chord audition while stopped");
+    require(machines.notes[1] == machines.notes[0]
+                && machines.notes[2] == machines.notes[0] + 4
+                && machines.notes[3] == machines.notes[0] + 7,
+            "preview-only chord root follows the last auditioned piano key");
+
+    keyboardEditor.gotoSequencePage();
+    keyboardEditor.setCurrentStep(1);
+    keyboardSequencer.setStepData(0, 1,
+        {{ static_cast<double>(CommandType::MidiNote), 62.0, 100.0, 1.0 },
+         { static_cast<double>(CommandType::MidiNote), 65.0, 100.0, 1.0 }});
+    const auto beforeStepTrigger = keyboardSequencer.getStepData(0, 1);
+    machines.notes.clear();
+    require(keyboardEditor.triggerCurrentStep(), "Return-style Sequence-page step trigger is handled");
+    require(machines.notes == std::vector<unsigned short>({62, 65}),
+            "Sequence-page step trigger auditions every stored chord row");
+    require(keyboardSequencer.getStepData(0, 1) == beforeStepTrigger,
+            "Sequence-page step trigger does not edit step data");
+
+    keyboardSequencer.toggleStepActive(0, 1);
+    keyboardEditor.gotoStepPage();
+    machines.notes.clear();
+    require(keyboardEditor.triggerCurrentStep(), "Return-style Step-page step trigger is handled");
+    require(machines.notes == std::vector<unsigned short>({62, 65}),
+            "Step-page trigger auditions stored data even when the step is inactive");
+    require(!keyboardSequencer.isStepActive(0, 1),
+            "Step-page trigger does not change the step active state");
+
     keyboardSequencer.play();
     machines.notes.clear();
+    require(keyboardEditor.triggerCurrentStep(), "playing Step-page trigger is swallowed");
+    require(machines.notes.empty(), "step audition remains suppressed while playing");
+    keyboardEditor.gotoMixerPage();
     require(keyboardEditor.handleNoteKey('x'), "playing mixer-page piano key is swallowed");
     require(machines.notes.empty(), "preview remains suppressed while playing");
+
+    Sequencer tpsSequencer(1, 4);
+    SequencerEditor tpsEditor(&tpsSequencer);
+    TestMachineHost tpsHost;
+    tpsEditor.setMachineHost(&tpsHost);
+    tpsEditor.gotoSequenceConfigPage();
+    tpsEditor.moveCursorDown();
+    tpsEditor.moveCursorDown();
+    tpsEditor.moveCursorDown();
+    require(tpsEditor.getCurrentSeqParam() == Sequence::tpsConfig,
+            "TPS row is reachable on the sequence configuration page");
+    tpsSequencer.play();
+    tpsEditor.incrementAtCursor();
+    require(tpsSequencer.getSequence(0)->getReadHeadConfig(0).ticksPerStep == 5,
+            "TPS increment updates the selected read head");
+    require(tpsSequencer.getSequence(0)->isWaitingForQuarterBeatResync(),
+            "TPS increment keeps the existing quarter-beat restart behaviour");
+    tpsEditor.decrementAtCursor();
+    require(tpsSequencer.getSequence(0)->getReadHeadConfig(0).ticksPerStep == 4,
+            "TPS decrement updates the selected read head");
+    require(tpsHost.silencedStacks.empty(),
+            "TPS edits preserve active stack voices and pending note-offs");
 
     Sequencer navigationSequencer(1, 4);
     SequencerEditor navigationEditor(&navigationSequencer);
@@ -535,6 +588,26 @@ int main()
     mixerEditor.toggleSoloCurrentMixerStack();
     require(mixerHost.muted[0] && mixerHost.solo[0],
             "mixer shortcuts edit the selected stack's canonical mute and solo state");
+
+    Sequencer sequenceMuteSequencer(1, 4);
+    SequencerEditor sequenceMuteEditor(&sequenceMuteSequencer);
+    TestMachineHost sequenceMuteHost;
+    sequenceMuteEditor.setMachineHost(&sequenceMuteHost);
+    auto* routedSequence = sequenceMuteSequencer.getSequence(0);
+    routedSequence->setMachineId(1.0);
+
+    sequenceMuteEditor.toggleMuteCurrentSequence();
+    require(routedSequence->isMuted() && !sequenceMuteHost.muted[1],
+            "sequence mute still mutes the sequence when its routed stack is audible");
+    sequenceMuteHost.muted[1] = true;
+    sequenceMuteEditor.toggleMuteCurrentSequence();
+    require(!routedSequence->isMuted() && !sequenceMuteHost.muted[1],
+            "unmuting a sequence clears both sequence and routed-stack mute states");
+
+    sequenceMuteHost.muted[1] = true;
+    sequenceMuteEditor.toggleMuteCurrentSequence();
+    require(!routedSequence->isMuted() && !sequenceMuteHost.muted[1],
+            "unmuting an effectively muted sequence clears a routed-stack-only mute");
 
     return 0;
 }

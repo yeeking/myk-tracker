@@ -271,6 +271,8 @@ public:
   bool handleChordKey(char key);
   bool handleControlKey(char key);
   bool handleNoteKey(char key);
+  /** Audition every event in the focused Sequence/Step-page step while stopped. */
+  bool triggerCurrentStep();
   bool enterSelectedMachineDetail();
   bool enterMachineDetailFromAnywhere();
   bool cycleMachineDetailNext();
@@ -476,6 +478,8 @@ private:
   SequencerEditorSubMode editSubMode;
   double stepIncrement;
   double octave;
+  /** Last piano-key note actually auditioned while stopped; roots preview-only chords. */
+  std::optional<double> lastAuditionedMidiNote;
   std::vector<std::vector<UIBox>> machineCells;
   std::size_t machineCursorRow = 0;
   std::size_t machineCursorCol = 0;

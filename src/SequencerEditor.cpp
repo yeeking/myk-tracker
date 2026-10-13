@@ -1657,8 +1657,11 @@ void SequencerEditor::incrementOnSequenceConfigPage()
     {
       auto* sequence = sequencer->getSequence(currentSequence);
       const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+      // TPS resynchronises the read head itself, but does not change routing or
+      // invalidate already-scheduled note-offs.  Do not silence the stack for
+      // that timing-only edit: active voices should be allowed to release.
       const bool structural = currentSeqParam == Sequence::sendConfig || currentSeqParam == Sequence::headCountConfig
-          || currentSeqParam == Sequence::tpsConfig || currentSeqParam == Sequence::modeConfig
+          || currentSeqParam == Sequence::modeConfig
           || currentSeqParam == Sequence::rhythmConfig;
       if (structural && machineHost != nullptr) machineHost->silenceStack(oldStack);
       sequencer->incrementSeqParam(currentSequence, currentSeqParam, currentConfigHead);
@@ -1711,8 +1714,10 @@ void SequencerEditor::decrementOnSequenceConfigPage()
     {
       auto* sequence = sequencer->getSequence(currentSequence);
       const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+      // See incrementOnSequenceConfigPage: a TPS change resets read-head phase
+      // without being a reason to stop the stack's currently playing voices.
       const bool structural = currentSeqParam == Sequence::sendConfig || currentSeqParam == Sequence::headCountConfig
-          || currentSeqParam == Sequence::tpsConfig || currentSeqParam == Sequence::modeConfig
+          || currentSeqParam == Sequence::modeConfig
           || currentSeqParam == Sequence::rhythmConfig;
       if (structural && machineHost != nullptr) machineHost->silenceStack(oldStack);
       sequencer->decrementSeqParam(currentSequence, currentSeqParam, currentConfigHead);
@@ -1836,6 +1841,7 @@ void SequencerEditor::previewEnteredNote(double midiNote)
 
     data[safeRow][Step::noteInd] = midiNote;
     CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
+    lastAuditionedMidiNote = midiNote;
   }
 }
 
@@ -2060,8 +2066,33 @@ void SequencerEditor::toggleArmCurrentSequence()
 
 void SequencerEditor::toggleMuteCurrentSequence()
 {
-  if (auto* impl = getSequencerImpl())
-    impl->toggleSequenceMute(getCurrentSequence());
+  auto* impl = getSequencerImpl();
+  const auto sequenceIndex = getCurrentSequence();
+  auto* sequence = impl != nullptr ? impl->getSequence(sequenceIndex) : nullptr;
+  if (sequence == nullptr)
+    return;
+
+  const bool sequenceMuted = sequence->isMuted();
+  std::optional<std::size_t> mutedStack;
+  if (machineHost != nullptr)
+  {
+    const int routedStack = juce::jmax(0, static_cast<int>(sequence->getMachineId()));
+    const auto stackIndex = static_cast<std::size_t>(routedStack);
+    if (stackIndex < machineHost->getMachineStackCount()
+        && machineHost->isStackMuted(stackIndex))
+      mutedStack = stackIndex;
+  }
+
+  if (sequenceMuted || mutedStack.has_value())
+  {
+    if (sequenceMuted)
+      impl->toggleSequenceMute(sequenceIndex);
+    if (mutedStack.has_value())
+      machineHost->setStackMuted(*mutedStack, false);
+    return;
+  }
+
+  impl->toggleSequenceMute(sequenceIndex);
 }
 
 void SequencerEditor::toggleSoloCurrentSequence()
@@ -2240,6 +2271,33 @@ bool SequencerEditor::handleNoteKey(char key)
   return true;
 }
 
+bool SequencerEditor::triggerCurrentStep()
+{
+  const auto page = getCurrentPage();
+  if (sequencer == nullptr
+      || (page != SequencerEditorPage::sequence && page != SequencerEditorPage::step))
+    return false;
+
+  // Return is an audition shortcut, not another transport trigger.  Keeping it
+  // stopped-only matches piano/chord preview and avoids racing live read heads.
+  if (isSequencerPlaying(sequencer))
+    return true;
+
+  auto data = sequencer->getStepData(currentSequence, currentStep);
+  auto* sequence = sequencer->getSequence(currentSequence);
+  if (sequence == nullptr)
+    return true;
+
+  auto context = sequence->getReadOnlyContext();
+  for (auto& row : data)
+  {
+    if (row.size() < Step::maxInd + 1)
+      row.resize(Step::maxInd + 1, 0.0);
+    CommandProcessor::executeCommand(row[Step::cmdInd], &row, &context);
+  }
+  return true;
+}
+
 bool SequencerEditor::isCurrentSamplerRangeCell() const
 {
   const auto type = getFocusedMachineDetailType();
@@ -2276,6 +2334,11 @@ bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
     rootNote = baseRow[Step::noteInd];
   }
 
+  const bool editingSequence = editMode == SequencerEditorMode::editingStep
+      || editMode == SequencerEditorMode::selectingSeqAndStep;
+  if (!editingSequence && lastAuditionedMidiNote.has_value())
+    rootNote = *lastAuditionedMidiNote;
+
   if (rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
     return true;
 
@@ -2305,7 +2368,7 @@ bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
     }
   }
 
-  if (editMode == SequencerEditorMode::editingStep || editMode == SequencerEditorMode::selectingSeqAndStep)
+  if (editingSequence)
   {
     writeStepData(std::move(chordRows));
     clampStepCursorToCurrentStep();

@@ -21,7 +21,7 @@ leaving the sustain level unchanged.
 
 ## Main Pages
 
-- `Song` page: arrange sequence sets into a song and choose how many beats each row runs before switching.
+- `Song` page: arrange sequence sets into a song and choose how many beats each row runs before switching. Editing the `SET` of the row currently playing queues the replacement for the next beat boundary (four clock ticks), rather than changing patterns mid-beat.
 - `Sequence` page: browse sequences and steps, mute/solo tracks, and move around the current pattern. A pattern can hold from 1 to 128 sequences. Control-mode sequences are marked with a bright violet column outline and soloed sequences receive a thick yellow outline. Sequence mute/solo is independent of Mixer stack mute/solo, but this page shows their effective result: a muted stack or a non-soloed stack while another stack is soloed renders its routed sequences empty, while every sequence routed to a soloed stack gets the yellow outline. A muted sequence on a soloed stack remains silent and outlined. Removing the stack override reveals the preserved sequence settings. `Shift+E` explodes the current sequence into one note per step; `Shift+G` implodes its note events into pitch-sorted chord steps.
 - `Step` page: edit the command rows inside a single step: command, note, velocity, and duration. A sequence in control mode can store `TAUX1`, `TAUX2`, or `COFF` events that operate the sequence's machine stack during playback.
 - `Machine` page: inspect and configure the machine stack for the current track, including instruments and effects. SEND/RETURN levels render as horizontal fill bars scaled to their level, and the scope band under the grid shows the stack output with an auto-calibrating vertical scale.
@@ -47,8 +47,10 @@ leaving the sustain level unchanged.
 - `Page Up` / `Page Down`: jump by larger row amounts on the Machine page.
 - `Tab`: next populated step (wrapping on the Step page), or next
   machine detail when already editing a machine detail view.
+- `Return` on the Sequence or Step page: audition every event in the focused
+  step while stopped, including inactive steps, without changing its data or active state.
 - `Backspace`: reset or clear the current item. On machine pages, this first tries the machine-specific clear action.
-- `Shift+M` on the Sequence page: mute/unmute the current sequence; on Mixer, mute/unmute the selected stack. It does nothing while `MASTER` is selected.
+- `Shift+M` on the Sequence page: mute/unmute the current sequence. When unmuting, it also clears mute on the routed machine stack if that stack is muted, clearing both layers when necessary. On Mixer, it mutes/unmutes the selected stack and does nothing while `MASTER` is selected.
 - `Shift+S` on the Sequence page: solo/unsolo the current sequence; on Mixer, solo/unsolo the selected stack. It does nothing while `MASTER` is selected.
 - `Shift+E` on the Sequence page: explode the current sequence into one note per step, growing or shrinking the sequence to fit the collected notes.
 - `Shift+G` on the Sequence page: implode the current sequence's notes into evenly distributed, pitch-sorted chord steps.
@@ -63,7 +65,7 @@ leaving the sustain level unchanged.
 - `_` / `+`: decrease / increase BPM by 1.
 - Piano note keys: enter notes using the current octave on Sequence and Step pages; elsewhere they audition without changing tracker data while stopped.
 - Control-mode sequence keys: when the current sequence is in `SEQ:CON` mode, `z` enters `TAUX1`, `x` enters `TAUX2`, and `c` enters `COFF` (default `2000` Hz) on the Sequence and Step pages. Piano note keys and Step-page chord shortcuts are suppressed in that mode.
-- Chord shortcut keys on Sequence and Step pages (and audition-only on other non-transient pages):
+- Chord shortcut keys on Sequence and Step pages (and audition-only on other non-transient pages). Sequence/Step chord entry uses the focused step's note as its root; audition-only chords use the last piano-key note played while stopped:
   - `q`: major triad
   - `w`: minor triad
   - `e`: dominant 7

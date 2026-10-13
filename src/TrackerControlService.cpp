@@ -1289,7 +1289,18 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     }
                     else if (keyCode == juce::KeyPress::backspaceKey) { handled = editor.machineHandleTextBackspace(); if (!handled) { editor.resetAtCursor(); handled = true; } contentChanged = handled; }
                     else if (keyCode == juce::KeyPress::escapeKey) { handled = editor.dismissCurrentTransientUi(); viewChanged = handled; }
-                    else if (keyCode == juce::KeyPress::returnKey) { editor.click(); contentChanged = true; handled = true; }
+                    else if (keyCode == juce::KeyPress::returnKey)
+                    {
+                        const auto page = editor.getCurrentPage();
+                        if (page == SequencerEditorPage::sequence || page == SequencerEditorPage::step)
+                            handled = editor.triggerCurrentStep();
+                        else
+                        {
+                            editor.click();
+                            contentChanged = true;
+                            handled = true;
+                        }
+                    }
                     else if (keyCode == juce::KeyPress::upKey) { sequenceSelection.active = false; editor.moveCursorUp(); viewChanged = true; handled = true; }
                     else if (keyCode == juce::KeyPress::downKey) { sequenceSelection.active = false; editor.moveCursorDown(); viewChanged = true; handled = true; }
                     else if (keyCode == juce::KeyPress::leftKey) { sequenceSelection.active = false; editor.moveCursorLeft(); viewChanged = true; handled = true; }

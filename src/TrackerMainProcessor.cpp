@@ -919,6 +919,8 @@ void TrackerMainProcessor::initialiseMachines()
 void TrackerMainProcessor::recreateSequencersAndMachines()
 {
     suspendProcessing(true);
+    const double activeSampleRate = getSampleRate();
+    const int activeBlockSize = getBlockSize();
     CommandProcessor::sendAllNotesOff();
     if (auto* playbackSequencer = getPlaybackSequencerInternal())
         playbackSequencer->stop();
@@ -934,6 +936,13 @@ void TrackerMainProcessor::recreateSequencersAndMachines()
         recreateSequencersAndMachines();
     });
     initialiseMachines();
+    // Reset can run while the standalone device or plug-in host remains
+    // prepared.  The freshly-created machines therefore need the same DSP
+    // lifecycle call as the instances they replaced before audio resumes.
+    // Without this, Delay owns no delay buffer and Filter owns unprepared JUCE
+    // DSP storage until the host happens to call prepareToPlay again.
+    if (activeSampleRate > 0.0 && activeBlockSize > 0)
+        prepareToPlay(activeSampleRate, activeBlockSize);
     if (auto* viewedSequencer = getViewedSequencerInternal())
         viewedSequencer->requestStrUpdate();
     suspendProcessing(false);
@@ -2664,6 +2673,12 @@ void TrackerMainProcessor::adjustSongRowSequenceSetId(std::size_t row, int direc
     songRows[row].sequenceSetId = static_cast<std::size_t>(juce::jlimit(0, maxId, current + direction));
     if (songPlayMode == SongPlayMode::sequence && row == selectedSongRow)
         setSelectedSongRow(row);
+    else if (songPlayMode == SongPlayMode::song && row == currentSongRow)
+    {
+        // Song-row edits must not replace the currently playing set mid-beat.
+        // The pending switch is consumed only at the next four-tick beat boundary.
+        schedulePlaybackSequenceSetSwitch(songRows[row].sequenceSetId);
+    }
 }
 
 void TrackerMainProcessor::adjustSongRowBeatCount(std::size_t row, int direction)
