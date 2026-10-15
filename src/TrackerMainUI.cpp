@@ -2082,10 +2082,11 @@ void TrackerMainUI::chooseStateSaveDirectory()
                 return;
             }
 
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                   "MYK Tracker state saved",
-                                                   file.getFullPathName(),
-                                                   "OK");
+            // The chooser has closed and the state is safely written.  Do not
+            // add a second modal acknowledgement: it is awkward to dismiss on
+            // keyboard-only/touchscreen setups and steals focus from tracker
+            // controls such as Space.
+            safeThis->grabKeyboardFocus();
         });
 }
 
@@ -2119,10 +2120,9 @@ void TrackerMainUI::chooseStateFileToLoad()
 
             safeThis->audioProcessor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
             safeThis->lastStateDirectory = file.getParentDirectory();
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                   "MYK Tracker state loaded",
-                                                   file.getFullPathName(),
-                                                   "OK");
+            // As for save, return straight to the tracker once the chooser
+            // has closed instead of presenting an extra modal confirmation.
+            safeThis->grabKeyboardFocus();
         });
 }
 
