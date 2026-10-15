@@ -66,8 +66,15 @@ struct TestMachineHost final : MachineHost
     float getMasterMeterLevel(std::size_t channel) const override { return masterMeters[channel]; }
     float getMasterGainDb() const override { return masterGain; }
     void setMasterGainDb(float gainDb) override { masterGain = MixerState::clampMasterGainDb(gainDb); }
+    bool isMasterMuted() const override { return masterMuted; }
+    void setMasterMuted(bool value) override { masterMuted = value; }
     bool isMasterRecording() const override { return masterRecording; }
     bool toggleMasterRecording() override { masterRecording = !masterRecording; return masterRecording; }
+    float getAuxReturnMeterLevel(std::size_t aux, std::size_t channel) const override { return auxMeters[aux][channel]; }
+    float getAuxReturnGainDb(std::size_t aux) const override { return auxGains[aux]; }
+    void setAuxReturnGainDb(std::size_t aux, float gainDb) override { auxGains[aux] = MixerState::clampMasterGainDb(gainDb); }
+    bool isAuxReturnMuted(std::size_t aux) const override { return auxMuted[aux]; }
+    void setAuxReturnMuted(std::size_t aux, bool value) override { auxMuted[aux] = value; }
     bool isStackMuted(std::size_t stack) const override { return muted[stack]; }
     bool isStackSolo(std::size_t stack) const override { return solo[stack]; }
     void setStackMuted(std::size_t stack, bool value) override { muted[stack] = value; }
@@ -81,8 +88,12 @@ struct TestMachineHost final : MachineHost
     std::vector<float> meters { 0.0f, 0.0f };
     std::vector<float> gains { 0.0f, 0.0f };
     std::array<float, 2> masterMeters { 0.0f, 0.0f };
+    std::array<std::array<float, 2>, 2> auxMeters {};
     float masterGain = 0.0f;
+    std::array<float, 2> auxGains { 0.0f, 0.0f };
     bool masterRecording = false;
+    bool masterMuted = false;
+    std::array<bool, 2> auxMuted { false, false };
     std::vector<std::size_t> silencedStacks;
 };
 
@@ -648,11 +659,23 @@ int main()
     require(mixerHost.masterGain == 0.0f, "master fader rows adjust master gain");
     mixerEditor.toggleMuteCurrentMixerStack();
     mixerEditor.toggleSoloCurrentMixerStack();
-    require(!mixerHost.muted[0] && !mixerHost.solo[0],
-            "mixer mute and solo shortcuts do nothing on master");
+    require(mixerHost.masterMuted && !mixerHost.muted[0] && !mixerHost.solo[0],
+            "mixer mute toggles master while solo does nothing on master");
+    mixerEditor.moveCursorRight();
+    require(mixerEditor.getSelectedMixerAux() == std::optional<std::size_t>(0),
+            "first aux return follows the master column");
+    mixerEditor.incrementAtCursor();
+    require(mixerHost.auxGains[0] == 1.0f, "aux gain row adjusts by one decibel");
+    mixerEditor.toggleMuteCurrentMixerStack();
+    mixerEditor.toggleSoloCurrentMixerStack();
+    require(mixerHost.auxMuted[0] && !mixerHost.solo[0],
+            "mixer mute toggles aux while solo does nothing on aux returns");
+    mixerEditor.moveCursorRight();
+    require(mixerEditor.getSelectedMixerAux() == std::optional<std::size_t>(1),
+            "second aux return follows the first");
     mixerEditor.moveCursorRight();
     require(mixerEditor.getSelectedMixerStack() == std::optional<std::size_t>(0),
-            "first stack retains stack id zero after the master insertion");
+            "first stack retains stack id zero after master and aux insertions");
     mixerEditor.toggleMuteCurrentMixerStack();
     mixerEditor.toggleSoloCurrentMixerStack();
     require(mixerHost.muted[0] && mixerHost.solo[0],

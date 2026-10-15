@@ -44,18 +44,24 @@ struct UIBox
     bool isControlModeSequence = false;
     /** True when the cell belongs to a soloed sequence or mixer channel. */
     bool isSoloChannel = false;
+    /** True when the cell belongs to a muted mixer channel. */
+    bool isMutedChannel = false;
     /** True when the cell represents note-bearing content. */
     bool hasNote = false;
     /** True when `customFillArgb` should override normal fill colours. */
     bool useCustomFillColour = false;
     /** True when `customTextArgb` should override normal text colours. */
     bool useCustomTextColour = false;
+    /** True when `customGlowArgb` should override the normal tracker glow colour. */
+    bool useCustomGlowColour = false;
     /** True when custom colours must remain visible under the cursor. */
     bool customColoursOverrideSelection = false;
     /** ARGB fill colour override. */
     std::uint32_t customFillArgb = 0;
     /** ARGB text colour override. */
     std::uint32_t customTextArgb = 0;
+    /** ARGB glow colour override. */
+    std::uint32_t customGlowArgb = 0;
     /** Draw independent left/right meter rails inside this cell. */
     bool drawStereoMeter = false;
     bool stereoMeterLeftActive = false;

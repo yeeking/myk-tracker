@@ -139,8 +139,15 @@ public:
     float getMasterMeterLevel(std::size_t channel) const override;
     float getMasterGainDb() const override;
     void setMasterGainDb(float gainDb) override;
+    bool isMasterMuted() const override;
+    void setMasterMuted(bool muted) override;
     bool isMasterRecording() const override;
     bool toggleMasterRecording() override;
+    float getAuxReturnMeterLevel(std::size_t auxIndex, std::size_t channel) const override;
+    float getAuxReturnGainDb(std::size_t auxIndex) const override;
+    void setAuxReturnGainDb(std::size_t auxIndex, float gainDb) override;
+    bool isAuxReturnMuted(std::size_t auxIndex) const override;
+    void setAuxReturnMuted(std::size_t auxIndex, bool muted) override;
     bool isStackMuted(std::size_t stackIndex) const override;
     bool isStackSolo(std::size_t stackIndex) const override;
     void setStackMuted(std::size_t stackIndex, bool muted) override;
@@ -325,6 +332,10 @@ private:
     {
         std::unique_ptr<AuxReverbMachine> machine;
         juce::AudioBuffer<float> inputBuffer;
+        std::array<float, 2> meterLevels { 0.0f, 0.0f };
+        float gainDb = 0.0f;
+        float gainLinear = 1.0f;
+        bool muted = false;
         int id = 0;
     };
     std::vector<ScheduledSamplerEvent> samplerEventsToSend;
@@ -336,6 +347,7 @@ private:
     SharedAuxBus auxBus2;
     float masterGainDb = 0.0f;
     float masterGainLinear = 1.0f;
+    bool masterMuted = false;
     std::array<float, 2> masterMeterLevels { 0.0f, 0.0f };
     struct RecordingSession
     {
@@ -414,6 +426,8 @@ private:
     const MachineInterface* getMachineForStackType(const MachineStack& stack, CommandType type) const;
     SharedAuxBus* getAuxBusForType(CommandType type);
     const SharedAuxBus* getAuxBusForType(CommandType type) const;
+    SharedAuxBus* getAuxBus(std::size_t auxIndex);
+    const SharedAuxBus* getAuxBus(std::size_t auxIndex) const;
     static MachineStack::SlotState makeDefaultSlotState(CommandType type);
     /** (property key, machine) pairs for state save/restore. The persisted names
         are part of the plugin state format; do not rename. */

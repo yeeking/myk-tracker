@@ -362,9 +362,11 @@ void SequencerEditor::cycleAtCursor()
     if (machineHost != nullptr)
     {
       const auto stack = getSelectedMixerStack();
+      const auto aux = getSelectedMixerAux();
       if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, !machineHost->isStackMuted(*stack));
       else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, !machineHost->isStackSolo(*stack));
-      else if (!stack && mixerRow == 2) machineHost->toggleMasterRecording();
+      else if (aux && mixerRow == 2) machineHost->setAuxReturnMuted(*aux, !machineHost->isAuxReturnMuted(*aux));
+      else if (isMixerMasterSelected() && mixerRow == 2) machineHost->toggleMasterRecording();
     }
     break;
 
@@ -828,7 +830,7 @@ void SequencerEditor::moveCursorRight()
   case SequencerEditorPage::step: moveCursorRightOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorRightOnMachinePage(); break;
-  case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerColumn < machineHost->getMachineStackCount()) ++mixerColumn; break;
+  case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerColumn < machineHost->getMachineStackCount() + 2) ++mixerColumn; break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorRightOnResetConfirmationPage(); break;
   }
@@ -942,8 +944,11 @@ void SequencerEditor::incrementAtCursor()
     if (machineHost != nullptr)
     {
       const auto stack = getSelectedMixerStack();
-      if (!stack && (mixerRow == 1 || mixerRow >= 3))
+      const auto aux = getSelectedMixerAux();
+      if (isMixerMasterSelected() && (mixerRow == 1 || mixerRow >= 3))
         machineHost->setMasterGainDb(machineHost->getMasterGainDb() + 1.0f);
+      else if (aux && (mixerRow == 1 || mixerRow >= 3))
+        machineHost->setAuxReturnGainDb(*aux, machineHost->getAuxReturnGainDb(*aux) + 1.0f);
       else if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, true);
       else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, true);
       else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) + 1.0f);
@@ -979,8 +984,11 @@ void SequencerEditor::decrementAtCursor()
     if (machineHost != nullptr)
     {
       const auto stack = getSelectedMixerStack();
-      if (!stack && (mixerRow == 1 || mixerRow >= 3))
+      const auto aux = getSelectedMixerAux();
+      if (isMixerMasterSelected() && (mixerRow == 1 || mixerRow >= 3))
         machineHost->setMasterGainDb(machineHost->getMasterGainDb() - 1.0f);
+      else if (aux && (mixerRow == 1 || mixerRow >= 3))
+        machineHost->setAuxReturnGainDb(*aux, machineHost->getAuxReturnGainDb(*aux) - 1.0f);
       else if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, false);
       else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, false);
       else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) - 1.0f);
@@ -1928,7 +1936,7 @@ void SequencerEditor::gotoMixerPage()
   dismissMachineTransientUiIfNeeded();
   setEditMode(SequencerEditorMode::mixer);
   if (machineHost != nullptr)
-    mixerColumn = std::min(mixerColumn, machineHost->getMachineStackCount());
+    mixerColumn = std::min(mixerColumn, machineHost->getMachineStackCount() + 2);
   mixerRow = std::min<std::size_t>(10, mixerRow);
 }
 
@@ -2136,8 +2144,13 @@ void SequencerEditor::toggleSoloCurrentSequence()
 
 void SequencerEditor::toggleMuteCurrentMixerStack()
 {
-  const auto stack = getSelectedMixerStack();
-  if (machineHost != nullptr && stack)
+  if (machineHost == nullptr)
+    return;
+  if (isMixerMasterSelected())
+    machineHost->setMasterMuted(!machineHost->isMasterMuted());
+  else if (const auto aux = getSelectedMixerAux())
+    machineHost->setAuxReturnMuted(*aux, !machineHost->isAuxReturnMuted(*aux));
+  else if (const auto stack = getSelectedMixerStack())
     machineHost->setStackMuted(*stack, !machineHost->isStackMuted(*stack));
 }
 

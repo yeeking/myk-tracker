@@ -873,8 +873,16 @@ void TrackerMainProcessor::initialiseMachines()
     auxBus2.id = 2;
     auxBus1.machine = std::make_unique<AuxReverbMachine>(juce::Reverb::Parameters{ 0.72f, 0.35f, 0.28f, 0.0f, 1.0f, 0.0f });
     auxBus2.machine = std::make_unique<AuxReverbMachine>(juce::Reverb::Parameters{ 0.42f, 0.55f, 0.22f, 0.0f, 0.75f, 0.0f });
+    auxBus1.gainDb = auxBus2.gainDb = 0.0f;
+    auxBus1.gainLinear = auxBus2.gainLinear = 1.0f;
+    auxBus1.muted = auxBus2.muted = false;
+    auxBus1.meterLevels.fill(0.0f);
+    auxBus2.meterLevels.fill(0.0f);
     setMasterGainDb(0.0f);
+    masterMuted = false;
     masterMeterLevels.fill(0.0f);
+    auxBus1.meterLevels.fill(0.0f);
+    auxBus2.meterLevels.fill(0.0f);
     for (auto& stack : machineStacks)
     {
         stack.sampler = std::make_unique<SuperSamplerProcessor>();
@@ -1064,11 +1072,17 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
         case SequencerEditorMode::mixer:
         {
             const auto stack = seqEditor.getSelectedMixerStack();
-            if (!stack)
+            const auto aux = seqEditor.getSelectedMixerAux();
+            if (seqEditor.isMixerMasterSelected())
             {
-                if (seqEditor.getMixerRow() == 0) return "MASTER";
                 if (seqEditor.getMixerRow() == 2) return isMasterRecording() ? "RECORDING ON" : "RECORDING OFF";
                 return "MASTER GAIN " + juce::String(getMasterGainDb(), 1);
+            }
+            if (aux)
+            {
+                if (seqEditor.getMixerRow() == 0) return "AUX " + juce::String(static_cast<int>(*aux + 1));
+                if (seqEditor.getMixerRow() == 2) return isAuxReturnMuted(*aux) ? "AUX MUTE ON" : "AUX MUTE OFF";
+                return "AUX GAIN " + juce::String(getAuxReturnGainDb(*aux), 1);
             }
             if (seqEditor.getMixerRow() == 1) return isStackMuted(*stack) ? "MUTE ON" : "MUTE OFF";
             if (seqEditor.getMixerRow() == 2) return isStackSolo(*stack) ? "SOLO ON" : "SOLO OFF";
@@ -1109,7 +1123,7 @@ void TrackerMainProcessor::handleIncomingOscControlMessage(const juce::OSCMessag
 
         const float normalizedX = juce::jlimit(0.0f, 1.0f, message[0].getFloat32());
         const float normalizedY = juce::jlimit(0.0f, 1.0f, message[1].getFloat32());
-        const float delta = (address == zoomInAddress) ? 0.2f : -0.2f;
+        const float delta = (address == zoomInAddress) ? 0.1f : -0.1f;
         queueZoomCommand(delta, normalizedX, normalizedY);
         return;
     }
@@ -1216,6 +1230,8 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     auxBus1.inputBuffer.clear();
     auxBus2.inputBuffer.clear();
     masterMeterLevels.fill(0.0f);
+    auxBus1.meterLevels.fill(0.0f);
+    auxBus2.meterLevels.fill(0.0f);
     if (auxBus1.machine != nullptr)
         auxBus1.machine->prepareToPlay(sampleRate, samplesPerBlock);
     if (auxBus2.machine != nullptr)
@@ -1671,7 +1687,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     }
 
-    auto processAuxReturn = [&buffer](SharedAuxBus& auxBus)
+    auto processAuxReturn = [&buffer, this](SharedAuxBus& auxBus)
     {
         if (auxBus.machine == nullptr
             || auxBus.inputBuffer.getNumChannels() == 0
@@ -1681,8 +1697,23 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
 
         auxBus.machine->processAudioBuffer(auxBus.inputBuffer);
-        for (int channel = 0; channel < juce::jmin(buffer.getNumChannels(), auxBus.inputBuffer.getNumChannels()); ++channel)
-            buffer.addFrom(channel, 0, auxBus.inputBuffer, channel, 0, auxBus.inputBuffer.getNumSamples());
+        if (!auxBus.muted && auxBus.gainLinear != 1.0f)
+            auxBus.inputBuffer.applyGain(auxBus.gainLinear);
+
+        for (std::size_t channel = 0; channel < auxBus.meterLevels.size(); ++channel)
+        {
+            const int sourceChannel = auxBus.inputBuffer.getNumChannels() > 1
+                ? static_cast<int>(channel) : 0;
+            const float target = auxBus.muted ? 0.0f
+                : linearToMeterNormalised(measureChannelRms(auxBus.inputBuffer, sourceChannel));
+            const float smoothing = target > auxBus.meterLevels[channel] ? 0.65f : 0.12f;
+            auxBus.meterLevels[channel] += (target - auxBus.meterLevels[channel]) * smoothing;
+            auxBus.meterLevels[channel] = juce::jlimit(0.0f, 1.0f, auxBus.meterLevels[channel]);
+        }
+
+        if (!auxBus.muted)
+            for (int channel = 0; channel < juce::jmin(buffer.getNumChannels(), auxBus.inputBuffer.getNumChannels()); ++channel)
+                buffer.addFrom(channel, 0, auxBus.inputBuffer, channel, 0, auxBus.inputBuffer.getNumSamples());
     };
 
     processAuxReturn(auxBus1);
@@ -1691,6 +1722,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const float outputGainLinear = masterGainLinear;
     if (std::abs(masterGainDb) > 0.0001f)
         buffer.applyGain(outputGainLinear);
+    if (masterMuted)
+        buffer.clear();
 
     for (std::size_t channel = 0; channel < masterMeterLevels.size(); ++channel)
     {
@@ -1842,8 +1875,10 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("currentSeqParam", static_cast<int>(seqEditor.getCurrentSeqParam()));
     state->setProperty("mixerColumn", static_cast<int>(seqEditor.getMixerColumn()));
     const auto selectedMixerStack = seqEditor.getSelectedMixerStack();
+    const auto selectedMixerAux = seqEditor.getSelectedMixerAux();
     state->setProperty("mixerStack", selectedMixerStack ? static_cast<int>(*selectedMixerStack) : -1);
-    state->setProperty("mixerMasterSelected", !selectedMixerStack.has_value());
+    state->setProperty("mixerAux", selectedMixerAux ? static_cast<int>(*selectedMixerAux) : -1);
+    state->setProperty("mixerMasterSelected", seqEditor.isMixerMasterSelected());
     state->setProperty("mixerRow", static_cast<int>(seqEditor.getMixerRow()));
     state->setProperty("masterRecording", isMasterRecording());
     state->setProperty("masterMeterLeft", masterMeterLevels[0]);
@@ -2168,6 +2203,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     root->setProperty("bpm", getBPM());
     root->setProperty("internalClockEnabled", isInternalClockEnabled());
     root->setProperty("masterGainDb", masterGainDb);
+    root->setProperty("masterMuted", masterMuted);
     juce::Array<juce::var> sequenceSetStates;
     for (const auto& sequenceSet : sequenceSets)
         if (sequenceSet != nullptr)
@@ -2228,6 +2264,10 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     juce::DynamicObject::Ptr auxObj = new juce::DynamicObject();
     auxObj->setProperty("aux1", encodeMachineState(auxBus1.machine.get()));
     auxObj->setProperty("aux2", encodeMachineState(auxBus2.machine.get()));
+    auxObj->setProperty("aux1GainDb", auxBus1.gainDb);
+    auxObj->setProperty("aux1Muted", auxBus1.muted);
+    auxObj->setProperty("aux2GainDb", auxBus2.gainDb);
+    auxObj->setProperty("aux2Muted", auxBus2.muted);
     root->setProperty("sharedAuxBuses", auxObj.get());
 
     return root.get();
@@ -2268,7 +2308,14 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         setBPM(restoredBpm);
     setInternalClockEnabled(static_cast<bool>(stateVar.getProperty("internalClockEnabled", isInternalClockEnabled())));
     setMasterGainDb(static_cast<float>(stateVar.getProperty("masterGainDb", 0.0f)));
+    setMasterMuted(static_cast<bool>(stateVar.getProperty("masterMuted", false)));
     masterMeterLevels.fill(0.0f);
+    auxBus1.meterLevels.fill(0.0f);
+    auxBus2.meterLevels.fill(0.0f);
+    setAuxReturnGainDb(0, 0.0f);
+    setAuxReturnGainDb(1, 0.0f);
+    setAuxReturnMuted(0, false);
+    setAuxReturnMuted(1, false);
 
     resetSongState();
 
@@ -2470,6 +2517,10 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     {
         decodeMachineState(sharedAuxVar.getProperty("aux1", juce::var()), auxBus1.machine.get());
         decodeMachineState(sharedAuxVar.getProperty("aux2", juce::var()), auxBus2.machine.get());
+        setAuxReturnGainDb(0, static_cast<float>(sharedAuxVar.getProperty("aux1GainDb", 0.0f)));
+        setAuxReturnMuted(0, static_cast<bool>(sharedAuxVar.getProperty("aux1Muted", false)));
+        setAuxReturnGainDb(1, static_cast<float>(sharedAuxVar.getProperty("aux2GainDb", 0.0f)));
+        setAuxReturnMuted(1, static_cast<bool>(sharedAuxVar.getProperty("aux2Muted", false)));
     }
 
     viewedSequencer->updateSeqStringGrid();
@@ -2829,6 +2880,52 @@ void TrackerMainProcessor::setMasterGainDb(float gainDb)
 {
     masterGainDb = MixerState::clampMasterGainDb(gainDb);
     masterGainLinear = MixerState::masterGainToLinear(masterGainDb);
+}
+
+bool TrackerMainProcessor::isMasterMuted() const
+{
+    return masterMuted;
+}
+
+void TrackerMainProcessor::setMasterMuted(bool muted)
+{
+    masterMuted = muted;
+}
+
+float TrackerMainProcessor::getAuxReturnMeterLevel(std::size_t auxIndex, std::size_t channel) const
+{
+    if (const auto* auxBus = getAuxBus(auxIndex); auxBus != nullptr && channel < auxBus->meterLevels.size())
+        return auxBus->meterLevels[channel];
+    return 0.0f;
+}
+
+float TrackerMainProcessor::getAuxReturnGainDb(std::size_t auxIndex) const
+{
+    if (const auto* auxBus = getAuxBus(auxIndex))
+        return auxBus->gainDb;
+    return 0.0f;
+}
+
+void TrackerMainProcessor::setAuxReturnGainDb(std::size_t auxIndex, float gainDb)
+{
+    if (auto* auxBus = getAuxBus(auxIndex))
+    {
+        auxBus->gainDb = MixerState::clampMasterGainDb(gainDb);
+        auxBus->gainLinear = MixerState::masterGainToLinear(auxBus->gainDb);
+    }
+}
+
+bool TrackerMainProcessor::isAuxReturnMuted(std::size_t auxIndex) const
+{
+    if (const auto* auxBus = getAuxBus(auxIndex))
+        return auxBus->muted;
+    return false;
+}
+
+void TrackerMainProcessor::setAuxReturnMuted(std::size_t auxIndex, bool muted)
+{
+    if (auto* auxBus = getAuxBus(auxIndex))
+        auxBus->muted = muted;
 }
 
 bool TrackerMainProcessor::isMasterRecording() const
@@ -3336,4 +3433,19 @@ const TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBusForType
         case CommandType::AuxSend2Fx: return &auxBus2;
         default: return nullptr;
     }
+}
+
+TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBus(std::size_t auxIndex)
+{
+    switch (auxIndex)
+    {
+        case 0: return &auxBus1;
+        case 1: return &auxBus2;
+        default: return nullptr;
+    }
+}
+
+const TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBus(std::size_t auxIndex) const
+{
+    return const_cast<TrackerMainProcessor*>(this)->getAuxBus(auxIndex);
 }

@@ -1205,14 +1205,26 @@ void TrackerMainUI::prepareMixerView()
     std::vector<bool> muted(stackCount), solo(stackCount);
     std::vector<float> meters(stackCount), gains(stackCount);
     std::array<float, 2> masterMeters { 0.0f, 0.0f };
+    std::array<std::array<float, 2>, 2> auxMeters {};
+    std::array<float, 2> auxGains {};
+    std::array<bool, 2> auxMuted {};
     float masterGain = 0.0f;
+    bool masterMuted = false;
     bool masterRecording = false;
     audioProcessor.withAudioThreadExclusive([&]
     {
         masterMeters[0] = audioProcessor.getMasterMeterLevel(0);
         masterMeters[1] = audioProcessor.getMasterMeterLevel(1);
         masterGain = audioProcessor.getMasterGainDb();
+        masterMuted = audioProcessor.isMasterMuted();
         masterRecording = audioProcessor.isMasterRecording();
+        for (std::size_t aux = 0; aux < auxMeters.size(); ++aux)
+        {
+            auxMeters[aux][0] = audioProcessor.getAuxReturnMeterLevel(aux, 0);
+            auxMeters[aux][1] = audioProcessor.getAuxReturnMeterLevel(aux, 1);
+            auxGains[aux] = audioProcessor.getAuxReturnGainDb(aux);
+            auxMuted[aux] = audioProcessor.isAuxReturnMuted(aux);
+        }
         for (std::size_t stack = 0; stack < stackCount; ++stack)
         {
             muted[stack] = audioProcessor.isStackMuted(stack);
@@ -1221,9 +1233,7 @@ void TrackerMainUI::prepareMixerView()
             gains[stack] = audioProcessor.getStackGainDb(stack);
         }
     });
-    std::vector<std::vector<UIBox>> boxes(stackCount + 1, std::vector<UIBox>(rows));
-    boxes[0][0].text = "MASTER";
-    boxes[0][1].text = "GAIN:" + formatSignedGain(masterGain);
+    std::vector<std::vector<UIBox>> boxes(stackCount + 3, std::vector<UIBox>(rows));
     boxes[0][2].text = "R";
     boxes[0][2].isActive = masterRecording;
     boxes[0][2].isHighlighted = masterRecording;
@@ -1239,48 +1249,92 @@ void TrackerMainUI::prepareMixerView()
         juce::jlimit(0, 8, static_cast<int>(std::ceil(masterMeters[0] * 8.0f))),
         juce::jlimit(0, 8, static_cast<int>(std::ceil(masterMeters[1] * 8.0f)))
     };
-    const int masterHandle = juce::jlimit(0, 7, static_cast<int>(std::lround((masterGain + 48.0f) / 54.0f * 7.0f)));
-    for (std::size_t row = 0; row < rows; ++row) boxes[0][row].kind = UIBox::Kind::TrackerCell;
+    const auto faderBand = [](float gainDb)
+    {
+        return juce::jlimit(0, 7, static_cast<int>(std::lround((gainDb + 48.0f) / 54.0f * 7.0f)));
+    };
+    const auto brightenFaderCell = [this](UIBox& cell)
+    {
+        cell.useCustomFillColour = true;
+        cell.customFillArgb = palette.gridEmpty.brighter(0.45f).getARGB();
+    };
+    const auto fillMeterCell = [](UIBox& cell, juce::Colour colour)
+    {
+        cell.isHighlighted = true;
+        cell.useCustomFillColour = true;
+        cell.customFillArgb = colour.darker(0.55f).getARGB();
+        cell.useCustomGlowColour = true;
+        cell.customGlowArgb = colour.getARGB();
+    };
+    const int masterHandle = faderBand(masterGain);
+    for (std::size_t row = 0; row < rows; ++row)
+    {
+        boxes[0][row].kind = UIBox::Kind::TrackerCell;
+        boxes[0][row].isMutedChannel = masterMuted;
+    }
     for (int band = 0; band < 8; ++band)
     {
         auto& cell = boxes[0][3 + static_cast<std::size_t>(7 - band)];
-        cell.drawStereoMeter = true;
-        cell.stereoMeterLeftActive = band < masterLit[0];
-        cell.stereoMeterRightActive = band < masterLit[1];
-        const auto meterColour = band == 7 ? juce::Colours::red
-            : band >= 5 ? juce::Colours::yellow
-            : juce::Colours::limegreen;
-        cell.stereoMeterArgb = meterColour.getARGB();
-        if (cell.stereoMeterLeftActive || cell.stereoMeterRightActive)
-            cell.isHighlighted = true;
-        if (band == masterHandle) cell.text = "L--R";
+        if (band < std::max(masterLit[0], masterLit[1]))
+            fillMeterCell(cell, juce::Colours::limegreen);
+        if (band == masterHandle) brightenFaderCell(cell);
+    }
+    if (masterMuted)
+    {
+        boxes[0][0].useCustomFillColour = true;
+        boxes[0][0].customFillArgb = palette.gridEmpty.darker(0.55f).getARGB();
+    }
+    for (std::size_t aux = 0; aux < auxMeters.size(); ++aux)
+    {
+        auto& column = boxes[aux + 1];
+        column[0].text = "AUX:" + std::to_string(aux + 1);
+        column[1].text = "GAIN:" + formatSignedGain(auxGains[aux]);
+        column[2].text = auxMuted[aux] ? "MUTE:ON" : "MUTE:OFF";
+        const std::array<int, 2> lit {
+            juce::jlimit(0, 8, static_cast<int>(std::ceil(auxMeters[aux][0] * 8.0f))),
+            juce::jlimit(0, 8, static_cast<int>(std::ceil(auxMeters[aux][1] * 8.0f)))
+        };
+        const int handle = faderBand(auxGains[aux]);
+        for (std::size_t row = 0; row < rows; ++row)
+        {
+            column[row].kind = UIBox::Kind::TrackerCell;
+            column[row].isMutedChannel = auxMuted[aux];
+        }
+        for (int band = 0; band < 8; ++band)
+        {
+            auto& cell = column[3 + static_cast<std::size_t>(7 - band)];
+            if (band < std::max(lit[0], lit[1]))
+                fillMeterCell(cell, juce::Colours::deepskyblue);
+            if (band == handle) brightenFaderCell(cell);
+        }
     }
     for (std::size_t stack = 0; stack < stackCount; ++stack)
     {
-        auto& column = boxes[stack + 1];
+        auto& column = boxes[stack + 3];
         column[0].text = "STK:" + std::to_string(stack);
         column[1].text = muted[stack] ? "MUTE:ON" : "MUTE:OFF";
         column[2].text = solo[stack] ? "SOLO:ON" : "SOLO:OFF";
         const float meter = meters[stack];
         const float gain = gains[stack];
         const int lit = juce::jlimit(0, 8, static_cast<int>(std::ceil(meter * 8.0f)));
-        const int handle = juce::jlimit(0, 7, static_cast<int>(std::lround((gain + 48.0f) / 54.0f * 7.0f)));
+        const int handle = faderBand(gain);
         for (std::size_t row = 0; row < rows; ++row)
         {
             column[row].kind = UIBox::Kind::TrackerCell;
             column[row].isSoloChannel = solo[stack];
+            column[row].isMutedChannel = muted[stack];
         }
         for (int band = 0; band < 8; ++band)
         {
             auto& cell = column[3 + static_cast<std::size_t>(7 - band)];
             if (band < lit) cell.isHighlighted = true;
-            if (band == handle) cell.text = "====";
+            if (band == handle) brightenFaderCell(cell);
         }
     }
     const auto column = seqEditor->getMixerColumn();
     const auto row = seqEditor->getMixerRow();
     if (column < boxes.size() && row < rows) boxes[column][row].isSelected = true;
-    updateCellStates(boxes, rows, stackCount + 1);
+    updateCellStates(boxes, rows, stackCount + 3);
 }
 
 void TrackerMainUI::prepareControlPanelView()
@@ -1592,15 +1646,17 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
             cell.text = box.text;
             cell.fillColor = samplerViewActive ? getSamplerCellColour(box) : getCellColour(box);
             cell.textColor = samplerViewActive ? getSamplerTextColour(box) : getTextColour(box);
-            cell.glowColor = samplerViewActive ? samplerPalette.glowActive : palette.gridPlayhead;
+            cell.glowColor = samplerViewActive ? samplerPalette.glowActive
+                : (box.useCustomGlowColour ? juce::Colour(box.customGlowArgb) : palette.gridPlayhead);
             cell.glow = glowValue;
             cell.depthScale = samplerViewActive ? getSamplerCellDepthScale(box) : getCellDepthScale(box);
             cell.drawOutline = samplerViewActive ? box.isSelected
-                : (box.hasNote || box.isSoloChannel);
+                : (box.hasNote || box.isSoloChannel || box.isMutedChannel);
             cell.outlineColor = box.isSoloChannel ? juce::Colours::yellow
+                : box.isMutedChannel ? juce::Colours::red
                 : (box.isControlModeSequence && box.hasNote)
                     ? palette.sequenceControlModeOutline : palette.gridNote;
-            cell.outlineLineWidth = box.isSoloChannel ? 5.0f : 3.0f;
+            cell.outlineLineWidth = (box.isSoloChannel || box.isMutedChannel) ? 5.0f : 3.0f;
 
             cell.fillFraction = (!samplerViewActive && box.hasValueScale && !box.isDisabled)
                 ? box.valueNorm

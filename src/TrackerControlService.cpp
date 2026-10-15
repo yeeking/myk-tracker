@@ -1196,10 +1196,14 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     {
                         if (editor.getCurrentPage() == SequencerEditorPage::mixer)
                         {
-                            if (!editor.isMixerMasterSelected())
+                            if (key == 'm')
                             {
-                                if (key == 's') editor.toggleSoloCurrentMixerStack();
-                                else editor.toggleMuteCurrentMixerStack();
+                                editor.toggleMuteCurrentMixerStack();
+                                contentChanged = true;
+                            }
+                            else if (editor.getSelectedMixerStack())
+                            {
+                                editor.toggleSoloCurrentMixerStack();
                                 contentChanged = true;
                             }
                         }
