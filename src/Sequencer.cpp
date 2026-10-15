@@ -48,6 +48,17 @@ std::vector<double> makeEmptySequenceRow(double command)
   row[Step::cmdInd] = command;
   return row;
 }
+
+bool isPlayableNoteRow(const Step& step, std::size_t row)
+{
+  if (step.howManyDataCols() <= Step::noteInd || step.getDataAt(row, Step::noteInd) <= 0.0)
+    return false;
+
+  const auto commandValue = step.getDataAt(row, Step::cmdInd);
+  const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, commandValue)));
+  const auto traits = machineTraits(command);
+  return traits.isStepCommandType && traits.isStackRoutable && !traits.isControlCommand;
+}
 }
 
 Step::Step() : rw_mutex{std::make_unique<std::shared_mutex>()}, active{true}
@@ -384,13 +395,27 @@ void Sequence::tick(bool trigger, bool isQuarterNoteBoundary)
       if (stepIndex < steps.size() && steps[stepIndex].isActive()
           && steps[stepIndex].hasTriggerableEvent())
       {
-        auto triggerContext = context;
         if (head.config.octaves > 1)
         {
           std::uniform_int_distribution<int> octaveLayer(0, static_cast<int>(head.config.octaves - 1));
-          triggerContext.noteTransposeSemitones = 12 * octaveLayer(head.octaveRandom);
+          auto& step = steps[stepIndex];
+          const auto rowCount = step.howManyDataRows();
+          for (std::size_t row = 0; row < rowCount; ++row)
+          {
+            // Every playable note in a chord receives its own octave draw.
+            // Control commands retain their stored values and do not advance
+            // the dedicated octave RNG.
+            auto triggerContext = context;
+            if (isPlayableNoteRow(step, row))
+              triggerContext.noteTransposeSemitones = 12 * octaveLayer(head.octaveRandom);
+            step.trigger(row, &triggerContext);
+          }
         }
-        steps[stepIndex].trigger(steps[stepIndex].howManyDataRows(), &triggerContext);
+        else
+        {
+          // Preserve the OCT:1 dispatch path and random traversal behaviour.
+          steps[stepIndex].trigger(steps[stepIndex].howManyDataRows(), &context);
+        }
         anyStepTriggered = true;
       }
     }

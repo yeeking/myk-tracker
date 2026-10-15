@@ -233,6 +233,8 @@ public:
   void incrementOctave();
   /** decrease the octave offset applied when entering notes  */
   void decrementOctave();
+  /** Shift every playable note row in the current sequence by semitones. */
+  void transposeCurrentSequence(int semitones);
   /**add a row: might add a new step to current track or add a new row to a step's data */
   void addRow();
   /**remove a row: might remove a new step to current track or remove a new row to a step's data */

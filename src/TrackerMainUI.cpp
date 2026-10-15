@@ -1596,9 +1596,10 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
             cell.glow = glowValue;
             cell.depthScale = samplerViewActive ? getSamplerCellDepthScale(box) : getCellDepthScale(box);
             cell.drawOutline = samplerViewActive ? box.isSelected
-                : (box.hasNote || box.isControlModeSequence || box.isSoloChannel);
+                : (box.hasNote || box.isSoloChannel);
             cell.outlineColor = box.isSoloChannel ? juce::Colours::yellow
-                : box.isControlModeSequence ? palette.sequenceControlModeOutline : palette.gridNote;
+                : (box.isControlModeSequence && box.hasNote)
+                    ? palette.sequenceControlModeOutline : palette.gridNote;
             cell.outlineLineWidth = box.isSoloChannel ? 5.0f : 3.0f;
 
             cell.fillFraction = (!samplerViewActive && box.hasValueScale && !box.isDisabled)
@@ -1646,7 +1647,10 @@ juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
         return PaletteDefaults::cursor.fill;
 
     auto colour = cell.useCustomFillColour ? juce::Colour(cell.customFillArgb)
-        : cell.isArmed ? palette.statusOk : palette.gridEmpty;
+        : cell.isArmed ? palette.statusOk
+        : cell.isControlModeSequence
+            ? palette.gridEmpty.interpolatedWith(juce::Colours::white, 0.08f)
+            : palette.gridEmpty;
     return colour;
 }
 

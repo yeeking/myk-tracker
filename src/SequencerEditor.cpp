@@ -84,6 +84,16 @@ bool isMachineCellLandable(const UIBox& cell)
       && (cell.onAdjust != nullptr || cell.onInsert != nullptr || cell.onActivate != nullptr);
 }
 
+bool isPlayableNoteRow(const std::vector<double>& row)
+{
+  if (row.size() <= Step::noteInd || row[Step::noteInd] <= 0.0)
+    return false;
+
+  const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, row[Step::cmdInd])));
+  const auto traits = machineTraits(command);
+  return traits.isStepCommandType && traits.isStackRoutable && !traits.isControlCommand;
+}
+
 std::size_t getSequenceConfigRowCount()
 {
   return kSeqConfigBaseRows;
@@ -627,6 +637,29 @@ void SequencerEditor::decrementOctave()
   {
     break;
   }
+  }
+}
+
+void SequencerEditor::transposeCurrentSequence(int semitones)
+{
+  if (sequencer == nullptr || getCurrentPage() != SequencerEditorPage::sequence || semitones == 0)
+    return;
+
+  const auto stepCount = sequencer->howManySteps(currentSequence);
+  for (std::size_t step = 0; step < stepCount; ++step)
+  {
+    auto data = sequencer->getStepData(currentSequence, step);
+    bool changed = false;
+    for (auto& row : data)
+    {
+      if (!isPlayableNoteRow(row))
+        continue;
+      row[Step::noteInd] = static_cast<double>(juce::jlimit(
+          0, 127, static_cast<int>(row[Step::noteInd]) + semitones));
+      changed = true;
+    }
+    if (changed)
+      sequencer->setStepData(currentSequence, step, std::move(data));
   }
 }
 

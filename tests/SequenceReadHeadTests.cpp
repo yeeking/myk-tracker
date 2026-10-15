@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <set>
 
 namespace
@@ -466,13 +467,27 @@ int main()
     octaveSequence.resetReadHeads(true);
     for (int tick = 0; tick < 12; ++tick) octaveSequence.tick(true);
     require(machines.notes.size() == 24, "octave head triggers every row in each step");
+    std::mt19937 expectedOctaveRandom { 0x4f435431u };
+    std::uniform_int_distribution<int> expectedOctaveLayer(0, 2);
+    bool foundIndependentlyTransposedChord = false;
     for (std::size_t index = 0; index < machines.notes.size(); index += 2)
     {
-        const auto offset = static_cast<int>(machines.notes[index]) - 60;
-        require((offset == 0 || offset == 12 || offset == 24)
-                    && static_cast<int>(machines.notes[index + 1]) - 64 == offset,
-                "one random octave layer is shared by every note row in a step");
+        const int firstOffset = 12 * expectedOctaveLayer(expectedOctaveRandom);
+        const int secondOffset = 12 * expectedOctaveLayer(expectedOctaveRandom);
+        require(machines.notes[index] == static_cast<unsigned short>(60 + firstOffset)
+                    && machines.notes[index + 1] == static_cast<unsigned short>(64 + secondOffset),
+                "each note row receives its own deterministic octave RNG draw");
+        foundIndependentlyTransposedChord = foundIndependentlyTransposedChord || firstOffset != secondOffset;
     }
+    require(foundIndependentlyTransposedChord,
+            "octave-expanded chords contain independently transposed note rows");
+    octaveHead.octaves = 1;
+    octaveSequence.setReadHeadConfig(0, octaveHead);
+    machines.notes.clear();
+    octaveSequence.resetReadHeads(true);
+    octaveSequence.tick(true);
+    require(machines.notes == std::vector<unsigned short>({60, 64}),
+            "OCT:1 preserves untransposed chord playback");
     octaveHead.octaves = 0;
     octaveSequence.setReadHeadConfig(0, octaveHead);
     require(octaveSequence.getReadHeadConfig(0).octaves == 1, "octave range clamps to one");
@@ -506,6 +521,60 @@ int main()
     octaveControlSequence.tick(true);
     require(machines.cutoffs == std::vector<std::pair<unsigned short, double>>{{0, 1234.0}},
             "octave playback does not transpose control commands");
+
+    Sequence controlThenNoteSequence(nullptr, 2, 0);
+    controlThenNoteSequence.setControlMode(true);
+    controlThenNoteSequence.setStepData(0,
+        {{ static_cast<double>(CommandType::FilterCutoff), 1234.0, 0.0, 0.0 }});
+    controlThenNoteSequence.setStepData(1,
+        {{ static_cast<double>(CommandType::MidiNote), 60.0, 100.0, 1.0 }});
+    auto controlThenNoteHead = controlThenNoteSequence.getReadHeadConfig(0);
+    controlThenNoteHead.ticksPerStep = 1;
+    controlThenNoteHead.octaves = 3;
+    controlThenNoteSequence.setReadHeadConfig(0, controlThenNoteHead);
+    machines.notes.clear();
+    controlThenNoteSequence.resetReadHeads(true);
+    controlThenNoteSequence.tick(true);
+    controlThenNoteSequence.tick(true);
+    std::mt19937 firstOctaveRandom { 0x4f435431u };
+    std::uniform_int_distribution<int> firstOctaveLayer(0, 2);
+    require(machines.notes == std::vector<unsigned short>({ static_cast<unsigned short>(60 + 12 * firstOctaveLayer(firstOctaveRandom)) }),
+            "control commands do not consume octave RNG draws");
+
+    Sequencer transposeSequencer(1, 3);
+    SequencerEditor transposeEditor(&transposeSequencer);
+    transposeEditor.gotoSequencePage();
+    transposeSequencer.setStepData(0, 0, {
+        { static_cast<double>(CommandType::MidiNote), 60.0, 100.0, 1.0 },
+        { static_cast<double>(CommandType::WavetableSynth), 72.0, 100.0, 1.0 },
+        { static_cast<double>(CommandType::FilterCutoff), 1234.0, 0.0, 0.0 }
+    });
+    transposeSequencer.setStepData(0, 1,
+        {{ static_cast<double>(CommandType::Sampler), 120.0, 100.0, 1.0 }});
+    transposeSequencer.toggleStepActive(0, 1);
+    transposeSequencer.setStepData(0, 2,
+        {{ static_cast<double>(CommandType::MidiNote), 5.0, 100.0, 1.0 }});
+    const auto noteEntryOctave = transposeEditor.getCurrentOctave();
+    transposeEditor.transposeCurrentSequence(-12);
+    const auto transposedFirstStep = transposeSequencer.getStepData(0, 0);
+    require(transposedFirstStep[0][Step::noteInd] == 48.0
+                && transposedFirstStep[1][Step::noteInd] == 60.0
+                && transposedFirstStep[2][Step::noteInd] == 1234.0,
+            "sequence transpose shifts every playable chord row but not control values");
+    require(transposeSequencer.getStepData(0, 1)[0][Step::noteInd] == 108.0,
+            "sequence transpose includes inactive steps");
+    require(transposeSequencer.getStepData(0, 2)[0][Step::noteInd] == 0.0,
+            "sequence transpose clamps notes at MIDI zero");
+    require(transposeEditor.getCurrentOctave() == noteEntryOctave,
+            "sequence transpose does not alter the note-entry octave");
+    transposeSequencer.setStepData(0, 2,
+        {{ static_cast<double>(CommandType::MidiNote), 123.0, 100.0, 1.0 }});
+    transposeEditor.transposeCurrentSequence(12);
+    require(transposeSequencer.getStepData(0, 0)[0][Step::noteInd] == 60.0
+                && transposeSequencer.getStepData(0, 0)[1][Step::noteInd] == 72.0,
+            "sequence transpose restores unclamped notes when shifted back up");
+    require(transposeSequencer.getStepData(0, 2)[0][Step::noteInd] == 127.0,
+            "sequence transpose clamps notes at MIDI 127");
 
     Sequence implodeSequence(nullptr, 8, 0);
     for (std::size_t step = 0; step < 7; ++step)

@@ -1327,6 +1327,14 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (key == ']') { editor.incrementAtCursor(); contentChanged = true; handled = true; }
                     else if (key == ',') { editor.decrementOctave(); viewChanged = true; handled = true; }
                     else if (key == '.') { editor.incrementOctave(); viewChanged = true; handled = true; }
+                    else if (key == '<' && editor.getCurrentPage() == SequencerEditorPage::sequence)
+                    {
+                        editor.transposeCurrentSequence(-12); contentChanged = true; handled = true;
+                    }
+                    else if (key == '>' && editor.getCurrentPage() == SequencerEditorPage::sequence)
+                    {
+                        editor.transposeCurrentSequence(12); contentChanged = true; handled = true;
+                    }
                     if (!handled) return fail("unsupported", "Unmapped keyboard action");
                     viewChanged = viewChanged || !contentChanged;
                     break;
