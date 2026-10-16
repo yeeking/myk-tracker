@@ -280,6 +280,7 @@ void TrackerMainProcessor::resetSongState()
 {
     sequenceSets.clear();
     sequenceSets.push_back(createDefaultSequenceSet());
+    sequenceSetMachineEnableStates.clear();
     songRows.clear();
     songRows.push_back({ 0, 16 });
     songPlayMode = SongPlayMode::sequence;
@@ -294,6 +295,108 @@ void TrackerMainProcessor::resetSongState()
     quarterBeatTicksAccumulator = 0;
     resetClockTicks();
     setCurrentQuarterBeat(0);
+}
+
+TrackerMainProcessor::SequenceSetMachineEnableState TrackerMainProcessor::captureMachineEnableState() const
+{
+    SequenceSetMachineEnableState state;
+    state.stacks.resize(machineStacks.size());
+    for (std::size_t stackIndex = 0; stackIndex < machineStacks.size(); ++stackIndex)
+    {
+        const auto& stack = machineStacks[stackIndex];
+        auto& storedSlots = state.stacks[stackIndex];
+        storedSlots.reserve(stack.slots.size());
+        for (const auto& slot : stack.slots)
+            storedSlots.push_back({ slot.id, slot.type, slot.enabled });
+    }
+    return state;
+}
+
+void TrackerMainProcessor::captureMachineEnableStateForSequenceSet(std::size_t setIndex)
+{
+    if (setIndex >= sequenceSets.size())
+        return;
+    if (sequenceSetMachineEnableStates.size() < sequenceSets.size())
+        sequenceSetMachineEnableStates.resize(sequenceSets.size());
+    sequenceSetMachineEnableStates[setIndex] = captureMachineEnableState();
+}
+
+void TrackerMainProcessor::normaliseMachineEnableState(SequenceSetMachineEnableState& state) const
+{
+    auto previous = std::move(state.stacks);
+    state.stacks.clear();
+    state.stacks.resize(machineStacks.size());
+    for (std::size_t stackIndex = 0; stackIndex < machineStacks.size(); ++stackIndex)
+    {
+        const auto& stack = machineStacks[stackIndex];
+        const std::vector<SequenceSetMachineEnableState::Slot>* previousSlots =
+            stackIndex < previous.size() ? &previous[stackIndex] : nullptr;
+        auto& normalisedSlots = state.stacks[stackIndex];
+        normalisedSlots.reserve(stack.slots.size());
+        for (const auto& slot : stack.slots)
+        {
+            bool enabled = slot.enabled;
+            if (previousSlots != nullptr)
+            {
+                const auto found = std::find_if(previousSlots->begin(), previousSlots->end(),
+                    [&slot](const SequenceSetMachineEnableState::Slot& savedSlot)
+                    {
+                        return savedSlot.id == slot.id && savedSlot.type == slot.type;
+                    });
+                if (found != previousSlots->end())
+                    enabled = found->enabled;
+            }
+            normalisedSlots.push_back({ slot.id, slot.type, enabled });
+        }
+    }
+}
+
+void TrackerMainProcessor::normaliseAllMachineEnableStates()
+{
+    sequenceSetMachineEnableStates.resize(sequenceSets.size());
+    for (auto& state : sequenceSetMachineEnableStates)
+        normaliseMachineEnableState(state);
+}
+
+void TrackerMainProcessor::applyMachineEnableStateForSequenceSet(std::size_t setIndex)
+{
+    if (setIndex >= sequenceSetMachineEnableStates.size())
+        return;
+
+    const auto& state = sequenceSetMachineEnableStates[setIndex];
+    for (std::size_t stackIndex = 0; stackIndex < machineStacks.size(); ++stackIndex)
+    {
+        auto& stack = machineStacks[stackIndex];
+        if (stackIndex < state.stacks.size())
+        {
+            const auto& savedSlots = state.stacks[stackIndex];
+            for (auto& slot : stack.slots)
+            {
+                const auto found = std::find_if(savedSlots.begin(), savedSlots.end(),
+                    [&slot](const SequenceSetMachineEnableState::Slot& savedSlot)
+                    {
+                        return savedSlot.id == slot.id && savedSlot.type == slot.type;
+                    });
+                if (found != savedSlots.end())
+                    slot.enabled = found->enabled;
+            }
+        }
+        refreshStackProcessingState(stack);
+    }
+    updateClockedMachineActivity();
+}
+
+bool TrackerMainProcessor::isSongPlaybackRunning() const
+{
+    const auto* playbackSequencer = getPlaybackSequencerInternal();
+    return songPlayMode == SongPlayMode::song
+        && playbackSequencer != nullptr
+        && playbackSequencer->isPlaying();
+}
+
+std::size_t TrackerMainProcessor::getMachineEnableStateEditingSetIndex() const
+{
+    return isSongPlaybackRunning() ? activePlaybackSequenceSetIndex : viewedSequenceSetIndex;
 }
 
 Sequencer* TrackerMainProcessor::getViewedSequencerInternal()
@@ -378,6 +481,7 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
     if (sameSequenceSet)
     {
         pendingPlaybackSequenceSetIndex.reset();
+        applyMachineEnableStateForSequenceSet(targetIndex);
         if (songPlayMode == SongPlayMode::sequence)
             setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
 
@@ -390,6 +494,7 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
 
     activePlaybackSequenceSetIndex = targetIndex;
     pendingPlaybackSequenceSetIndex.reset();
+    applyMachineEnableStateForSequenceSet(targetIndex);
     if (previousPlaybackSequencer != nullptr)
         previousPlaybackSequencer->stop();
     if (songPlayMode == SongPlayMode::sequence)
@@ -920,6 +1025,8 @@ void TrackerMainProcessor::initialiseMachines()
             machine.setSecondsPerTick(secondsPerTick);
         });
     refreshAllStackProcessingStates();
+    normaliseAllMachineEnableStates();
+    applyMachineEnableStateForSequenceSet(viewedSequenceSetIndex);
     configureClockListeners();
     updateClockedMachineActivity();
 }
@@ -1216,6 +1323,36 @@ void TrackerMainProcessor::copyStackScope(std::size_t stackIndex, std::vector<fl
     });
 }
 
+void TrackerMainProcessor::copyStackScopes(const std::vector<std::size_t>& stackIndices,
+                                           std::vector<std::vector<float>>& out)
+{
+    // This is message-thread UI work. Allocate before taking the exclusive
+    // guard, keeping the section that can delay audio bounded to plain copies.
+    out.resize(stackIndices.size());
+    for (auto& samples : out)
+        samples.resize(kScopeRingSampleCount, 0.0f);
+
+    withAudioThreadExclusive([this, &stackIndices, &out]()
+    {
+        for (std::size_t index = 0; index < stackIndices.size(); ++index)
+        {
+            auto& destination = out[index];
+            const auto* stack = getMachineStack(stackIndices[index]);
+            if (stack == nullptr || stack->scopeRing.empty())
+            {
+                std::fill(destination.begin(), destination.end(), 0.0f);
+                continue;
+            }
+
+            const std::size_t ringSize = stack->scopeRing.size();
+            std::fill(destination.begin(), destination.end(), 0.0f);
+            const std::size_t samplesToCopy = std::min(destination.size(), ringSize);
+            for (std::size_t sample = 0; sample < samplesToCopy; ++sample)
+                destination[sample] = stack->scopeRing[(stack->scopeHead + sample) % ringSize];
+        }
+    });
+}
+
 //==============================================================================
 void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
@@ -1250,7 +1387,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         // size so it is allocated once and reused across sample-rate changes.
         if (stack.scopeRing.empty())
         {
-            stack.scopeRing.assign(1024, 0.0f);
+            stack.scopeRing.assign(kScopeRingSampleCount, 0.0f);
             stack.scopeHead = 0;
         }
         // setSecondsPerTick is a no-op for machines that do not track tick time.
@@ -1889,6 +2026,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     juce::Array<juce::var> sequenceSoloStates;
     juce::Array<juce::var> sequenceEffectiveSoloStates;
     juce::Array<juce::var> sequenceStackAudibleStates;
+    juce::Array<juce::var> sequenceMachineIds;
     const bool anyStackSolo = std::any_of(machineStacks.begin(), machineStacks.end(),
                                           [] (const auto& stack) { return stack.solo; });
     if (viewedSequencer != nullptr)
@@ -1898,6 +2036,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
             const auto* sequence = viewedSequencer->getSequence(col);
             const bool sequenceSolo = sequence->isSolo();
             sequenceSoloStates.add(sequenceSolo);
+            sequenceMachineIds.add(static_cast<int>(sequence->getMachineId()));
             const auto stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
             const auto* stack = getMachineStack(stackIndex);
             const auto presentation = MixerState::getSequencePresentation(
@@ -1923,6 +2062,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("sequenceSoloStates", sequenceSoloStates);
     state->setProperty("sequenceEffectiveSoloStates", sequenceEffectiveSoloStates);
     state->setProperty("sequenceStackAudibleStates", sequenceStackAudibleStates);
+    state->setProperty("sequenceMachineIds", sequenceMachineIds);
 }
 
 juce::var TrackerMainProcessor::getUiState()
@@ -2209,6 +2349,32 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         if (sequenceSet != nullptr)
             sequenceSetStates.add(serializeSingleSequencer(*sequenceSet));
     root->setProperty("sequenceSets", sequenceSetStates);
+
+    juce::Array<juce::var> machineEnableStateSets;
+    for (std::size_t setIndex = 0; setIndex < sequenceSets.size(); ++setIndex)
+    {
+        const auto state = setIndex < sequenceSetMachineEnableStates.size()
+            ? sequenceSetMachineEnableStates[setIndex]
+            : captureMachineEnableState();
+        juce::DynamicObject::Ptr setObj = new juce::DynamicObject();
+        juce::Array<juce::var> stacks;
+        for (const auto& savedStack : state.stacks)
+        {
+            juce::Array<juce::var> slots;
+            for (const auto& savedSlot : savedStack)
+            {
+                juce::DynamicObject::Ptr slotObj = new juce::DynamicObject();
+                slotObj->setProperty("id", juce::String(savedSlot.id));
+                slotObj->setProperty("type", static_cast<int>(savedSlot.type));
+                slotObj->setProperty("enabled", savedSlot.enabled);
+                slots.add(slotObj.get());
+            }
+            stacks.add(slots);
+        }
+        setObj->setProperty("stacks", stacks);
+        machineEnableStateSets.add(setObj.get());
+    }
+    root->setProperty("sequenceSetMachineEnableStates", machineEnableStateSets);
     root->setProperty("viewedSequenceSetIndex", static_cast<int>(viewedSequenceSetIndex));
     root->setProperty("activePlaybackSequenceSetIndex", static_cast<int>(activePlaybackSequenceSetIndex));
     root->setProperty("selectedSongRow", static_cast<int>(selectedSongRow));
@@ -2349,6 +2515,48 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         if (legacySeqVar.isObject())
             restoreSingleSequencer(*sequenceSets.front(), legacySeqVar);
     }
+
+    // The property was added after sequence sets already existed in saved
+    // sessions.  Empty states are normalised after stack restore below, which
+    // makes those older sessions inherit their saved global slot state.
+    sequenceSetMachineEnableStates.clear();
+    const auto machineEnableStateSetsVar = stateVar.getProperty("sequenceSetMachineEnableStates", juce::var());
+    if (machineEnableStateSetsVar.isArray())
+    {
+        const auto savedSetCount = std::min(static_cast<std::size_t>(machineEnableStateSetsVar.getArray()->size()), sequenceSets.size());
+        sequenceSetMachineEnableStates.resize(savedSetCount);
+        for (std::size_t setIndex = 0; setIndex < savedSetCount; ++setIndex)
+        {
+            const auto& setVar = (*machineEnableStateSetsVar.getArray())[static_cast<int>(setIndex)];
+            if (!setVar.isObject())
+                continue;
+            const auto stacksVar = setVar.getProperty("stacks", juce::var());
+            if (!stacksVar.isArray())
+                continue;
+            auto& restoredState = sequenceSetMachineEnableStates[setIndex];
+            restoredState.stacks.resize(static_cast<std::size_t>(stacksVar.getArray()->size()));
+            for (int stackIndex = 0; stackIndex < stacksVar.getArray()->size(); ++stackIndex)
+            {
+                const auto& slotsVar = (*stacksVar.getArray())[stackIndex];
+                if (!slotsVar.isArray())
+                    continue;
+                auto& restoredSlots = restoredState.stacks[static_cast<std::size_t>(stackIndex)];
+                restoredSlots.reserve(static_cast<std::size_t>(slotsVar.getArray()->size()));
+                for (const auto& slotVar : *slotsVar.getArray())
+                {
+                    if (!slotVar.isObject())
+                        continue;
+                    SequenceSetMachineEnableState::Slot slot;
+                    slot.id = slotVar.getProperty("id", juce::String()).toString().toStdString();
+                    slot.type = static_cast<CommandType>(static_cast<int>(slotVar.getProperty("type", static_cast<int>(CommandType::MidiNote))));
+                    slot.enabled = static_cast<bool>(slotVar.getProperty("enabled", true));
+                    if (!slot.id.empty())
+                        restoredSlots.push_back(std::move(slot));
+                }
+            }
+        }
+    }
+    sequenceSetMachineEnableStates.resize(sequenceSets.size());
 
     const auto songRowsVar = stateVar.getProperty("songRows", juce::var());
     songRows.clear();
@@ -2523,6 +2731,9 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         setAuxReturnMuted(1, static_cast<bool>(sharedAuxVar.getProperty("aux2Muted", false)));
     }
 
+    normaliseAllMachineEnableStates();
+    applyMachineEnableStateForSequenceSet(viewedSequenceSetIndex);
+
     viewedSequencer->updateSeqStringGrid();
 
     sendChangeMessage();
@@ -2572,6 +2783,11 @@ void TrackerMainProcessor::setViewedSequenceSetIndex(std::size_t index)
     if (sequenceSets.empty())
         return;
     viewedSequenceSetIndex = std::min(index, sequenceSets.size() - 1);
+    // While a song is running, its active sequence set owns the live stack
+    // state until the next scheduled song boundary.  Browsing another set
+    // must not change the sound early.
+    if (!isSongPlaybackRunning())
+        applyMachineEnableStateForSequenceSet(viewedSequenceSetIndex);
     bindViewedSequenceSetToEditor();
 }
 
@@ -2655,7 +2871,14 @@ std::size_t TrackerMainProcessor::addSongRowByCloningViewedSet()
 
     auto newSequenceSet = createDefaultSequenceSet();
     restoreSingleSequencer(*newSequenceSet, serializeSingleSequencer(*viewedSequencer));
+    const auto sourceSetIndex = std::min(viewedSequenceSetIndex, sequenceSets.size() - 1);
+    if (sequenceSetMachineEnableStates.size() < sequenceSets.size())
+        normaliseAllMachineEnableStates();
+    const auto sourceEnableState = sourceSetIndex < sequenceSetMachineEnableStates.size()
+        ? sequenceSetMachineEnableStates[sourceSetIndex]
+        : captureMachineEnableState();
     sequenceSets.push_back(std::move(newSequenceSet));
+    sequenceSetMachineEnableStates.push_back(sourceEnableState);
     const std::size_t newSetIndex = sequenceSets.size() - 1;
     songRows.push_back({ newSetIndex, 16 });
     return songRows.size() - 1;
@@ -2682,6 +2905,8 @@ void TrackerMainProcessor::removeSongRow(std::size_t row)
     if (!setStillReferenced && removedSetId < sequenceSets.size() && sequenceSets.size() > 1)
     {
         sequenceSets.erase(sequenceSets.begin() + static_cast<std::ptrdiff_t>(removedSetId));
+        if (removedSetId < sequenceSetMachineEnableStates.size())
+            sequenceSetMachineEnableStates.erase(sequenceSetMachineEnableStates.begin() + static_cast<std::ptrdiff_t>(removedSetId));
         for (auto& songRow : songRows)
             if (songRow.sequenceSetId > removedSetId)
                 --songRow.sequenceSetId;
@@ -3077,6 +3302,7 @@ void TrackerMainProcessor::addMachineToStack(std::size_t stackIndex)
             {
                 stack->slots.push_back(makeDefaultSlotState(type));
                 refreshStackProcessingState(*stack);
+                normaliseAllMachineEnableStates();
                 updateClockedMachineActivity();
                 break;
             }
@@ -3092,6 +3318,7 @@ void TrackerMainProcessor::removeMachineFromStack(std::size_t stackIndex, std::s
         {
             stack->slots.erase(stack->slots.begin() + static_cast<long>(slotIndex));
             refreshStackProcessingState(*stack);
+            normaliseAllMachineEnableStates();
             updateClockedMachineActivity();
         }
     }
@@ -3124,6 +3351,7 @@ void TrackerMainProcessor::cycleMachineTypeInStack(std::size_t stackIndex, std::
                 stack->slots[slotIndex] = makeDefaultSlotState(candidate);
                 stack->slots[slotIndex].id = stableId;
                 refreshStackProcessingState(*stack);
+                normaliseAllMachineEnableStates();
                 updateClockedMachineActivity();
                 return;
             }
@@ -3146,6 +3374,7 @@ void TrackerMainProcessor::moveMachineInStack(std::size_t stackIndex, std::size_
 
         std::swap(stack->slots[slotIndex], stack->slots[static_cast<std::size_t>(targetIndex)]);
         refreshStackProcessingState(*stack);
+        normaliseAllMachineEnableStates();
     }
 }
 
@@ -3163,6 +3392,7 @@ void TrackerMainProcessor::toggleMachineEnabledInStack(std::size_t stackIndex, s
         slot->enabled = !slot->enabled;
         if (auto* stack = getMachineStack(stackIndex))
             refreshStackProcessingState(*stack);
+        captureMachineEnableStateForSequenceSet(getMachineEnableStateEditingSetIndex());
         updateClockedMachineActivity();
     }
 }

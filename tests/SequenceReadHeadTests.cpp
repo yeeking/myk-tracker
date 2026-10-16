@@ -6,6 +6,8 @@
 #include "Sequencer.h"
 #include "SequencerCommands.h"
 #include "SequencerEditor.h"
+#include "SequenceScopeUtils.h"
+#include "TrackerFileBrowser.h"
 
 #include <algorithm>
 #include <array>
@@ -114,6 +116,61 @@ void putNote(Sequence& sequence, std::size_t step, double note)
 
 int main()
 {
+    const auto browserRoot = juce::File::getSpecialLocation(juce::File::tempDirectory)
+        .getNonexistentChildFile("myk-tracker-browser-test", "", false);
+    require(browserRoot.createDirectory().wasOk(), "create temporary file-browser directory");
+    const auto childDirectory = browserRoot.getChildFile("Alpha");
+    require(childDirectory.createDirectory().wasOk(), "create browser child directory");
+    require(browserRoot.getChildFile("zeta.myktracker").replaceWithText("state"), "create state file");
+    require(browserRoot.getChildFile("audio.wav").replaceWithText("audio"), "create filtered file");
+    require(browserRoot.getChildFile(".hidden.myktracker").replaceWithText("hidden"), "create hidden file");
+    TrackerFileBrowser fileBrowser;
+    fileBrowser.open(browserRoot);
+    const auto stateEntries = fileBrowser.getEntries([] (const juce::File& file) { return file.hasFileExtension("myktracker"); });
+    require(stateEntries.size() == 2 && stateEntries[0].isDirectory
+                && stateEntries[0].file.getFileName() == "Alpha"
+                && stateEntries[1].file.getFileName() == "zeta.myktracker",
+            "browser sorts folders first and filters hidden/non-state files");
+    fileBrowser.appendSearch('z');
+    require(fileBrowser.getEntries([] (const juce::File& file) { return file.hasFileExtension("myktracker"); }).size() == 1,
+            "browser search filters entries");
+    fileBrowser.clearSearch();
+    require(fileBrowser.browseInto(childDirectory), "browser enters child directory");
+    fileBrowser.browseUp();
+    require(fileBrowser.consumePreferredFocusName() == "Alpha", "browser preserves upward-navigation focus name");
+    browserRoot.deleteRecursively();
+
+    const auto uniqueScopeStacks = sequence_scope::collectUniqueStackIndices(
+        { 3, 1, 3, -1, 16, 1, 0 }, 16);
+    require(uniqueScopeStacks == std::vector<std::size_t>({ 3, 1, 0 }),
+            "scope routing keeps valid stack IDs in first-seen order without duplicates");
+
+    std::vector<float> silentScope(1024, 0.0f);
+    std::vector<float> scopePreview;
+    sequence_scope::reducePeakPreserving(silentScope, scopePreview);
+    require(scopePreview.size() == sequence_scope::kPreviewPointCount
+                && std::all_of(scopePreview.begin(), scopePreview.end(), [] (float value) { return std::abs(value) < 0.000001f; }),
+            "silent scope reduces to a centred 96-point preview");
+
+    std::vector<float> transientScope(1024, 0.0f);
+    transientScope[123] = 0.91f;
+    transientScope[130] = -0.84f;
+    sequence_scope::reducePeakPreserving(transientScope, scopePreview);
+    require(std::find(scopePreview.begin(), scopePreview.end(), 0.91f) != scopePreview.end()
+                && std::find(scopePreview.begin(), scopePreview.end(), -0.84f) != scopePreview.end(),
+            "scope reduction preserves brief positive and negative peaks");
+
+    std::vector<float> chronologicalScope(96, 0.0f);
+    for (std::size_t pair = 0; pair < 48; ++pair)
+    {
+        chronologicalScope[pair * 2] = 0.7f;
+        chronologicalScope[pair * 2 + 1] = -0.6f;
+    }
+    sequence_scope::reducePeakPreserving(chronologicalScope, scopePreview);
+    require(std::abs(scopePreview[0] - 0.7f) < 0.000001f
+                && std::abs(scopePreview[1] + 0.6f) < 0.000001f,
+            "scope reduction retains the source order of each bucket extrema");
+
     TestClock clock;
     TestMachines machines;
     CommandProcessor::assignMasterClock(&clock);

@@ -63,6 +63,7 @@ target_link_libraries(tracker-hardware-emulator
 target_sources(myk-tracker-plug
     PRIVATE
     src/TrackerMainUI.cpp
+    src/TrackerFileBrowser.cpp
     src/TrackerMainProcessor.cpp
     src/TrackerControlService.cpp
     src/McpRouter.cpp
@@ -129,6 +130,7 @@ if (BUILD_TESTING)
     juce_generate_juce_header(sequence-read-head-tests)
     target_sources(sequence-read-head-tests PRIVATE
         tests/SequenceReadHeadTests.cpp
+        src/TrackerFileBrowser.cpp
         src/Sequencer.cpp
         src/SequencerCommands.cpp
         src/SequencerEditor.cpp)
@@ -145,6 +147,7 @@ if (BUILD_TESTING)
     juce_generate_juce_header(sampler-tuning-tests)
     target_sources(sampler-tuning-tests PRIVATE
         tests/SamplerTuningTests.cpp
+        src/TrackerFileBrowser.cpp
         src/SuperSamplePlayer.cpp
         src/SuperSamplerProcessor.cpp)
     target_include_directories(sampler-tuning-tests PRIVATE src)

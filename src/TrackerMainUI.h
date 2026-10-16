@@ -16,7 +16,9 @@
 #include "TrackerControlService.h"
 // #include "StringTable.h"
 #include "SequencerEditor.h"
+#include "SequenceScopeUtils.h"
 #include "TrackerUIComponent.h"
+#include "TrackerFileBrowser.h"
 #include "Palette.h"
 #include "UIBox.h"
 //==============================================================================
@@ -83,11 +85,10 @@ private:
     void prepareStepView();
     void prepareSeqConfigView();
     void prepareMachineConfigView();
-    void updateScopeCalibration(int machineId, std::size_t stackIndex,
-                                const std::vector<float>& samples);
+    float updateScopeCalibration(std::size_t stackIndex,
+                                 const std::vector<float>& samples);
     void appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
                          std::size_t rows,
-                         int machineId,
                          std::size_t stackIndex,
                          std::vector<float>& scopeSamples);
     void appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
@@ -100,7 +101,8 @@ private:
     void prepareResetConfirmationView();
     void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                           size_t rowsToDisplay,
-                          size_t colsToDisplay);
+                          size_t colsToDisplay,
+                          const std::vector<UIBox>* stickyHeaderCells = nullptr);
 
     TrackerUIComponent::CellState makeDefaultCell() const;
     juce::Colour getCellColour(const UIBox& cell) const;
@@ -112,10 +114,19 @@ private:
     void moveDown(float amount);
     void moveLeft(float amount);
     void moveRight(float amount);
-    void chooseStateSaveDirectory();
-    void chooseStateFileToLoad();
+    void openStateSaveDialog();
+    void openStateLoadDialog();
+    void closeStateDialog();
+    bool handleStateDialogKey(const juce::KeyPress& key);
+    void prepareStateDialogView();
+    void rebuildStateDialogBoxes();
+    void activateStateDialogCell();
+    void moveStateDialogCursor(int rowDelta, int colDelta);
+    void beginStateBrowser(bool saving);
+    void saveStateToSelectedFile();
+    void loadSelectedStateFile(const juce::File& file);
+    juce::File selectedStateSaveFile(juce::String& error) const;
     juce::File initialStateDirectory() const;
-    void showStateFileError(const juce::String& message) const;
     std::vector<std::vector<UIBox>> buildBoxesFromGrid(const std::vector<std::vector<std::string>>& data,
                                                        size_t cursorCol,
                                                        size_t cursorRow,
@@ -168,21 +179,33 @@ private:
     };
     std::unordered_map<int, WavetablePreviewCache> wavetablePreviewCaches;
     std::unordered_map<int, EnvelopePreviewCache> filterEnvelopePreviewCaches;
-    /** Scale applied to the live scope snapshot by the auto-calibration. */
-    float scopeCalScale = 1.0f;
-    /** Target scale the auto-calibration eases toward. */
-    float scopeCalTarget = 1.0f;
-    /** Hi-res ms of the last recalibration; 0 = never calibrated yet. */
-    std::int64_t scopeCalLastRecalMs = 0;
-    /** Hi-res ms of the previous machine-view frame (for the ease step). */
-    std::int64_t scopeCalLastFrameMs = 0;
-    /** Machine/stack the calibration state was last computed for. */
-    int scopeCalMachineId = -1;
-    std::size_t scopeCalStackIndex = 0;
+    struct ScopeCalibration
+    {
+        float scale = 1.0f;
+        float target = 1.0f;
+        std::int64_t lastRecalMs = 0;
+        std::int64_t lastFrameMs = 0;
+    };
+    /** One auto-calibration state per stack so Sequence-page mini-scopes do not
+        influence each other's vertical scale. This is transient UI state. */
+    std::unordered_map<std::size_t, ScopeCalibration> scopeCalibrations;
+    /** Reused UI-thread buffers for a single batched scope snapshot. */
+    std::vector<std::vector<float>> sequenceScopeRawBuffers;
+    std::vector<std::vector<float>> sequenceScopePreviewBuffers;
     bool samplerViewActive = false;
     bool customMachineColumnWidthsActive = false;
     juce::File lastStateDirectory;
-    std::unique_ptr<juce::FileChooser> stateFileChooser;
+    enum class StateDialogMode { none, savePrompt, loadPrompt, saveBrowser, loadBrowser, overwriteConfirm, error };
+    StateDialogMode stateDialogMode = StateDialogMode::none;
+    TrackerFileBrowser stateFileBrowser;
+    std::vector<std::vector<UIBox>> stateDialogBoxes;
+    std::size_t stateDialogColumn = 0;
+    std::size_t stateDialogRow = 0;
+    juce::String stateSaveName;
+    juce::String stateDialogError;
+    juce::File pendingStateFile;
+    bool stateDialogErrorFromSave = false;
+    bool stateFilenameEditing = false;
 
     bool waitingForPaint;
     juce::CriticalSection screenshotLock;

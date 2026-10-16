@@ -531,7 +531,7 @@ bool SuperSamplerProcessor::handleTextInput(char character)
     if (browsingPlayerId < 0)
         return false;
 
-    browserSearchQuery.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+    fileBrowser.appendSearch(character);
     cachedBrowserUi.clear();
     browserUiDirty = true;
     stopPreviewPlayback();
@@ -544,8 +544,7 @@ bool SuperSamplerProcessor::handleTextBackspace()
     if (browsingPlayerId < 0)
         return false;
 
-    if (!browserSearchQuery.empty())
-        browserSearchQuery.pop_back();
+    fileBrowser.backspaceSearch();
     cachedBrowserUi.clear();
     browserUiDirty = true;
     stopPreviewPlayback();
@@ -560,20 +559,19 @@ bool SuperSamplerProcessor::wantsExclusiveKeyboardInput() const
 int SuperSamplerProcessor::consumePreferredCursorRow(const std::vector<std::vector<UIBox>>& cells)
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
-    if (pendingBrowserFocusLabel.empty() || cells.empty())
+    const auto preferredName = fileBrowser.consumePreferredFocusName();
+    if (preferredName.isEmpty() || cells.empty())
         return -1;
 
     const auto& column = cells[0];
     for (std::size_t row = 0; row < column.size(); ++row)
     {
-        if (column[row].text == pendingBrowserFocusLabel)
+        if (column[row].text == sanitizeLabel("[D] " + preferredName, 36))
         {
-            pendingBrowserFocusLabel.clear();
             return static_cast<int>(row);
         }
     }
 
-    pendingBrowserFocusLabel.clear();
     return -1;
 }
 
@@ -1150,16 +1148,16 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
 
     UIBox pathCell;
     pathCell.kind = UIBox::Kind::SamplerAction;
-    pathCell.text = sanitizeLabel(browsingDirectory.getFullPathName(), 36);
+    pathCell.text = sanitizeLabel(fileBrowser.getDirectory().getFullPathName(), 36);
     pathCell.width = 6.0f;
     pathCell.onActivate = [this]() { closeFileBrowser(); };
     pushRow(std::move(pathCell));
 
     UIBox searchCell;
     searchCell.kind = UIBox::Kind::SamplerAction;
-    searchCell.text = browserSearchQuery.empty()
+    searchCell.text = fileBrowser.getSearchQuery().isEmpty()
         ? "FIND: _"
-        : sanitizeLabel("FIND: " + juce::String(browserSearchQuery), 36);
+        : sanitizeLabel("FIND: " + fileBrowser.getSearchQuery(), 36);
     searchCell.width = 6.0f;
     pushRow(std::move(searchCell));
 
@@ -1170,40 +1168,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
     upCell.onActivate = [this]() { browseUp(); };
     pushRow(std::move(upCell));
 
-    std::vector<juce::File> directories;
-    std::vector<juce::File> files;
-    for (juce::DirectoryEntry entry : juce::RangedDirectoryIterator(browsingDirectory, false, "*", juce::File::findFilesAndDirectories))
-    {
-        const auto file = entry.getFile();
-        if (file.getFileName().startsWithChar('.'))
-            continue;
-        if (file.isDirectory())
-            directories.push_back(file);
-        else if (isBrowsableAudioFile(file))
-            files.push_back(file);
-    }
-
-    auto fileSort = [] (const juce::File& a, const juce::File& b)
-    {
-        return a.getFileName().compareIgnoreCase(b.getFileName()) < 0;
-    };
-    std::sort(directories.begin(), directories.end(), fileSort);
-    std::sort(files.begin(), files.end(), fileSort);
-
-    if (!browserSearchQuery.empty())
-    {
-        auto matchesSearch = [this](const juce::File& file)
-        {
-            return file.getFileName().containsIgnoreCase(browserSearchQuery);
-        };
-
-        directories.erase(std::remove_if(directories.begin(), directories.end(),
-            [&matchesSearch](const juce::File& file) { return !matchesSearch(file); }),
-            directories.end());
-        files.erase(std::remove_if(files.begin(), files.end(),
-            [&matchesSearch](const juce::File& file) { return !matchesSearch(file); }),
-            files.end());
-    }
+    const auto entries = fileBrowser.getEntries(isBrowsableAudioFile);
 
     auto addEntry = [this, &pushRow](const juce::File& file, bool isDirectory)
     {
@@ -1232,16 +1197,14 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
         pushRow(std::move(nameCell), std::move(actionCell));
     };
 
-    for (const auto& directory : directories)
-        addEntry(directory, true);
-    for (const auto& file : files)
-        addEntry(file, false);
+    for (const auto& entry : entries)
+        addEntry(entry.file, entry.isDirectory);
 
     if (cells[0].size() == 3)
     {
         UIBox emptyLeft;
         emptyLeft.kind = UIBox::Kind::SamplerAction;
-        emptyLeft.text = browserSearchQuery.empty() ? "NO FILES" : "NO MATCH";
+        emptyLeft.text = fileBrowser.getSearchQuery().isEmpty() ? "NO FILES" : "NO MATCH";
         emptyLeft.width = 6.0f;
         pushRow(std::move(emptyLeft));
     }
@@ -1256,14 +1219,12 @@ void SuperSamplerProcessor::openFileBrowserForPlayer(int playerId)
     const std::lock_guard<std::mutex> lock(playerMutex);
     stopPreviewPlayback();
     browsingPlayerId = playerId;
-    browserSearchQuery.clear();
-    pendingBrowserFocusLabel.clear();
     cachedBrowserUi.clear();
     browserUiDirty = true;
     if (lastSampleDirectory.exists() && lastSampleDirectory.isDirectory())
-        browsingDirectory = lastSampleDirectory;
+        fileBrowser.open(lastSampleDirectory);
     else
-        browsingDirectory = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+        fileBrowser.open(juce::File::getSpecialLocation(juce::File::userHomeDirectory));
 }
 
 void SuperSamplerProcessor::closeFileBrowser()
@@ -1271,9 +1232,7 @@ void SuperSamplerProcessor::closeFileBrowser()
     const std::lock_guard<std::mutex> lock(playerMutex);
     stopPreviewPlayback();
     browsingPlayerId = -1;
-    browsingDirectory = juce::File();
-    browserSearchQuery.clear();
-    pendingBrowserFocusLabel.clear();
+    fileBrowser.close();
     cachedBrowserUi.clear();
     browserUiDirty = true;
 }
@@ -1282,14 +1241,9 @@ void SuperSamplerProcessor::browseUp()
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
     stopPreviewPlayback();
-    browserSearchQuery.clear();
-    if (browsingDirectory.exists() && browsingDirectory.getParentDirectory() != browsingDirectory)
-    {
-        pendingBrowserFocusLabel = sanitizeLabel("[D] " + browsingDirectory.getFileName(), 36);
-        browsingDirectory = browsingDirectory.getParentDirectory();
-        cachedBrowserUi.clear();
-        browserUiDirty = true;
-    }
+    fileBrowser.browseUp();
+    cachedBrowserUi.clear();
+    browserUiDirty = true;
 }
 
 void SuperSamplerProcessor::browseInto(const juce::File& target)
@@ -1298,8 +1252,7 @@ void SuperSamplerProcessor::browseInto(const juce::File& target)
     stopPreviewPlayback();
     if (target.exists() && target.isDirectory())
     {
-        browserSearchQuery.clear();
-        browsingDirectory = target;
+        fileBrowser.browseInto(target);
         cachedBrowserUi.clear();
         browserUiDirty = true;
     }
@@ -1317,8 +1270,7 @@ void SuperSamplerProcessor::loadBrowsedFile(const juce::File& file)
         playerId = browsingPlayerId;
         lastSampleDirectory = file.getParentDirectory();
         browsingPlayerId = -1;
-        browsingDirectory = juce::File();
-        browserSearchQuery.clear();
+        fileBrowser.close();
         cachedBrowserUi.clear();
         browserUiDirty = true;
     }

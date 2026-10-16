@@ -193,6 +193,11 @@ public:
     /** Copies the most recent mono scope samples of the given machine stack into
         out, oldest to newest. Blocks until the audio thread is idle. */
     void copyStackScope(std::size_t stackIndex, std::vector<float>& out);
+    /** Copies the most recent mono scope samples for several distinct machine
+        stacks under one audio-exclusive section. `out` is sized before the
+        section is entered so the audio thread is never delayed by UI allocation. */
+    void copyStackScopes(const std::vector<std::size_t>& stackIndices,
+                         std::vector<std::vector<float>>& out);
 
     template <typename Fn>
     auto withAudioThreadExclusive(Fn&& fn) -> decltype(fn())
@@ -219,13 +224,29 @@ public:
     }
     
 private:
+    static constexpr std::size_t kScopeRingSampleCount = 1024;
     friend class TrackerControlService;
     struct SongRow
     {
         std::size_t sequenceSetId = 0;
         int beatCount = 16;
     };
+    /** Machine instances and their parameters are shared by all sequence sets.
+        This stores only the slot bypass state each set recalls.  Slot IDs keep
+        the state stable when slots are reordered. */
+    struct SequenceSetMachineEnableState
+    {
+        struct Slot
+        {
+            std::string id;
+            CommandType type = CommandType::MidiNote;
+            bool enabled = true;
+        };
+
+        std::vector<std::vector<Slot>> stacks;
+    };
     std::vector<std::unique_ptr<Sequencer>> sequenceSets;
+    std::vector<SequenceSetMachineEnableState> sequenceSetMachineEnableStates;
     std::vector<SongRow> songRows;
     SongPlayMode songPlayMode = SongPlayMode::sequence;
     std::size_t viewedSequenceSetIndex = 0;
@@ -417,6 +438,13 @@ private:
     void primeSequenceSetForTransportStart(std::size_t index);
     juce::var serializeSingleSequencer(const Sequencer& sequencerToSave) const;
     void restoreSingleSequencer(Sequencer& target, const juce::var& seqVar);
+    SequenceSetMachineEnableState captureMachineEnableState() const;
+    void captureMachineEnableStateForSequenceSet(std::size_t setIndex);
+    void normaliseMachineEnableState(SequenceSetMachineEnableState& state) const;
+    void normaliseAllMachineEnableStates();
+    void applyMachineEnableStateForSequenceSet(std::size_t setIndex);
+    std::size_t getMachineEnableStateEditingSetIndex() const;
+    bool isSongPlaybackRunning() const;
     static constexpr std::size_t kMachineStackCount = 16;
     MachineStack* getMachineStack(std::size_t stackIndex);
     const MachineStack* getMachineStack(std::size_t stackIndex) const;

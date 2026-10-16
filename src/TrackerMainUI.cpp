@@ -82,6 +82,18 @@ std::string formatSignedGain(float gainDb)
     return (roundedGain >= 0 ? "+" : "") + std::to_string(roundedGain);
 }
 
+bool isTrackerStateFile(const juce::File& file)
+{
+    return file.existsAsFile() && file.hasFileExtension("myktracker");
+}
+
+juce::String sanitizeStateFileName(juce::String name)
+{
+    name = name.trim();
+    name = name.replaceCharacter('/', '_').replaceCharacter('\\', '_');
+    return name;
+}
+
 std::vector<std::vector<std::string>> gridFromSnapshot(const juce::var& value)
 {
     std::vector<std::vector<std::string>> grid;
@@ -384,9 +396,13 @@ void TrackerMainUI::timerCallback ()
       seqConfigTriggerBaselineValid = false;
       seqConfigTriggerSetIndex = std::size_t(-1);
   }
-  // Only the machine stack table (re)populates traces each frame.
+  // Pages with scope or waveform previews repopulate their traces each frame.
   currentTraces.clear();
-  switch(editMode){
+  if (stateDialogMode != StateDialogMode::none)
+  {
+      prepareStateDialogView();
+  }
+  else switch(editMode){
 
       case SequencerEditorMode::arrangingSong:
       {
@@ -434,7 +450,8 @@ void TrackerMainUI::timerCallback ()
   // rest, but render a steady glow during playback so meters and active cells
   // do not throb in time with the UI animation.
   uiComponent.setGlowPulseEnabled(!isPlaying);
-    if (editMode != SequencerEditorMode::machineConfig
+    if (stateDialogMode == StateDialogMode::none
+        && editMode != SequencerEditorMode::machineConfig
         && editMode != SequencerEditorMode::arrangingSong
         && editMode != SequencerEditorMode::resetConfirmation)
     {
@@ -590,6 +607,14 @@ void TrackerMainUI::prepareSequenceView()
               cell.isSoloChannel = true;
       }
   }
+  std::vector<int> sequenceMachineIds;
+  const auto machineIds = ui.getProperty("sequenceMachineIds", juce::var());
+  if (machineIds.isArray())
+  {
+      sequenceMachineIds.reserve(static_cast<std::size_t>(machineIds.getArray()->size()));
+      for (const auto& machineId : *machineIds.getArray())
+          sequenceMachineIds.push_back(static_cast<int>(machineId));
+  }
   const std::array<juce::Colour, 3> headColours { juce::Colours::red, juce::Colours::cyan, juce::Colours::magenta };
   for (const auto& headCell : headCells)
   {
@@ -603,7 +628,75 @@ void TrackerMainUI::prepareSequenceView()
       box.useCustomFillColour = true;
       box.customFillArgb = colour.getARGB();
   }
-  updateCellStates(boxes, rowsInUI - 1, 6);
+
+  // The sequence page reserves a fixed, non-interactive header cell above its
+  // scrolling step window. Copy the column presentation state so solo/mute
+  // outlines continue to read as one continuous sequence column.
+  std::vector<UIBox> scopeHeaders(boxes.size());
+  for (std::size_t sequenceIndex = 0; sequenceIndex < boxes.size(); ++sequenceIndex)
+  {
+      auto& header = scopeHeaders[sequenceIndex];
+      header.kind = UIBox::Kind::TrackerCell;
+      header.isDisabled = true;
+      header.useCustomFillColour = true;
+      header.customFillArgb = 0xFF0A0F14;
+      if (!boxes[sequenceIndex].empty())
+      {
+          const auto& source = boxes[sequenceIndex].front();
+          header.isControlModeSequence = source.isControlModeSequence;
+          header.isSoloChannel = source.isSoloChannel;
+          header.isMutedChannel = source.isMutedChannel;
+      }
+  }
+  updateCellStates(boxes, rowsInUI, 6, &scopeHeaders);
+
+  // Only visible sequence columns need a scope. A shared stack is copied and
+  // calibrated once, then deliberately drawn in each routed sequence header.
+  std::vector<int> visibleStackIds(visibleCols, -1);
+  for (std::size_t displayCol = 0; displayCol < visibleCols; ++displayCol)
+  {
+      const auto sequenceIndex = startCol + displayCol;
+      if (sequenceIndex < sequenceMachineIds.size())
+          visibleStackIds[displayCol] = sequenceMachineIds[sequenceIndex];
+  }
+  const auto uniqueStackIndices = sequence_scope::collectUniqueStackIndices(
+      visibleStackIds, audioProcessor.getMachineStackCount());
+  if (!uniqueStackIndices.empty())
+  {
+      audioProcessor.copyStackScopes(uniqueStackIndices, sequenceScopeRawBuffers);
+      sequenceScopePreviewBuffers.resize(uniqueStackIndices.size());
+      for (std::size_t stack = 0; stack < uniqueStackIndices.size(); ++stack)
+      {
+          const float scale = updateScopeCalibration(uniqueStackIndices[stack], sequenceScopeRawBuffers[stack]);
+          auto& preview = sequenceScopePreviewBuffers[stack];
+          sequence_scope::reducePeakPreserving(sequenceScopeRawBuffers[stack], preview);
+          for (auto& sample : preview)
+              sample *= scale;
+      }
+
+      currentTraces.reserve(currentTraces.size() + visibleCols);
+      for (std::size_t displayCol = 0; displayCol < visibleStackIds.size(); ++displayCol)
+      {
+          const int stackId = visibleStackIds[displayCol];
+          if (stackId < 0)
+              continue;
+          const auto found = std::find(uniqueStackIndices.begin(), uniqueStackIndices.end(),
+                                       static_cast<std::size_t>(stackId));
+          if (found == uniqueStackIndices.end())
+              continue;
+
+          TrackerUIComponent::Trace scope;
+          scope.colStart = static_cast<float>(displayCol);
+          scope.colEnd = static_cast<float>(displayCol + 1);
+          scope.rowTop = 0.0f;
+          scope.rowBottom = 1.0f;
+          scope.samples = sequenceScopePreviewBuffers[static_cast<std::size_t>(found - uniqueStackIndices.begin())];
+          scope.color = juce::Colour(0xFF29E0FF);
+          scope.z = 1.15f;
+          scope.lineWidth = 2.0f;
+          currentTraces.push_back(std::move(scope));
+      }
+  }
 }
 void TrackerMainUI::prepareStepView()
 {
@@ -810,7 +903,7 @@ void TrackerMainUI::prepareMachineConfigView()
         // The band (and its trace) are hidden while the file browser clamps
         // the visible rows.
         if (!browserActive)
-            appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+            appendScopeBand(machineBoxes, rows, scopeStackIndex, scopeSamples);
         updateCellStates(machineBoxes, browserActive ? std::min<std::size_t>(rows, 8) : rows + 2, cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [sampler]";
         overlayState.color = samplerPalette.textPrimary;
@@ -841,7 +934,7 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        appendScopeBand(machineBoxes, rows, machineId, scopeStackIndex, scopeSamples);
+        appendScopeBand(machineBoxes, rows, scopeStackIndex, scopeSamples);
         updateCellStates(machineBoxes, rows + 2, cols);
 
         // WAVE previews: each source row shows one cycle of its base waveform,
@@ -997,7 +1090,7 @@ void TrackerMainUI::prepareMachineConfigView()
             rowsBeforeScope += 2;
         }
 
-        appendScopeBand(machineBoxes, rowsBeforeScope, machineId, scopeStackIndex, scopeSamples);
+        appendScopeBand(machineBoxes, rowsBeforeScope, scopeStackIndex, scopeSamples);
         updateCellStates(machineBoxes, rowsBeforeScope + 2, cols);
 
         if (detail == CommandType::AuxSend1Fx)
@@ -1032,9 +1125,9 @@ void TrackerMainUI::prepareMachineConfigView()
     {
         // Auto-calibrate the zoom from the snapshot peak, then apply it; the
         // renderer clamps samples to -1..1, so overdriven input flattens.
-        updateScopeCalibration(machineId, scopeStackIndex, scopeSamples);
+        const float scopeScale = updateScopeCalibration(scopeStackIndex, scopeSamples);
         for (float& sample : scopeSamples)
-            sample *= scopeCalScale;
+            sample *= scopeScale;
 
         TrackerUIComponent::Trace scope;
         scope.colStart = 0.0f;
@@ -1051,26 +1144,16 @@ void TrackerMainUI::prepareMachineConfigView()
     overlayState.text = "Stack [" + std::to_string(machineId) + "] [" + selectedStackAction + "]";
 }
 
-void TrackerMainUI::updateScopeCalibration(int machineId, std::size_t stackIndex,
-                                           const std::vector<float>& samples)
+float TrackerMainUI::updateScopeCalibration(std::size_t stackIndex,
+                                            const std::vector<float>& samples)
 {
-    // A different stack/machine means a different signal level: start from
-    // unity so the first second of the new view is not over- or under-zoomed.
-    if (scopeCalMachineId != machineId || scopeCalStackIndex != stackIndex)
-    {
-        scopeCalMachineId = machineId;
-        scopeCalStackIndex = stackIndex;
-        scopeCalScale = 1.0f;
-        scopeCalTarget = 1.0f;
-        scopeCalLastRecalMs = 0;
-        scopeCalLastFrameMs = 0;
-    }
+    auto& calibration = scopeCalibrations[stackIndex];
 
     const auto nowMs = juce::Time::getMillisecondCounterHiRes();
     // Clamp dt so a long stall (e.g. debugger) cannot jump the scale.
     const float dtSeconds = juce::jlimit(0.0f, 0.25f,
-                                         static_cast<float>((nowMs - scopeCalLastFrameMs) / 1000.0));
-    scopeCalLastFrameMs = nowMs;
+                                         static_cast<float>((nowMs - calibration.lastFrameMs) / 1000.0));
+    calibration.lastFrameMs = nowMs;
 
     float peak = 0.0f;
     for (const float sample : samples)
@@ -1082,31 +1165,32 @@ void TrackerMainUI::updateScopeCalibration(int machineId, std::size_t stackIndex
     if (peak >= 0.01f)
     {
         const float neededScale = juce::jlimit(1.0f, 100.0f, 1.0f / peak);
-        if (neededScale < scopeCalTarget)
+        if (neededScale < calibration.target)
         {
             // A new loud peak needs more zoom-out: take it immediately so a
             // transient is not clipped for up to a second.
-            scopeCalTarget = neededScale;
-            scopeCalLastRecalMs = nowMs;
+            calibration.target = neededScale;
+            calibration.lastRecalMs = nowMs;
         }
-        else if (scopeCalLastRecalMs == 0 || nowMs - scopeCalLastRecalMs >= 1000)
+        else if (calibration.lastRecalMs == 0 || nowMs - calibration.lastRecalMs >= 1000)
         {
             // A quieter signal only zooms in once it has held for a second.
-            scopeCalTarget = neededScale;
-            scopeCalLastRecalMs = nowMs;
+            calibration.target = neededScale;
+            calibration.lastRecalMs = nowMs;
         }
     }
 
     // Asymmetric ease toward the target: settle within a few frames when
     // zooming out for loud signal, but drift slowly into quiet signal so the
     // zoom-in does not pump on momentary gaps.
-    const float timeConstant = (scopeCalTarget < scopeCalScale) ? 0.05f : 1.5f;
-    scopeCalScale += (scopeCalTarget - scopeCalScale) * (1.0f - std::exp(-dtSeconds / timeConstant));
+    const float timeConstant = (calibration.target < calibration.scale) ? 0.05f : 1.5f;
+    calibration.scale += (calibration.target - calibration.scale)
+        * (1.0f - std::exp(-dtSeconds / timeConstant));
+    return calibration.scale;
 }
 
 void TrackerMainUI::appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
                                     std::size_t rows,
-                                    int machineId,
                                     std::size_t stackIndex,
                                     std::vector<float>& scopeSamples)
 {
@@ -1134,9 +1218,9 @@ void TrackerMainUI::appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
 
     if (rows >= 4 && cols >= 1 && !scopeSamples.empty())
     {
-        updateScopeCalibration(machineId, stackIndex, scopeSamples);
+        const float scopeScale = updateScopeCalibration(stackIndex, scopeSamples);
         for (float& sample : scopeSamples)
-            sample *= scopeCalScale;
+            sample *= scopeScale;
 
         TrackerUIComponent::Trace scope;
         scope.colStart = 0.0f;
@@ -1536,9 +1620,15 @@ std::vector<std::vector<UIBox>> TrackerMainUI::buildBoxesFromGrid(const std::vec
 
 void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                                     size_t rowsToDisplay,
-                                    size_t colsToDisplay)
+                                    size_t colsToDisplay,
+                                    const std::vector<UIBox>* stickyHeaderCells)
 {
     if (rowsToDisplay == 0 || colsToDisplay == 0)
+        return;
+
+    const bool hasStickyHeader = stickyHeaderCells != nullptr;
+    const size_t bodyRowsToDisplay = hasStickyHeader ? rowsToDisplay - 1 : rowsToDisplay;
+    if (bodyRowsToDisplay == 0)
         return;
 
     const size_t maxCols = boxes.size();
@@ -1582,15 +1672,15 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
     size_t nextStartCol = lastStartCol;
     size_t nextStartRow = lastStartRow;
     size_t nextEndCol = nextStartCol + colsToDisplay;
-    size_t nextEndRow = nextStartRow + rowsToDisplay;
+    size_t nextEndRow = nextStartRow + bodyRowsToDisplay;
 
     if (cursorCol < nextStartCol) nextStartCol = cursorCol;
     if (cursorCol >= nextEndCol) nextStartCol = cursorCol - colsToDisplay + 1;
     if (cursorRow < nextStartRow) nextStartRow = cursorRow;
-    if (cursorRow >= nextEndRow) nextStartRow = cursorRow - rowsToDisplay + 1;
+    if (cursorRow >= nextEndRow) nextStartRow = cursorRow - bodyRowsToDisplay + 1;
 
     nextEndCol = nextStartCol + colsToDisplay;
-    nextEndRow = nextStartRow + rowsToDisplay;
+    nextEndRow = nextStartRow + bodyRowsToDisplay;
 
     if (nextEndRow >= maxRows) nextEndRow = maxRows;
     if (nextEndCol >= maxCols) nextEndCol = maxCols;
@@ -1613,12 +1703,19 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
 
         for (size_t displayRow = 0; displayRow < rowsToDisplay; ++displayRow)
         {
-            const size_t row = nextStartRow + displayRow;
-            const bool rowInRange = row < maxRows;
-
             UIBox box;
-            if (colInRange && rowInRange)
-                box = boxes[col][row];
+            if (hasStickyHeader && displayRow == 0)
+            {
+                if (colInRange && col < stickyHeaderCells->size())
+                    box = (*stickyHeaderCells)[col];
+            }
+            else
+            {
+                const size_t bodyRow = displayRow - (hasStickyHeader ? 1 : 0);
+                const size_t row = nextStartRow + bodyRow;
+                if (colInRange && row < maxRows)
+                    box = boxes[col][row];
+            }
 
             const float previousGlow = reuseGlow ? playheadGlow[displayCol][displayRow] : 0.0f;
             const float glowDecayScalar = samplerViewActive
@@ -1863,17 +1960,19 @@ float TrackerMainUI::getSamplerCellDepthScale(const UIBox& cell) const
 bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent)
 {
     juce::ignoreUnused(originatingComponent);
+    if (stateDialogMode != StateDialogMode::none)
+        return handleStateDialogKey(key);
     if (key.getModifiers().isCtrlDown())
     {
         const auto keyCode = key.getKeyCode();
         if (keyCode == 's' || keyCode == 'S')
         {
-            chooseStateSaveDirectory();
+            openStateSaveDialog();
             return true;
         }
         if (keyCode == 'l' || keyCode == 'L')
         {
-            chooseStateFileToLoad();
+            openStateLoadDialog();
             return true;
         }
     }
@@ -2103,87 +2202,295 @@ juce::File TrackerMainUI::initialStateDirectory() const
     return documents.isDirectory() ? documents : juce::File::getSpecialLocation(juce::File::userHomeDirectory);
 }
 
-void TrackerMainUI::showStateFileError(const juce::String& message) const
+void TrackerMainUI::openStateSaveDialog()
 {
-    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                                           "MYK Tracker state",
-                                           message,
-                                           "OK");
+    stateDialogMode = StateDialogMode::savePrompt;
+    stateDialogColumn = stateDialogRow = 0;
+    stateDialogError.clear();
+    stateDialogErrorFromSave = false;
+    pendingStateFile = juce::File();
 }
 
-void TrackerMainUI::chooseStateSaveDirectory()
+void TrackerMainUI::openStateLoadDialog()
 {
-    if (stateFileChooser != nullptr)
-        return;
-
-    stateFileChooser = std::make_unique<juce::FileChooser>("Choose a folder for the tracker state",
-                                                             initialStateDirectory());
-    juce::Component::SafePointer<TrackerMainUI> safeThis(this);
-    stateFileChooser->launchAsync(juce::FileBrowserComponent::openMode
-                                      | juce::FileBrowserComponent::canSelectDirectories,
-        [safeThis] (const juce::FileChooser& chooser)
-        {
-            if (safeThis == nullptr)
-                return;
-
-            const auto directory = chooser.getResult();
-            safeThis->stateFileChooser.reset();
-            if (!directory.isDirectory())
-                return; // User cancelled the directory browser.
-
-            safeThis->lastStateDirectory = directory;
-            const auto timestamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
-            const auto file = directory.getNonexistentChildFile("MYK-Tracker-" + timestamp, ".myktracker");
-            juce::MemoryBlock state;
-            safeThis->audioProcessor.getStateInformation(state);
-            if (state.getSize() == 0 || !file.replaceWithData(state.getData(), state.getSize()))
-            {
-                safeThis->showStateFileError("Could not save the tracker state to:\n" + file.getFullPathName());
-                return;
-            }
-
-            // The chooser has closed and the state is safely written.  Do not
-            // add a second modal acknowledgement: it is awkward to dismiss on
-            // keyboard-only/touchscreen setups and steals focus from tracker
-            // controls such as Space.
-            safeThis->grabKeyboardFocus();
-        });
+    stateDialogMode = StateDialogMode::loadPrompt;
+    stateDialogColumn = stateDialogRow = 0;
+    stateDialogError.clear();
+    stateDialogErrorFromSave = false;
+    pendingStateFile = juce::File();
 }
 
-void TrackerMainUI::chooseStateFileToLoad()
+void TrackerMainUI::closeStateDialog()
 {
-    if (stateFileChooser != nullptr)
+    stateFileBrowser.close();
+    stateDialogMode = StateDialogMode::none;
+    stateDialogBoxes.clear();
+    stateFilenameEditing = false;
+    pendingStateFile = juce::File();
+    grabKeyboardFocus();
+}
+
+void TrackerMainUI::beginStateBrowser(bool saving)
+{
+    stateFileBrowser.open(initialStateDirectory());
+    stateDialogMode = saving ? StateDialogMode::saveBrowser : StateDialogMode::loadBrowser;
+    stateDialogColumn = stateDialogRow = 0;
+    stateFilenameEditing = false;
+    if (saving)
+    {
+        const auto timestamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
+        stateSaveName = "MYK-Tracker-" + timestamp + ".myktracker";
+    }
+}
+
+juce::File TrackerMainUI::selectedStateSaveFile(juce::String& error) const
+{
+    auto name = sanitizeStateFileName(stateSaveName);
+    if (name.isEmpty() || name == ".myktracker")
+    {
+        error = "ENTER A FILE NAME";
+        return juce::File();
+    }
+    if (!name.endsWithIgnoreCase(".myktracker"))
+        name += ".myktracker";
+    return stateFileBrowser.getDirectory().getChildFile(name);
+}
+
+void TrackerMainUI::saveStateToSelectedFile()
+{
+    juce::String error;
+    const auto file = selectedStateSaveFile(error);
+    if (file.getFullPathName().isEmpty())
+    {
+        stateDialogError = error;
+        stateDialogErrorFromSave = true;
+        stateDialogMode = StateDialogMode::error;
         return;
+    }
+    if (file.existsAsFile())
+    {
+        pendingStateFile = file;
+        stateDialogMode = StateDialogMode::overwriteConfirm;
+        stateDialogColumn = 0;
+        stateDialogRow = 0;
+        return;
+    }
 
-    stateFileChooser = std::make_unique<juce::FileChooser>("Load tracker state",
-                                                             initialStateDirectory(),
-                                                             "*.myktracker");
-    juce::Component::SafePointer<TrackerMainUI> safeThis(this);
-    stateFileChooser->launchAsync(juce::FileBrowserComponent::openMode
-                                      | juce::FileBrowserComponent::canSelectFiles,
-        [safeThis] (const juce::FileChooser& chooser)
+    juce::MemoryBlock state;
+    audioProcessor.getStateInformation(state);
+    if (state.getSize() == 0 || !file.replaceWithData(state.getData(), state.getSize()))
+    {
+        stateDialogError = "COULD NOT SAVE " + file.getFileName();
+        stateDialogErrorFromSave = true;
+        stateDialogMode = StateDialogMode::error;
+        return;
+    }
+    lastStateDirectory = file.getParentDirectory();
+    closeStateDialog();
+}
+
+void TrackerMainUI::loadSelectedStateFile(const juce::File& file)
+{
+    juce::MemoryBlock state;
+    if (!file.existsAsFile() || !file.loadFileAsData(state) || state.getSize() == 0)
+    {
+        stateDialogError = "COULD NOT LOAD " + file.getFileName();
+        stateDialogErrorFromSave = false;
+        stateDialogMode = StateDialogMode::error;
+        return;
+    }
+    audioProcessor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+    lastStateDirectory = file.getParentDirectory();
+    closeStateDialog();
+}
+
+void TrackerMainUI::rebuildStateDialogBoxes()
+{
+    stateDialogBoxes.assign(2, {});
+    const auto pushRow = [this](UIBox left, UIBox right = UIBox{})
+    {
+        left.kind = UIBox::Kind::TrackerCell;
+        if (right.kind == UIBox::Kind::None && right.text.empty() && !right.onActivate)
+            right.isDisabled = true;
+        else
+            right.kind = UIBox::Kind::TrackerCell;
+        stateDialogBoxes[0].push_back(std::move(left));
+        stateDialogBoxes[1].push_back(std::move(right));
+    };
+    const auto action = [] (const juce::String& text, std::function<void()> callback)
+    {
+        UIBox box;
+        box.text = text.toStdString();
+        box.onActivate = std::move(callback);
+        return box;
+    };
+
+    if (stateDialogMode == StateDialogMode::savePrompt)
+        pushRow(action("SAVE", [this] { beginStateBrowser(true); }), action("CANCEL", [this] { closeStateDialog(); }));
+    else if (stateDialogMode == StateDialogMode::loadPrompt)
+        pushRow(action("LOAD", [this] { beginStateBrowser(false); }), action("CANCEL", [this] { closeStateDialog(); }));
+    else if (stateDialogMode == StateDialogMode::overwriteConfirm)
+        pushRow(action("REPLACE", [this]
         {
-            if (safeThis == nullptr)
-                return;
-
-            const auto file = chooser.getResult();
-            safeThis->stateFileChooser.reset();
-            if (!file.existsAsFile())
-                return; // User cancelled the file browser.
-
-            juce::MemoryBlock state;
-            if (!file.loadFileAsData(state) || state.getSize() == 0)
+            const auto file = pendingStateFile;
+            pendingStateFile = juce::File();
+            if (file.existsAsFile())
             {
-                safeThis->showStateFileError("Could not read tracker state from:\n" + file.getFullPathName());
-                return;
+                juce::MemoryBlock state;
+                if (audioProcessor.getStateInformation(state), state.getSize() > 0 && file.replaceWithData(state.getData(), state.getSize()))
+                {
+                    lastStateDirectory = file.getParentDirectory();
+                    closeStateDialog();
+                    return;
+                }
             }
+            stateDialogError = "COULD NOT REPLACE FILE";
+            stateDialogErrorFromSave = true;
+            stateDialogMode = StateDialogMode::error;
+        }), action("CANCEL", [this] { pendingStateFile = juce::File(); stateDialogMode = StateDialogMode::saveBrowser; }));
+    else if (stateDialogMode == StateDialogMode::error)
+        pushRow(action("BACK", [this]
+        {
+            stateDialogMode = stateDialogErrorFromSave ? StateDialogMode::saveBrowser : StateDialogMode::loadBrowser;
+            stateDialogError.clear();
+            pendingStateFile = juce::File();
+        }));
+    else
+    {
+        UIBox path = action(stateFileBrowser.getDirectory().getFullPathName(), [this] { closeStateDialog(); });
+        path.width = 6.0f;
+        pushRow(std::move(path), action("CANCEL", [this] { closeStateDialog(); }));
+        if (stateDialogMode == StateDialogMode::saveBrowser)
+        {
+            UIBox name = action("NAME: " + stateSaveName + (stateFilenameEditing ? "_" : ""), [this] { stateFilenameEditing = !stateFilenameEditing; });
+            name.width = 6.0f;
+            pushRow(std::move(name), action("SAVE", [this] { saveStateToSelectedFile(); }));
+        }
+        else
+        {
+            UIBox find = action(stateFileBrowser.getSearchQuery().isEmpty() ? "FIND: _" : "FIND: " + stateFileBrowser.getSearchQuery(), [] {});
+            find.width = 6.0f;
+            pushRow(std::move(find));
+        }
+        UIBox up = action("../", [this] { stateFileBrowser.browseUp(); stateDialogRow = 2; });
+        up.width = 6.0f;
+        pushRow(std::move(up));
+        const auto preferredFocusName = stateFileBrowser.consumePreferredFocusName();
+        for (const auto& entry : stateFileBrowser.getEntries(isTrackerStateFile))
+        {
+            const auto entryRow = stateDialogBoxes[0].size();
+            UIBox name = action((entry.isDirectory ? "[D] " : "[F] ") + entry.file.getFileName(), [this, entry]
+            {
+                if (entry.isDirectory)
+                    stateFileBrowser.browseInto(entry.file);
+                else if (stateDialogMode == StateDialogMode::saveBrowser)
+                {
+                    stateSaveName = entry.file.getFileName();
+                    stateDialogRow = 1;
+                    stateDialogColumn = 0;
+                }
+            });
+            name.width = 6.0f;
+            UIBox right;
+            if (!entry.isDirectory && stateDialogMode == StateDialogMode::loadBrowser)
+                right = action("LOAD", [this, entry] { loadSelectedStateFile(entry.file); });
+            pushRow(std::move(name), std::move(right));
+            if (entry.isDirectory && entry.file.getFileName() == preferredFocusName)
+            {
+                stateDialogRow = entryRow;
+                stateDialogColumn = 0;
+            }
+        }
+    }
+    const auto rows = stateDialogBoxes[0].size();
+    if (rows == 0) stateDialogRow = stateDialogColumn = 0;
+    else stateDialogRow = std::min(stateDialogRow, rows - 1);
+}
 
-            safeThis->audioProcessor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
-            safeThis->lastStateDirectory = file.getParentDirectory();
-            // As for save, return straight to the tracker once the chooser
-            // has closed instead of presenting an extra modal confirmation.
-            safeThis->grabKeyboardFocus();
-        });
+void TrackerMainUI::prepareStateDialogView()
+{
+    samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
+    samplerColumnWidths.clear();
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
+    rebuildStateDialogBoxes();
+    for (std::size_t col = 0; col < stateDialogBoxes.size(); ++col)
+        for (std::size_t row = 0; row < stateDialogBoxes[col].size(); ++row)
+            stateDialogBoxes[col][row].isSelected = col == stateDialogColumn && row == stateDialogRow;
+    updateCellStates(stateDialogBoxes, stateDialogBoxes.empty() ? 1 : stateDialogBoxes[0].size(), 2);
+    overlayState.text = stateDialogMode == StateDialogMode::savePrompt ? "SAVE TRACKER STATE"
+        : stateDialogMode == StateDialogMode::loadPrompt ? "LOAD TRACKER STATE"
+        : stateDialogMode == StateDialogMode::overwriteConfirm ? "REPLACE EXISTING FILE?"
+        : stateDialogMode == StateDialogMode::error ? stateDialogError.toStdString()
+        : stateDialogMode == StateDialogMode::saveBrowser ? "SAVE TRACKER STATE"
+        : "LOAD TRACKER STATE";
+    overlayState.color = stateDialogMode == StateDialogMode::error ? palette.textWarning : palette.textPrimary;
+    overlayState.glowColor = palette.gridPlayhead;
+    overlayState.glowStrength = 0.35f;
+}
+
+void TrackerMainUI::activateStateDialogCell()
+{
+    rebuildStateDialogBoxes();
+    if (stateDialogColumn >= stateDialogBoxes.size() || stateDialogRow >= stateDialogBoxes[stateDialogColumn].size())
+        return;
+    auto& box = stateDialogBoxes[stateDialogColumn][stateDialogRow];
+    if (!box.isDisabled && box.onActivate)
+        box.onActivate();
+}
+
+void TrackerMainUI::moveStateDialogCursor(int rowDelta, int colDelta)
+{
+    rebuildStateDialogBoxes();
+    if (stateDialogBoxes.empty() || stateDialogBoxes[0].empty())
+        return;
+    const auto rows = stateDialogBoxes[0].size();
+    if (rowDelta != 0)
+        stateDialogRow = static_cast<std::size_t>(juce::jlimit(0, static_cast<int>(rows) - 1, static_cast<int>(stateDialogRow) + rowDelta));
+    if (colDelta != 0)
+    {
+        const auto candidate = static_cast<std::size_t>(juce::jlimit(0, 1, static_cast<int>(stateDialogColumn) + colDelta));
+        if (stateDialogRow < stateDialogBoxes[candidate].size() && !stateDialogBoxes[candidate][stateDialogRow].isDisabled)
+            stateDialogColumn = candidate;
+    }
+}
+
+bool TrackerMainUI::handleStateDialogKey(const juce::KeyPress& key)
+{
+    const auto code = key.getKeyCode();
+    if (code == juce::KeyPress::escapeKey) { closeStateDialog(); return true; }
+    if (stateDialogMode == StateDialogMode::saveBrowser && stateFilenameEditing)
+    {
+        if (code == juce::KeyPress::returnKey) { stateFilenameEditing = false; return true; }
+        if (code == juce::KeyPress::backspaceKey) { stateSaveName = stateSaveName.dropLastCharacters(1); return true; }
+        const auto character = key.getTextCharacter();
+        if (character >= 32 && character <= 126) { stateSaveName += juce::String::charToString(character); return true; }
+    }
+    if (stateDialogMode == StateDialogMode::loadBrowser)
+    {
+        if (code == juce::KeyPress::backspaceKey) { stateFileBrowser.backspaceSearch(); return true; }
+        const auto character = key.getTextCharacter();
+        if (character >= 32 && character <= 126) { stateFileBrowser.appendSearch(character); return true; }
+    }
+    if (code == juce::KeyPress::leftKey)
+    {
+        if (stateDialogMode == StateDialogMode::saveBrowser || stateDialogMode == StateDialogMode::loadBrowser)
+            stateFileBrowser.browseUp();
+        else moveStateDialogCursor(0, -1);
+        return true;
+    }
+    if (code == juce::KeyPress::rightKey) { moveStateDialogCursor(0, 1); return true; }
+    if (code == juce::KeyPress::upKey) { moveStateDialogCursor(-1, 0); return true; }
+    if (code == juce::KeyPress::downKey) { moveStateDialogCursor(1, 0); return true; }
+    if (code == juce::KeyPress::returnKey) { activateStateDialogCell(); return true; }
+    return true;
 }
 
 bool TrackerMainUI::keyStateChanged(bool isKeyDown, juce::Component* originatingComponent)

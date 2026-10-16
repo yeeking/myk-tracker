@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "MachineInterface.h"
+#include "TrackerFileBrowser.h"
 
 class SuperSamplePlayer;
 
@@ -247,18 +248,14 @@ private:
     std::vector<float> uiGlowLevels;
     /** Player currently associated with the open browser. */
     int browsingPlayerId { -1 };
-    /** Directory currently displayed in the browser. */
-    juce::File browsingDirectory;
-    /** Active browser search query. */
-    std::string browserSearchQuery;
+    /** Shared directory/search state for the integrated browser. */
+    TrackerFileBrowser fileBrowser;
     /** Cached browser UI cells. */
     std::vector<std::vector<UIBox>> cachedBrowserUi;
     /** True when the cached browser UI must be rebuilt. */
     bool browserUiDirty { true };
     /** Preview file currently loaded in the hidden player. */
     juce::File previewLoadedFile;
-    /** Folder label to refocus after navigating upward. */
-    std::string pendingBrowserFocusLabel;
     /** Cancels stale async preview requests. */
     std::atomic<std::uint64_t> previewRequestGeneration { 0 };
     /** Last output sample rate seen in prepareToPlay. */
