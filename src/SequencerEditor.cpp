@@ -656,9 +656,15 @@ void SequencerEditor::transposeCurrentSequence(int semitones)
     {
       if (!isPlayableNoteRow(row))
         continue;
-      row[Step::noteInd] = static_cast<double>(juce::jlimit(
-          0, 127, static_cast<int>(row[Step::noteInd]) + semitones));
-      changed = true;
+      const int currentNote = static_cast<int>(row[Step::noteInd]);
+      const int transposedNote = currentNote + semitones;
+      // Preserve notes that cannot make the requested complete move.  This
+      // avoids repeatedly collapsing low or high notes onto a MIDI boundary.
+      if (transposedNote >= 1 && transposedNote <= 127)
+      {
+        row[Step::noteInd] = static_cast<double>(transposedNote);
+        changed = true;
+      }
     }
     if (changed)
       sequencer->setStepData(currentSequence, step, std::move(data));

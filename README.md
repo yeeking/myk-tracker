@@ -62,7 +62,7 @@ leaving the sustain level unchanged.
 - `=`: add a row or entry where supported.
 - `[` / `]`: decrement/increment the current value. On the Mixer master gain or fader rows this changes master gain by 1 dB.
 - `,` / `.`: octave down / octave up for note entry.
-- `<` / `>` on the Sequence page: transpose every playable note in the current sequence down / up one octave.
+- `<` / `>` on the Sequence page: transpose every playable note in the current sequence down / up one octave. Notes that cannot make the full move while staying in MIDI range 1–127 are left unchanged.
 - `_` / `+`: decrease / increase BPM by 1.
 - Piano note keys: enter notes using the current octave on Sequence and Step pages; elsewhere they audition without changing tracker data while stopped.
 - Control-mode sequence keys: when the current sequence is in `SEQ:CON` mode, `z` enters `TAUX1`, `x` enters `TAUX2`, and `c` enters `COFF` (default `2000` Hz) on the Sequence and Step pages. Piano note keys and Step-page chord shortcuts are suppressed in that mode.

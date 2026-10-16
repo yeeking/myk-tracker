@@ -620,8 +620,10 @@ int main()
     transposeSequencer.setStepData(0, 1,
         {{ static_cast<double>(CommandType::Sampler), 120.0, 100.0, 1.0 }});
     transposeSequencer.toggleStepActive(0, 1);
-    transposeSequencer.setStepData(0, 2,
-        {{ static_cast<double>(CommandType::MidiNote), 5.0, 100.0, 1.0 }});
+    transposeSequencer.setStepData(0, 2, {
+        { static_cast<double>(CommandType::MidiNote), 5.0, 100.0, 1.0 },
+        { static_cast<double>(CommandType::Sampler), 13.0, 100.0, 1.0 }
+    });
     const auto noteEntryOctave = transposeEditor.getCurrentOctave();
     transposeEditor.transposeCurrentSequence(-12);
     const auto transposedFirstStep = transposeSequencer.getStepData(0, 0);
@@ -631,8 +633,9 @@ int main()
             "sequence transpose shifts every playable chord row but not control values");
     require(transposeSequencer.getStepData(0, 1)[0][Step::noteInd] == 108.0,
             "sequence transpose includes inactive steps");
-    require(transposeSequencer.getStepData(0, 2)[0][Step::noteInd] == 0.0,
-            "sequence transpose clamps notes at MIDI zero");
+    require(transposeSequencer.getStepData(0, 2)[0][Step::noteInd] == 5.0
+                && transposeSequencer.getStepData(0, 2)[1][Step::noteInd] == 1.0,
+            "sequence transpose preserves too-low notes and never creates MIDI zero");
     require(transposeEditor.getCurrentOctave() == noteEntryOctave,
             "sequence transpose does not alter the note-entry octave");
     transposeSequencer.setStepData(0, 2,
@@ -641,8 +644,8 @@ int main()
     require(transposeSequencer.getStepData(0, 0)[0][Step::noteInd] == 60.0
                 && transposeSequencer.getStepData(0, 0)[1][Step::noteInd] == 72.0,
             "sequence transpose restores unclamped notes when shifted back up");
-    require(transposeSequencer.getStepData(0, 2)[0][Step::noteInd] == 127.0,
-            "sequence transpose clamps notes at MIDI 127");
+    require(transposeSequencer.getStepData(0, 2)[0][Step::noteInd] == 123.0,
+            "sequence transpose preserves notes that would exceed MIDI 127");
 
     Sequence implodeSequence(nullptr, 8, 0);
     for (std::size_t step = 0; step < 7; ++step)
