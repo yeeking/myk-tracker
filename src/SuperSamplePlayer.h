@@ -61,6 +61,8 @@ public:
     void triggerNote (int midiNote, int velocity);
     /** Stops playback immediately. */
     void stop() noexcept;
+    /** Starts the short click-free performance-gate release. */
+    void gateRelease() noexcept;
     /** Updates the player for the current output sample rate. */
     void prepareToPlay (double sampleRate, int samplesPerBlock);
     /** Adds the next segment of playback into the destination buffer. */
@@ -117,6 +119,8 @@ private:
     float lastVuDb { -60.0f };
     /** Velocity-derived gain applied on the next trigger. */
     float velocityGain { 1.0f };
+    int gateFadeSamplesRemaining { 0 };
+    int gateFadeSamplesTotal { 0 };
     /** Cached waveform points for UI rendering. */
     std::vector<float> waveformPoints;
 };

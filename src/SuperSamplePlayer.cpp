@@ -139,6 +139,13 @@ void SuperSamplePlayer::stop() noexcept
     resetPlaybackState (false);
 }
 
+void SuperSamplePlayer::gateRelease() noexcept
+{
+    if (!state.isPlaying) return;
+    gateFadeSamplesTotal = juce::jmax(1, static_cast<int>(std::lround(outputSampleRate * 0.003)));
+    gateFadeSamplesRemaining = gateFadeSamplesTotal;
+}
+
 void SuperSamplePlayer::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused (samplesPerBlock);
@@ -178,12 +185,14 @@ void SuperSamplePlayer::renderToBuffer (juce::AudioBuffer<float>& buffer, int st
         float firstOutputSample = 0.0f;
         float monoRendered = 0.0f;
 
+        const float gateGain = gateFadeSamplesRemaining > 0
+            ? static_cast<float>(gateFadeSamplesRemaining) / static_cast<float>(gateFadeSamplesTotal) : 1.0f;
         for (int sourceChannel = 0; sourceChannel < numSourceChans; ++sourceChannel)
         {
             const float* samples = sampleBuffer.getReadPointer (sourceChannel);
             const float current = samples[sourceIndex];
             const float next = samples[nextSourceIndex];
-            const float rendered = juce::jmap (fractionalPart, current, next) * gain;
+            const float rendered = juce::jmap (fractionalPart, current, next) * gain * gateGain;
 
             if (sourceChannel == 0)
                 firstOutputSample = rendered;
@@ -205,6 +214,11 @@ void SuperSamplePlayer::renderToBuffer (juce::AudioBuffer<float>& buffer, int st
         pushVuSample (firstOutputSample);
         fractionalPlaybackPosition += playbackRatio;
         sourceReadIndex = static_cast<int> (fractionalPlaybackPosition);
+        if (gateFadeSamplesRemaining > 0 && --gateFadeSamplesRemaining == 0)
+        {
+            state.isPlaying = false;
+            break;
+        }
     }
 }
 
@@ -279,6 +293,8 @@ void SuperSamplePlayer::resetPlaybackState (bool keepPlaying) noexcept
     sourceReadIndex = 0;
     fractionalPlaybackPosition = 0.0;
     state.isPlaying = keepPlaying && sampleBuffer.getNumSamples() > 0;
+    gateFadeSamplesRemaining = 0;
+    gateFadeSamplesTotal = 0;
 }
 
 void SuperSamplePlayer::updatePlaybackRatio() noexcept

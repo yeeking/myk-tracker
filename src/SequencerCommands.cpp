@@ -74,6 +74,18 @@ void CommandProcessor::initialiseCommands() {
     assert(CommandData::masterClock != nullptr);
     assert(CommandData::machineUtils != nullptr);
     
+    const auto sendSequenceNote = [] (CommandType type, std::vector<double>* stepData,
+                                      const SequenceReadOnly* context)
+    {
+        const auto mode = context->noteLengthMode;
+        const bool shortened = mode != SequenceReadOnly::NoteLengthMode::off;
+        const double duration = mode == SequenceReadOnly::NoteLengthMode::half ? 0.5
+            : mode == SequenceReadOnly::NoteLengthMode::quarter ? 0.25
+            : (*stepData)[Step::lengthInd];
+        CommandData::machineUtils->sendTimedMessageToMachine(
+            type, static_cast<unsigned short>(context->machineId), playbackNote(*stepData, context),
+            static_cast<unsigned short>((*stepData)[Step::velInd]), duration, shortened);
+    };
     // get a MIDI link going
     Command midiNote{
             "MIDINote", "Midi", "Plays a MIDI note",
@@ -85,16 +97,11 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd, // int noteEditGoesToParam;
             Step::velInd, // int numberEditGoesToParam;
             Step::lengthInd, // int lengthEditGoesToParam;  
-            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+            [sendSequenceNote](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
                 assert(sequenceContext != nullptr);
                 if ((*stepData)[Step::noteInd] > 0) {// there is a valid note
-                    CommandData::machineUtils->sendMessageToMachine(
-                        static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
-                        static_cast<unsigned short> (sequenceContext->machineId),
-                        playbackNote(*stepData, sequenceContext),
-                        static_cast<unsigned short> ((*stepData)[Step::velInd]),
-                        static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
+                    sendSequenceNote(static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)), stepData, sequenceContext);
                 }
                 
             }
@@ -107,7 +114,7 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
-            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+            [sendSequenceNote](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
                 std::cout << "Log command: machineId=" << sequenceContext->machineId << " stepData=[";
@@ -128,15 +135,10 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
-            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+            [sendSequenceNote](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
-                CommandData::machineUtils->sendMessageToMachine(
-                    static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)),
-                    static_cast<unsigned short> (sequenceContext->machineId),
-                    playbackNote(*stepData, sequenceContext),
-                    static_cast<unsigned short> ((*stepData)[Step::velInd]),
-                    static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
+                sendSequenceNote(static_cast<CommandType>(static_cast<std::size_t>(sequenceContext->machineType)), stepData, sequenceContext);
             }
     };
     Command wavetableSynthCommand{
@@ -147,15 +149,10 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
-            [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+            [sendSequenceNote](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
-                CommandData::machineUtils->sendMessageToMachine(
-                    CommandType::WavetableSynth,
-                    static_cast<unsigned short> (sequenceContext->machineId),
-                    playbackNote(*stepData, sequenceContext),
-                    static_cast<unsigned short> ((*stepData)[Step::velInd]),
-                    static_cast<unsigned short> ((*stepData)[Step::lengthInd]));
+                sendSequenceNote(CommandType::WavetableSynth, stepData, sequenceContext);
             }
     };
     // Command sample{

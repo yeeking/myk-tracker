@@ -24,7 +24,10 @@ public:
         float depthScale = 1.0f;
         bool drawOutline = false;
         /** OpenGL line width used when drawing this cell's outline. */
-        float outlineLineWidth = 3.0f;
+    float outlineLineWidth = 3.0f;
+    bool drawInsetOutline = false;
+    juce::Colour insetOutlineColor;
+    float insetOutlineLineWidth = 2.0f;
         /** Horizontal parameter fill bar; -1 = no bar, otherwise [0,1]. */
         float fillFraction = -1.0f;
         /** Colour of the horizontal parameter fill bar (0xAARRGGBB). */

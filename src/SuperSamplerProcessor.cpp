@@ -756,6 +756,11 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
             const auto pos = juce::jlimit (0, numSamples - 1, meta.samplePosition);
             pendingNoteOns.push_back ({ pos, msg.getNoteNumber(), msg.getVelocity() });
         }
+        else if (msg.isNoteOff())
+        {
+            const auto pos = juce::jlimit (0, numSamples - 1, meta.samplePosition);
+            pendingNoteOns.push_back ({ pos, msg.getNoteNumber(), -1 });
+        }
     }
     // MidiBuffer iteration already preserves sample and equal-sample ordering.
     const std::lock_guard<std::mutex> lock (playerMutex);
@@ -789,7 +794,10 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
             for (auto& player : players)
             {
                 if (player->acceptsNote (event.note))
-                    player->triggerNote (event.note, event.velocity);
+                {
+                    if (event.velocity < 0) player->gateRelease();
+                    else player->triggerNote (event.note, event.velocity);
+                }
             }
             ++cursor;
         }

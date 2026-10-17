@@ -301,6 +301,9 @@ class Sequence{
     void setControlMode(bool enabled);
     /** change the sequence entry mode to its opposite */
     void toggleControlMode();
+    SequenceReadOnly::NoteLengthMode getNoteLengthMode() const noexcept;
+    void setNoteLengthMode(SequenceReadOnly::NoteLengthMode mode) noexcept;
+    void cycleNoteLengthMode() noexcept;
     /** tell the sequence to reset its position counter at next tick. Useful for rewinding*/
     void rewindAtNextZero();
     /** prime this sequence so the next tick triggers step zero immediately */
@@ -323,6 +326,7 @@ class Sequence{
     std::vector<Step> steps;
     SequenceType type;
     double machineType;
+    SequenceReadOnly::NoteLengthMode noteLengthMode = SequenceReadOnly::NoteLengthMode::off;
     // temporary sequencer adjustment parameters that get reset at step 0
     double transpose; 
     signed int lengthAdjustment;
@@ -499,6 +503,7 @@ class Sequencer : public SequencerAbs {
       void setSequenceControlMode(std::size_t sequence, bool enabled);
       /** toggle the control-command entry mode for the sent sequence */
       void toggleSequenceControlMode(std::size_t sequence);
+      void cycleSequenceNoteLengthMode(std::size_t sequence);
       /** true when at least one sequence is soloed */
       bool isSoloModeActive() const;
       /** toggle activity state of specified step in specified sequence*/

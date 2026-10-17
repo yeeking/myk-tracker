@@ -46,6 +46,8 @@ struct UIBox
     bool isSoloChannel = false;
     /** True when the cell belongs to a muted mixer channel. */
     bool isMutedChannel = false;
+    /** 1=half, 2=quarter live sequence note gate. */
+    int noteLengthMode = 0;
     /** True when the cell represents note-bearing content. */
     bool hasNote = false;
     /** True when `customFillArgb` should override normal fill colours. */

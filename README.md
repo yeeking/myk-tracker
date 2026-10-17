@@ -30,7 +30,7 @@ leaving the sustain level unchanged.
 - `Mixer` page: edit the 8 machine stacks' independent mute, solo, gain, pan, and post-mute meters. Stack panning uses equal-power stereo placement; AUX 1 and AUX 2 preserve their stereo reverb width while their PAN control balances the return. Soloed stack columns use the same thick yellow outline as the Sequence page, and multiple soloed stacks remain audible together. The stripped-back far-left master strip has persistent output gain, mute, green stereo post-gain rails, and an `R` recording cell. AUX 1 and AUX 2 immediately follow it, each with persistent -48 to +6 dB return gain, mute, and blue stereo meters measured after return gain and balance but before the main mix. The brightened meter-cell background marks each channel's current gain setting. Activate `R` to start or stop recording; it lights red while a stereo 24-bit WAV is streamed at the current device/host sample rate into `MYK Tracker Recordings` inside the platform-standard Documents folder.
 - `Audio Config` page: in standalone mode, stage separate input/output device, sample-rate (`44.1`, `48`, `88.2`, or `96` kHz), and buffer-size choices, then activate `APPLY` while stopped. It reports audio callback CPU load, peak load, xruns, block duration, latency, bit depth, and backend. `REVERT`, `REFRESH`, and `RESET STATS` are all grid controls. In plug-in builds the page is read-only because the host owns audio configuration.
 - Each normal page has a compact fixed page identifier in the right-hand HUD strip (`SONG`, `SEQ`, `STEP`, `MACH`, `CONF`, and so on), leaving the grid area clear while playing.
-- `Help` page: show the main keyboard shortcuts. `Shift+H` toggles the page, `Backspace` returns to the previous page, and page shortcut keys also leave Help.
+- `Help` page: show the main keyboard shortcuts. `Ctrl+H` toggles the page, `Backspace` returns to the previous page, and page shortcut keys also leave Help.
 - `Reset / Quit` confirmation page: confirm tracker reset and, in standalone builds, quit.
 
 ## Keyboard Shortcuts
@@ -59,7 +59,8 @@ leaving the sustain level unchanged.
 - `Shift+G` on the Sequence page: implode the current sequence's notes into evenly distributed, pitch-sorted chord steps.
 - `Shift+I` on the Sequence page: insert a blank eight-step control-mode sequence to the right of the current sequence, using the same machine stack.
 - `Shift+K` on the Sequence page: delete the current sequence and shift later sequences left.
-- `Shift+H`: toggle the Help page.
+- `Shift+H` on the Sequence page: cycle the selected sequence through normal, half-tick, and quarter-tick performance gates. Green and purple outlines respectively identify the shortened modes; stored step durations are unchanged.
+- `Ctrl+H`: toggle the Help page.
 - `r`: rewind transport.
 - `-`: remove a row or entry where supported.
 - `=`: add a row or entry where supported.

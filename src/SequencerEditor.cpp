@@ -2418,6 +2418,12 @@ void SequencerEditor::toggleMuteCurrentSequence()
   impl->toggleSequenceMute(sequenceIndex);
 }
 
+void SequencerEditor::cycleNoteLengthCurrentSequence()
+{
+  if (auto* impl = getSequencerImpl())
+    impl->cycleSequenceNoteLengthMode(getCurrentSequence());
+}
+
 void SequencerEditor::toggleSoloCurrentSequence()
 {
   if (auto* impl = getSequencerImpl())

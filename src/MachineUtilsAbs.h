@@ -16,6 +16,15 @@ class MachineUtilsAbs{
          * and schedule a note off for later
          */
          virtual void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
+         /** Fractional tracker-tick note timing used by live performance gates. */
+         virtual void sendTimedMessageToMachine(CommandType machineType, unsigned short machineId,
+                                                unsigned short note, unsigned short velocity,
+                                                double durationTicks, bool gateSampler)
+         {
+             (void) gateSampler;
+             sendMessageToMachine(machineType, machineId, note, velocity,
+                                  static_cast<unsigned short>(durationTicks < 1.0 ? 1.0 : durationTicks));
+         }
          /** Starts a computer-keyboard audition which remains active until its
           * matching endHeldNote. Lightweight hosts keep one-shot semantics. */
          virtual void beginHeldNote(CommandType machineType, unsigned short machineId,

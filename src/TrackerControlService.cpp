@@ -836,6 +836,14 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 if (hasArg(args, "muted") && sequence->isMuted() != boolArg(args, "muted")) sequencer->toggleSequenceMute(static_cast<std::size_t>(sequenceIndex));
                 if (hasArg(args, "controlMode") && sequence->isControlMode() != boolArg(args, "controlMode"))
                     sequencer->setSequenceControlMode(static_cast<std::size_t>(sequenceIndex), boolArg(args, "controlMode"));
+                if (hasArg(args, "noteLengthMode"))
+                {
+                    const auto mode = stringArg(args, "noteLengthMode");
+                    if (mode == "off") sequence->setNoteLengthMode(SequenceReadOnly::NoteLengthMode::off);
+                    else if (mode == "half") sequence->setNoteLengthMode(SequenceReadOnly::NoteLengthMode::half);
+                    else if (mode == "quarter") sequence->setNoteLengthMode(SequenceReadOnly::NoteLengthMode::quarter);
+                    else return fail("invalid_argument", "noteLengthMode must be off, half, or quarter");
+                }
                 if (hasArg(args, "armed")) { editor.setArmedSequence(static_cast<std::size_t>(sequenceIndex)); viewChanged = true; }
                 contentChanged = true;
                 break;
@@ -1250,10 +1258,19 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         contentChanged = true;
                         handled = true;
                     }
-                    else if (!ctrl && shift && key == 'h')
+                    else if (ctrl && key == 'h')
                     {
                         editor.toggleHelpPage();
                         viewChanged = true;
+                        handled = true;
+                    }
+                    else if (!ctrl && shift && key == 'h')
+                    {
+                        if (editor.getCurrentPage() == SequencerEditorPage::sequence)
+                        {
+                            editor.cycleNoteLengthCurrentSequence();
+                            contentChanged = true;
+                        }
                         handled = true;
                     }
                     else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'i')

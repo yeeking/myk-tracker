@@ -722,6 +722,14 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
 
             if (cell.drawOutline)
                 outlines.push_back(OutlineEntry{ modelMatrix, cell.outlineColor, cell.outlineLineWidth });
+            if (cell.drawInsetOutline)
+            {
+                const auto insetPosition = juce::Vector3D<float>(centerX,
+                    startY - static_cast<float>(row) * stepY, depth + 0.015f);
+                const auto insetScale = juce::Vector3D<float>(width * 0.84f, cellHeight * 0.78f, depth);
+                outlines.push_back(OutlineEntry{ getModelMatrix(insetPosition, insetScale),
+                    cell.insetOutlineColor, cell.insetOutlineLineWidth });
+            }
         }
         cursorX += cursorOffset;
     }

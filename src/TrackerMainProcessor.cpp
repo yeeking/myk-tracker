@@ -152,11 +152,10 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
                                               unsigned short channel,
                                               unsigned short outNote,
                                               unsigned short outVelocity,
-                                              unsigned short outDurTicks)
+                                              double outDurTicks)
 {
-    const int samplesPerTickInt = static_cast<int>(samplesPerTick);
     const int onSample = elapsedSamples;
-    const int offsetSamples = (samplesPerTickInt * static_cast<int>(outDurTicks)) % maxHorizon;
+    const int offsetSamples = juce::jmax(1, static_cast<int>(std::lround(samplesPerTick * outDurTicks))) % maxHorizon;
     const int offSample = onSample + offsetSamples;
     lastQdOnAt = onSample;
 
@@ -649,20 +648,21 @@ void TrackerMainProcessor::allNotesOffForStack(std::size_t stackIndex)
 void TrackerMainProcessor::enqueueStackSamplerMidi(std::size_t stackIndex,
                                                    unsigned short outNote,
                                                    unsigned short outVelocity,
-                                                   unsigned short outDurTicks)
+                                                   double outDurTicks, bool gateAtDuration)
 {
-    const int samplesPerTickInt = static_cast<int>(samplesPerTick);
-    const int offsetSamples = (samplesPerTickInt * static_cast<int>(outDurTicks)) % maxHorizon;
-    const int offSample = elapsedSamples + offsetSamples;
+    const int offsetSamples = juce::jmax(1, static_cast<int>(std::lround(samplesPerTick * outDurTicks))) % maxHorizon;
+    const int fadeSamples = juce::jmax(1, static_cast<int>(std::lround(getSampleRate() * 0.003)));
+    const int offSample = elapsedSamples + juce::jmax(1, offsetSamples - fadeSamples);
     samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOn(1, static_cast<int>(outNote), static_cast<uint8>(outVelocity)), elapsedSamples });
-    samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOff(1, static_cast<int>(outNote), static_cast<uint8>(outVelocity)), offSample });
+    if (gateAtDuration)
+        samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOff(1, static_cast<int>(outNote), static_cast<uint8>(outVelocity)), offSample });
 }
 
 void TrackerMainProcessor::enqueueStackNote(NoteEventQueue& queue,
                                              std::size_t stackIndex,
                                              unsigned short note,
                                              unsigned short velocity,
-                                             unsigned short durInTicks,
+                                             double durInTicks,
                                              bool isNoteOff)
 {
     queue.pending.push_back({ stackIndex, note, velocity, durInTicks, isNoteOff, elapsedSamples });
@@ -730,9 +730,10 @@ void TrackerMainProcessor::distributeNoteEvents(NoteEventQueue& queue,
 void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                                                     unsigned short note,
                                                     unsigned short velocity,
-                                                    unsigned short durInTicks,
+                                                    double durInTicks,
                                                     std::size_t startSlotIndex,
-                                                    bool held)
+                                                    bool held,
+                                                    bool gateSampler)
 {
     auto* stack = getMachineStack(stackIndex);
     if (stack == nullptr || !isStackAudible(stackIndex))
@@ -780,7 +781,7 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                 if (held)
                     samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOn(1, static_cast<int>(note), static_cast<uint8>(velocity)), elapsedSamples });
                 else
-                    enqueueStackSamplerMidi(stackIndex, note, velocity, durInTicks);
+                    enqueueStackSamplerMidi(stackIndex, note, velocity, durInTicks, gateSampler);
                 anyTerminalTriggered = true;
                 break;
             case CommandType::WavetableSynth:
@@ -2238,6 +2239,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     juce::Array<juce::var> sequenceEffectiveSoloStates;
     juce::Array<juce::var> sequenceStackAudibleStates;
     juce::Array<juce::var> sequenceMachineIds;
+    juce::Array<juce::var> sequenceNoteLengthModes;
     const bool anyStackSolo = std::any_of(machineStacks.begin(), machineStacks.end(),
                                           [] (const auto& stack) { return stack.solo; });
     if (viewedSequencer != nullptr)
@@ -2248,6 +2250,9 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
             const bool sequenceSolo = sequence->isSolo();
             sequenceSoloStates.add(sequenceSolo);
             sequenceMachineIds.add(static_cast<int>(sequence->getMachineId()));
+            const auto noteLengthMode = sequence->getNoteLengthMode();
+            sequenceNoteLengthModes.add(noteLengthMode == SequenceReadOnly::NoteLengthMode::half ? 1
+                : noteLengthMode == SequenceReadOnly::NoteLengthMode::quarter ? 2 : 0);
             const auto stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
             const auto* stack = getMachineStack(stackIndex);
             const auto presentation = MixerState::getSequencePresentation(
@@ -2274,6 +2279,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("sequenceEffectiveSoloStates", sequenceEffectiveSoloStates);
     state->setProperty("sequenceStackAudibleStates", sequenceStackAudibleStates);
     state->setProperty("sequenceMachineIds", sequenceMachineIds);
+    state->setProperty("sequenceNoteLengthModes", sequenceNoteLengthModes);
 }
 
 juce::var TrackerMainProcessor::getUiState()
@@ -2380,6 +2386,9 @@ juce::var TrackerMainProcessor::serializeSingleSequencer(const Sequencer& sequen
         seqObj->setProperty("muted", seq->isMuted());
         seqObj->setProperty("solo", seq->isSolo());
         seqObj->setProperty("controlMode", seq->isControlMode());
+        const auto noteLengthMode = seq->getNoteLengthMode();
+        seqObj->setProperty("noteLengthMode", noteLengthMode == SequenceReadOnly::NoteLengthMode::half ? "half"
+            : noteLengthMode == SequenceReadOnly::NoteLengthMode::quarter ? "quarter" : "off");
         seqObj->setProperty("machineId", seq->getMachineId());
         seqObj->setProperty("machineType", seq->getMachineType());
         juce::Array<juce::var> readHeads;
@@ -2444,6 +2453,10 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
         const int length = juce::jmax(1, static_cast<int>(seqObj.getProperty("length", static_cast<int>(seq->getLength()))));
         seq->ensureEnoughStepsForLength(static_cast<std::size_t>(length));
         seq->setLength(static_cast<std::size_t>(length));
+        const auto lengthMode = seqObj.getProperty("noteLengthMode", "off").toString();
+        seq->setNoteLengthMode(lengthMode == "half" ? SequenceReadOnly::NoteLengthMode::half
+            : lengthMode == "quarter" ? SequenceReadOnly::NoteLengthMode::quarter
+            : SequenceReadOnly::NoteLengthMode::off);
 
         const auto typeInt = static_cast<int>(seqObj.getProperty("type", static_cast<int>(seq->getType())));
         seq->setType(static_cast<SequenceType>(typeInt));
@@ -3841,6 +3854,21 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
                        note,
                        velocity,
                        durInTicks);
+}
+
+void TrackerMainProcessor::sendTimedMessageToMachine(CommandType machineType, unsigned short machineId,
+                                                      unsigned short note, unsigned short velocity,
+                                                      double durationTicks, bool gateSampler)
+{
+    durationTicks = juce::jmax(0.001, durationTicks);
+    if (machineTraits(machineType).isStackRoutable)
+    {
+        dispatchNoteThroughStack(static_cast<std::size_t>(machineId), note, velocity,
+                                 durationTicks, 0, false, gateSampler);
+        return;
+    }
+    enqueueMachineMidi(midiToSend, static_cast<unsigned short>(getStackMidiOutputChannel(static_cast<std::size_t>(machineId))),
+                       note, velocity, durationTicks);
 }
 void TrackerMainProcessor::beginHeldNote(CommandType machineType, unsigned short machineId,
                                          unsigned short note, unsigned short velocity)

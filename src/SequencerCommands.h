@@ -38,6 +38,8 @@ struct SequenceReadOnly {
     bool controlMode = false;
     /** Per-trigger playback offset; stored sequence rows remain unchanged. */
     int noteTransposeSemitones = 0;
+    /** Live performance gate.  It deliberately does not alter stored rows. */
+    enum class NoteLengthMode : unsigned char { off, half, quarter } noteLengthMode = NoteLengthMode::off;
 };
 
 /** Commands are the main things that are executed by the sequencer when triggering a step 

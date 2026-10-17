@@ -626,6 +626,11 @@ void TrackerMainUI::prepareSequenceView()
               cell.isSoloChannel = true;
       }
   }
+  const auto noteLengthModes = ui.getProperty("sequenceNoteLengthModes", juce::var());
+  if (noteLengthModes.isArray())
+      for (int i = 0; i < noteLengthModes.getArray()->size() && static_cast<std::size_t>(i) < boxes.size(); ++i)
+          for (auto& cell : boxes[static_cast<std::size_t>(i)])
+              cell.noteLengthMode = juce::jlimit(0, 2, static_cast<int>(noteLengthModes.getArray()->getReference(i)));
   std::vector<int> sequenceMachineIds;
   const auto machineIds = ui.getProperty("sequenceMachineIds", juce::var());
   if (machineIds.isArray())
@@ -665,6 +670,7 @@ void TrackerMainUI::prepareSequenceView()
           header.isControlModeSequence = source.isControlModeSequence;
           header.isSoloChannel = source.isSoloChannel;
           header.isMutedChannel = source.isMutedChannel;
+          header.noteLengthMode = source.noteLengthMode;
       }
   }
   updateCellStates(boxes, rowsInUI, 6, &scopeHeaders);
@@ -1632,7 +1638,7 @@ void TrackerMainUI::prepareHelpView()
         {"BACK", "RESET/EXIT", "TAB", "STEP", "[ ]", "ADJUST"},
         {"+/-", "ROWS", "S+C", "CLOCK", "R", "REWIND"},
         {"0-7", "PAGES", "S+I", "INSERT", "S+K", "DELETE"},
-        {"S+H", "HELP", "S+UP/DN", "SELECT", "C+C", "COPY"},
+        {"C+H", "HELP", "S+H", "SHORT", "C+C", "COPY"},
         {"C+V", "PASTE", "C+=", "SHIFT +", "C+-", "SHIFT -"},
         {"S+S", "SOLO", "S+M", "MUTE", "S+E/G", "XPL/IMP"},
         {"Z X C", "CONTROL", "Q-P", "CHORDS", ", .", "OCTAVE"}
@@ -1858,13 +1864,20 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
                 : (box.useCustomGlowColour ? juce::Colour(box.customGlowArgb) : palette.gridPlayhead);
             cell.glow = glowValue;
             cell.depthScale = samplerViewActive ? getSamplerCellDepthScale(box) : getCellDepthScale(box);
+            const bool shortened = box.noteLengthMode != 0;
+            const auto shortenColour = box.noteLengthMode == 1 ? juce::Colour(0xff36dd68) : juce::Colour(0xffb96cff);
+            const bool outerPriority = box.isSoloChannel || box.isMutedChannel;
             cell.drawOutline = samplerViewActive ? box.isSelected
-                : (box.hasNote || box.isSoloChannel || box.isMutedChannel);
+                : (box.hasNote || outerPriority || shortened);
             cell.outlineColor = box.isSoloChannel ? juce::Colours::yellow
                 : box.isMutedChannel ? juce::Colours::red
+                : shortened ? shortenColour
                 : (box.isControlModeSequence && box.hasNote)
                     ? palette.sequenceControlModeOutline : palette.gridNote;
             cell.outlineLineWidth = (box.isSoloChannel || box.isMutedChannel) ? 5.0f : 3.0f;
+            cell.drawInsetOutline = !samplerViewActive && shortened && outerPriority;
+            cell.insetOutlineColor = shortenColour;
+            cell.insetOutlineLineWidth = 2.0f;
 
             cell.fillFraction = (!samplerViewActive && box.hasValueScale && !box.isDisabled)
                 ? box.valueNorm

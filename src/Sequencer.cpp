@@ -80,6 +80,8 @@ double Step::getDataAt(std::size_t row, std::size_t col) const
 {
   // this lock allows multiple concorrent reads
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  if (row >= data.size() || col >= data[row].size())
+    return 0.0;
   return data[row][col];
 }
 std::size_t Step::howManyDataRows() const 
@@ -90,7 +92,7 @@ std::size_t Step::howManyDataRows() const
 std::size_t Step::howManyDataCols() const
 {
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
-  return data[0].size();
+  return data.empty() ? 0 : data[0].size();
 }
 
 // std::vector<std::vector<double>>* Step::getDataDirect()
@@ -103,6 +105,8 @@ std::string Step::toStringFlat(const SequenceReadOnly* sequenceContext) const
   if (sequenceContext == nullptr)
     return "----";
 
+  if (data.empty() || data.front().size() <= Step::lengthInd)
+    return "----";
   const double commandValue = this->data[0][Step::cmdInd];
   const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, commandValue)));
   const auto traits = machineTraits(command);
@@ -243,7 +247,8 @@ void Step::trigger(std::size_t row, const SequenceReadOnly* sequenceContext)
     { // only trigger one row
       // note that the command decides if 
       // the data is valid and therefore, if it should do anything, not the step 
-      CommandProcessor::executeCommand(data[row][Step::cmdInd], &data[row], sequenceContext);
+      if (data[row].size() > Step::lengthInd)
+        CommandProcessor::executeCommand(data[row][Step::cmdInd], &data[row], sequenceContext);
     }
     else
     {
@@ -251,7 +256,8 @@ void Step::trigger(std::size_t row, const SequenceReadOnly* sequenceContext)
       {
       // note that the command decides if 
       // the data is valid and therefore, if it should do anything, not the step 
-        CommandProcessor::executeCommand(dataRow[Step::cmdInd], &dataRow, sequenceContext);
+        if (dataRow.size() > Step::lengthInd)
+          CommandProcessor::executeCommand(dataRow[Step::cmdInd], &dataRow, sequenceContext);
       }
     }
   }
@@ -881,7 +887,7 @@ void Sequence::selectPositions(ReadHeadState& head)
 
 SequenceReadOnly Sequence::getReadOnlyContext() const
 {
-  return SequenceReadOnly{machineType, machineId, controlMode, 0};
+  return SequenceReadOnly{machineType, machineId, controlMode, 0, noteLengthMode};
 }
 
 void Sequence::setTranspose(double _transpose)
@@ -1043,6 +1049,19 @@ void Sequence::setControlMode(bool enabled)
 void Sequence::toggleControlMode()
 {
   controlMode = !controlMode;
+}
+
+SequenceReadOnly::NoteLengthMode Sequence::getNoteLengthMode() const noexcept { return noteLengthMode; }
+void Sequence::setNoteLengthMode(SequenceReadOnly::NoteLengthMode mode) noexcept
+{
+  noteLengthMode = mode == SequenceReadOnly::NoteLengthMode::half || mode == SequenceReadOnly::NoteLengthMode::quarter
+      ? mode : SequenceReadOnly::NoteLengthMode::off;
+}
+void Sequence::cycleNoteLengthMode() noexcept
+{
+  noteLengthMode = noteLengthMode == SequenceReadOnly::NoteLengthMode::off ? SequenceReadOnly::NoteLengthMode::half
+      : noteLengthMode == SequenceReadOnly::NoteLengthMode::half ? SequenceReadOnly::NoteLengthMode::quarter
+      : SequenceReadOnly::NoteLengthMode::off;
 }
 
 void Sequence::rewindAtNextZero()
@@ -1571,6 +1590,14 @@ void Sequencer::toggleSequenceControlMode(std::size_t sequence)
   if (!assertSequence(sequence))
     return;
   sequences[sequence].toggleControlMode();
+  stringUpdateRequested = true;
+}
+
+void Sequencer::cycleSequenceNoteLengthMode(std::size_t sequence)
+{
+  std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+  if (!assertSequence(sequence)) return;
+  sequences[sequence].cycleNoteLengthMode();
   stringUpdateRequested = true;
 }
 

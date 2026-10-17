@@ -138,6 +138,7 @@ class SequencerAbs{
     virtual bool isSequenceControlMode(std::size_t) const { return false; }
     virtual void setSequenceControlMode(std::size_t, bool) {}
     virtual void toggleSequenceControlMode(std::size_t) {}
+    virtual void cycleSequenceNoteLengthMode(std::size_t) {}
     virtual void toggleStepActive(std::size_t sequence, std::size_t step) = 0;
     virtual bool stepHasTriggerableEvent(std::size_t, std::size_t) const { return false; }
 };
@@ -291,6 +292,7 @@ public:
   void toggleArmCurrentSequence();
   void toggleMuteCurrentSequence();
   void toggleSoloCurrentSequence();
+  void cycleNoteLengthCurrentSequence();
   void toggleMuteCurrentMixerStack();
   void toggleSoloCurrentMixerStack();
   void explodeCurrentSequence();

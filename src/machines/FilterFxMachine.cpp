@@ -176,7 +176,7 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
             }
             // A zero duration is the held computer-keyboard gate. Its
             // matching explicit note-off supplies the release event.
-            if (note.durationTicks == 0)
+            if (note.durationTicks <= 0.0)
             {
                 planEvents.push_back({ on, true });
                 continue;

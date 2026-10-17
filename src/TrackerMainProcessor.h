@@ -61,6 +61,8 @@ public:
     // the MachineUtils interface 
     void allNotesOff() override;
     void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
+    void sendTimedMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note,
+                                   unsigned short velocity, double durationTicks, bool gateSampler) override;
     void beginHeldNote(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity) override;
     void endHeldNote(CommandType machineType, unsigned short machineId, unsigned short note) override;
     std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const override;
@@ -300,7 +302,7 @@ private:
         std::size_t stackIndex = 0;
         unsigned short note = 0;
         unsigned short velocity = 0;
-        unsigned short durationTicks = 0;
+        double durationTicks = 0.0;
         bool isNoteOff = false;
         int samplePosition = 0;
     };
@@ -546,16 +548,16 @@ private:
                             unsigned short channel,
                             unsigned short outNote,
                             unsigned short outVelocity,
-                            unsigned short outDurTicks);
+                            double outDurTicks);
     void enqueueStackSamplerMidi(std::size_t stackIndex,
                                  unsigned short outNote,
                                  unsigned short outVelocity,
-                                 unsigned short outDurTicks);
+                                 double outDurTicks, bool gateAtDuration = false);
     void enqueueStackNote(NoteEventQueue& queue,
                           std::size_t stackIndex,
                           unsigned short note,
                           unsigned short velocity,
-                          unsigned short durInTicks,
+                          double durInTicks,
                           bool isNoteOff = false);
     /** Delivers queued note events that fall inside the current block and keeps the
         per-stack delivery vector sorted for the machine's cursor walk. */
@@ -569,9 +571,10 @@ private:
     void dispatchNoteThroughStack(std::size_t stackIndex,
                                   unsigned short note,
                                   unsigned short velocity,
-                                  unsigned short durInTicks,
+                                  double durInTicks,
                                   std::size_t startSlotIndex = 0,
-                                  bool held = false);
+                                  bool held = false,
+                                  bool gateSampler = false);
     void allNotesOffForStack(std::size_t stackIndex);
     //==============================================================================
     juce::OSCReceiver oscReceiver;

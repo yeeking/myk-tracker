@@ -37,6 +37,9 @@ struct TestMachines final : MachineUtilsAbs
     void allNotesOff() override {}
     void sendMessageToMachine(CommandType, unsigned short, unsigned short note,
                               unsigned short, unsigned short) override { notes.push_back(note); }
+    void sendTimedMessageToMachine(CommandType, unsigned short, unsigned short note,
+                                   unsigned short, double duration, bool gateSampler) override
+    { notes.push_back(note); timedDurations.push_back(duration); samplerGates.push_back(gateSampler); }
     void beginHeldNote(CommandType, unsigned short, unsigned short note,
                        unsigned short) override { notes.push_back(note); heldNotes.push_back(note); }
     void endHeldNote(CommandType, unsigned short, unsigned short note) override
@@ -53,6 +56,8 @@ struct TestMachines final : MachineUtilsAbs
     std::vector<unsigned short> releasedNotes;
     std::vector<std::pair<unsigned short, bool>> auxToggles;
     std::vector<std::pair<unsigned short, double>> cutoffs;
+    std::vector<double> timedDurations;
+    std::vector<bool> samplerGates;
 };
 
 struct TestMachineHost final : MachineHost
@@ -231,6 +236,7 @@ int main()
     require(machines.notes == std::vector<unsigned short>{60}, "linear head triggers the first step");
     for (int tick = 0; tick < 4; ++tick) sequence.tick(true);
     require(machines.notes.back() == 61, "linear TPS advances at the configured interval");
+
 
     auto head = sequence.getReadHeadConfig(0);
     head.ticksPerStep = 1;
@@ -865,6 +871,18 @@ int main()
     audioConfigEditor.click();
     require(audioConfigHost.applies == 1, "disabled audio apply does not activate");
 
+    Sequence performanceGateSequence(nullptr, 1, 0);
+    performanceGateSequence.setStepData(0, {{ static_cast<double>(CommandType::MidiNote), 64.0, 100.0, 8.0 }});
+    performanceGateSequence.setNoteLengthMode(SequenceReadOnly::NoteLengthMode::half);
+    machines.timedDurations.clear(); machines.samplerGates.clear();
+    performanceGateSequence.triggerStep(0, 0);
+    require(machines.timedDurations.size() == 1 && machines.timedDurations[0] == 0.5
+                && machines.samplerGates[0], "half performance gate uses fixed half D1 timing");
+    performanceGateSequence.setNoteLengthMode(SequenceReadOnly::NoteLengthMode::quarter);
+    performanceGateSequence.triggerStep(0, 0);
+    require(machines.timedDurations.back() == 0.25
+                && performanceGateSequence.getStepData(0)[0][Step::lengthInd] == 8.0,
+            "quarter performance gate preserves the stored duration");
     return 0;
 }
 

@@ -27,7 +27,7 @@ struct MachineNoteEvent
     /** MIDI velocity emitted by the machine. */
     unsigned short velocity = 0;
     /** Note duration in tracker ticks. */
-    unsigned short durationTicks = 0;
+    double durationTicks = 0.0;
 };
 
 /** A sequencer-scheduled note delivered for the current block. */
@@ -40,7 +40,7 @@ struct MachineScheduledNote
     /** MIDI velocity to trigger with. */
     unsigned short velocity = 0;
     /** Note duration in tracker ticks. */
-    unsigned short durationTicks = 0;
+    double durationTicks = 0.0;
     /** Explicit release for a held computer-keyboard audition. */
     bool isNoteOff = false;
 };

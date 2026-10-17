@@ -826,7 +826,7 @@ void WavetableSynthMachine::configureVoiceForNote(Voice& voice, const MachineSch
     voice.triggerOrder = ++nextVoiceTriggerOrder;
     // A zero duration is reserved for computer-keyboard audition: its release
     // is delivered as an explicit note-off when the physical key is lifted.
-    voice.noteDurationSamples = event.durationTicks == 0
+    voice.noteDurationSamples = event.durationTicks <= 0.0
         ? std::numeric_limits<int>::max()
         : juce::jmax(1, static_cast<int>(std::lround(currentSampleRate
             * currentSecondsPerTick
