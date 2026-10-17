@@ -40,11 +40,6 @@ double getSecondsPerTickFromBpm(double bpm)
     return bpm > 0.0 ? (60.0 / bpm) / 8.0 : (60.0 / 120.0) / 8.0;
 }
 
-bool isAudioSourceType(CommandType type)
-{
-    return type == CommandType::Sampler || type == CommandType::WavetableSynth;
-}
-
 bool isAudioEffectType(CommandType type)
 {
     return machineTraits(type).isAudioEffect;
@@ -189,25 +184,17 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
         if (!slot.enabled)
             continue;
 
-        switch (slot.type)
-        {
-            case CommandType::Sampler:
-                samplerActive = true;
-                hasAudioPath = true;
-                break;
-            case CommandType::WavetableSynth:
-                wavetableActive = true;
-                hasAudioPath = true;
-                break;
-            case CommandType::FilterFx:
-                filterActive = true;
-                hasAudioPath = true;
-                break;
-            default:
-                if (isAudioEffectType(slot.type))
-                    hasAudioPath = true;
-                break;
-        }
+        if (slot.type == CommandType::Sampler)
+            samplerActive = true;
+        else if (slot.type == CommandType::WavetableSynth)
+            wavetableActive = true;
+        else if (slot.type == CommandType::FilterFx)
+            filterActive = true;
+
+        if (slot.type == CommandType::Sampler
+            || slot.type == CommandType::WavetableSynth
+            || isAudioEffectType(slot.type))
+            hasAudioPath = true;
     }
 
     stack.audioProcessingActive = hasAudioPath;
@@ -285,6 +272,8 @@ void TrackerMainProcessor::resetSongState()
 {
     sequenceSets.clear();
     sequenceSets.push_back(createDefaultSequenceSet());
+    sequenceSetBpms.assign(1, 120.0);
+    setBPM(120.0);
     sequenceSetMachineEnableStates.clear();
     songRows.clear();
     songRows.push_back({ 0, 16 });
@@ -490,6 +479,8 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
     auto* previousPlaybackSequencer = getPlaybackSequencerInternal();
     const bool wasPlaying = previousPlaybackSequencer != nullptr && previousPlaybackSequencer->isPlaying();
     const auto targetIndex = std::min(index, sequenceSets.size() - 1);
+    if (targetIndex < sequenceSetBpms.size())
+        setBPM(sequenceSetBpms[targetIndex]);
     const bool sameSequenceSet = previousPlaybackSequencer != nullptr && targetIndex == activePlaybackSequenceSetIndex;
     if (sameSequenceSet)
     {
@@ -765,8 +756,10 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                 enqueueStackNote(filterEvents, stackIndex, note, velocity, durInTicks);
                 break;
             case CommandType::Log:
-                break;
-            default:
+            case CommandType::ToggleAux1:
+            case CommandType::ToggleAux2:
+            case CommandType::FilterCutoff:
+            case CommandType::ModulationMatrix:
                 break;
         }
     }
@@ -988,15 +981,23 @@ void TrackerMainProcessor::initialiseOsc()
 
     oscReceiverReady = oscReceiver.connect(oscListenPort);
     if (!oscReceiverReady)
+    {
         DBG("OSC receiver failed to listen on port " << oscListenPort);
+    }
     else
+    {
         DBG("OSC receiver listening on port " << oscListenPort);
+    }
 
     oscSenderReady = oscSender.connect(lcdDisplayHost, lcdDisplayPort);
     if (!oscSenderReady)
+    {
         DBG("OSC sender failed to connect to " << lcdDisplayHost << ":" << lcdDisplayPort);
+    }
     else
+    {
         DBG("OSC sender connected to " << lcdDisplayHost << ":" << lcdDisplayPort);
+    }
 }
 
 void TrackerMainProcessor::initialiseMachines()
@@ -1164,7 +1165,9 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload(bool refreshMachineC
                 return "SET " + juce::String(static_cast<int>(songRows[rowIndex].sequenceSetId + 1));
             if (songCol == 1)
                 return "BEAT " + juce::String(songRows[rowIndex].beatCount);
-            if (songCol == 3)
+            if (songCol == 2)
+                return "BPM " + juce::String(getSongRowBpm(rowIndex));
+            if (songCol == 4)
                 return "DEL";
             return "EDIT";
         }
@@ -1229,6 +1232,14 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload(bool refreshMachineC
             if (seqEditor.getMixerRow() == 1) return isStackMuted(*stack) ? "MUTE ON" : "MUTE OFF";
             if (seqEditor.getMixerRow() == 2) return isStackSolo(*stack) ? "SOLO ON" : "SOLO OFF";
             return "GAIN " + juce::String(getStackGainDb(*stack), 1);
+        }
+        case SequencerEditorMode::audioConfig:
+        {
+            const auto& cells = seqEditor.getAudioConfigCells();
+            for (const auto& column : cells)
+                for (const auto& cell : column)
+                    if (cell.isSelected) return juce::String(cell.text);
+            break;
         }
         case SequencerEditorMode::help:
             return "HELP";
@@ -1394,6 +1405,7 @@ void TrackerMainProcessor::copyStackScopes(const std::vector<std::size_t>& stack
 //==============================================================================
 void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    seqEditor.setHostAudioFormat(sampleRate, samplesPerBlock);
     stopMasterRecording();
     const double activeSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     const double activeBpm = getBPM();
@@ -1517,6 +1529,8 @@ bool TrackerMainProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 
 void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
+    PerformanceMetrics::Scope callbackTiming(performanceMetrics, PerformanceMetrics::Stage::callback);
+    PerformanceMetrics::Scope sequencingTiming(performanceMetrics, PerformanceMetrics::Stage::sequencing);
     processing.store(true, std::memory_order_release);
     std::lock_guard<std::mutex> audioLock(audioMutex);
     juce::ScopedNoDenormals noDenormals;
@@ -1550,12 +1564,17 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     if (!useInternalClock)
     {
         #if JUCE_MAJOR_VERSION >= 5
-        juce::AudioPlayHead::CurrentPositionInfo posInfo;
-        auto* playHead = getPlayHead();
-        if (playHead != nullptr && playHead->getCurrentPosition(posInfo)
-            && posInfo.bpm > 0.0 && posInfo.ppqPosition >= 0.0)
+        auto* hostPlayHead = getPlayHead();
+        const auto position = hostPlayHead != nullptr ? hostPlayHead->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>();
+        if (position.hasValue()
+            && position->getBpm().hasValue()
+            && position->getPpqPosition().hasValue()
+            && *position->getBpm() > 0.0
+            && *position->getPpqPosition() >= 0.0)
         {
-            const bool hostPlaying = posInfo.isPlaying;
+            const double hostBpm = *position->getBpm();
+            const double hostPpqPosition = *position->getPpqPosition();
+            const bool hostPlaying = position->getIsPlaying();
             if (hostPlaying != hostWasPlaying)
             {
                 pendingTransportQuarterBeatReset = hostPlaying;
@@ -1576,22 +1595,22 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 usingHostClock = true;
                 if (playbackSequencer != nullptr)
                     playbackSequencer->play();
-                if (posInfo.bpm != getBPM())
-                    setBPM(posInfo.bpm);
+                if (std::abs(hostBpm - getBPM()) > std::numeric_limits<double>::epsilon())
+                    setBPM(hostBpm);
 
                 const double ticksPerQuarter = 8.0;
-                const double samplesPerTickDouble = getSampleRate() * (60.0 / posInfo.bpm) / ticksPerQuarter;
-                double tickPosition = posInfo.ppqPosition * ticksPerQuarter;
+                const double samplesPerTickDouble = getSampleRate() * (60.0 / hostBpm) / ticksPerQuarter;
+                double tickPosition = hostPpqPosition * ticksPerQuarter;
                 double tickPhase = std::fmod(tickPosition, 1.0);
                 if (tickPhase < 0.0)
                     tickPhase += 1.0;
 
-                if (!hostPpqValid || posInfo.ppqPosition < lastHostPpqPosition)
+                if (!hostPpqValid || hostPpqPosition < lastHostPpqPosition)
                 {
                     // Transport restarted or jumped; re-sync tick phase from the new PPQ position.
                     hostPpqValid = true;
                 }
-                lastHostPpqPosition = posInfo.ppqPosition;
+                lastHostPpqPosition = hostPpqPosition;
 
                 const double phaseEpsilon = 1.0e-6;
                 long long tickIndex = static_cast<long long>(std::floor(tickPosition));
@@ -1673,8 +1692,6 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             if ( metadata.samplePosition >= blockStartSample && 
                 metadata.samplePosition < blockEndSample) {
                 if (metadata.getMessage().isNoteOn()){
-                    const int delta = metadata.samplePosition - lastSendOnAt; 
-
                     // DBG("On Event delta: " << delta << "  blockStart " << blockStartSample << " at " << metadata.samplePosition - blockStartSample);
                     lastSendOnAt = metadata.samplePosition;
                 }
@@ -1746,6 +1763,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     distributeNoteEvents(filterEvents, blockStartSample, blockEndSample, &MachineStack::filterBlockNotes);
     distributeNoteEvents(modulationEvents, blockStartSample, blockEndSample, &MachineStack::modulationBlockNotes);
 
+    sequencingTiming.stop();
+
     if (auxBus1.inputBuffer.getNumChannels() != 2 || auxBus1.inputBuffer.getNumSamples() != buffer.getNumSamples())
         auxBus1.inputBuffer.setSize(2, buffer.getNumSamples(), false, false, true);
     auxBus1.inputBuffer.clear();
@@ -1779,6 +1798,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
             if (stack->modulationMatrix != nullptr)
             {
+                PerformanceMetrics::Scope timing(performanceMetrics, PerformanceMetrics::Stage::modulation);
                 stack->modulationMatrix->processModulationBlock(buffer.getNumSamples(), stack->modulationEnabled,
                     sequencerPlaying, modulationClockTicks.data(), modulationClockTickCount, stack->modulationBlockNotes);
                 const auto* modulation = &stack->modulationMatrix->getBlockView();
@@ -1788,16 +1808,23 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             }
 
             if (stack->samplerProcessingActive && stack->sampler != nullptr)
+            {
+                PerformanceMetrics::Scope timing(performanceMetrics, PerformanceMetrics::Stage::sampler);
                 stack->sampler->processBlock(stackBuffer, stack->samplerMidiBuffer);
+            }
             if (stack->wavetableProcessingActive && stack->wavetableSynth != nullptr)
             {
+                PerformanceMetrics::Scope timing(performanceMetrics, PerformanceMetrics::Stage::wavetable);
                 stack->wavetableSynth->scheduleBlockNotes(stack->wavetableBlockNotes);
                 stack->wavetableSynth->processBlock(stackBuffer, emptyMidiBuffer);
             }
             // The filter's audio runs through the effect slot loop below; this
             // only hands over the notes that retrigger its cutoff envelope.
             if (stack->filterProcessingActive && stack->filterFx != nullptr)
+            {
+                PerformanceMetrics::Scope timing(performanceMetrics, PerformanceMetrics::Stage::filter);
                 stack->filterFx->scheduleBlockNotes(stack->filterBlockNotes);
+            }
 
             for (auto& slot : stack->slots)
             {
@@ -1829,12 +1856,17 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 const float returnGainLinear = slot.returnGain.get(slot.returnLevelDb);
                 if (auto* effect = getAudioEffectForStackType(*stack, type))
                 {
+                    const auto effectStage = type == CommandType::DistortionFx ? PerformanceMetrics::Stage::distortion
+                        : type == CommandType::DelayFx ? PerformanceMetrics::Stage::delay
+                        : type == CommandType::ChannelStripFx ? PerformanceMetrics::Stage::channel
+                        : PerformanceMetrics::Stage::filter;
+                    PerformanceMetrics::Scope timing(performanceMetrics, effectStage);
                     if (!slotEnabled && type == CommandType::DelayFx)
                     {
                         auto& delayTailBuffer = stack->delayTailBuffer;
                         delayTailBuffer.clear();
                         effect->processAudioBuffer(delayTailBuffer);
-                        if (returnGainLinear != 1.0f)
+                        if (std::abs(returnGainLinear - 1.0f) > std::numeric_limits<float>::epsilon())
                             delayTailBuffer.applyGain(returnGainLinear);
                         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
                             stackBuffer.addFrom(channel, 0, delayTailBuffer, channel, 0, delayTailBuffer.getNumSamples());
@@ -1845,16 +1877,17 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                         continue;
 
                     const float sendGainLinear = slot.sendGain.get(slot.sendLevelDb);
-                    if (sendGainLinear != 1.0f)
+                    if (std::abs(sendGainLinear - 1.0f) > std::numeric_limits<float>::epsilon())
                         stackBuffer.applyGain(sendGainLinear);
 
                     effect->processAudioBuffer(stackBuffer);
 
-                    if (returnGainLinear != 1.0f)
+                    if (std::abs(returnGainLinear - 1.0f) > std::numeric_limits<float>::epsilon())
                         stackBuffer.applyGain(returnGainLinear);
                 }
             }
 
+            PerformanceMetrics::Scope scopeMeterTiming(performanceMetrics, PerformanceMetrics::Stage::scopeMeter);
             const float stackGainLinear = stack->gain.get(stack->gainDb);
             stackBuffer.applyGain(stackGainLinear);
 
@@ -1896,8 +1929,9 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     }
 
-    auto processAuxReturn = [&buffer, this](SharedAuxBus& auxBus)
+    auto processAuxReturn = [&buffer, this](SharedAuxBus& auxBus, PerformanceMetrics::Stage stage)
     {
+        PerformanceMetrics::Scope timing(performanceMetrics, stage);
         if (auxBus.machine == nullptr
             || auxBus.inputBuffer.getNumChannels() == 0
             || auxBus.inputBuffer.getNumSamples() != buffer.getNumSamples())
@@ -1906,7 +1940,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
 
         auxBus.machine->processAudioBuffer(auxBus.inputBuffer);
-        if (!auxBus.muted && auxBus.gainLinear != 1.0f)
+        if (!auxBus.muted && std::abs(auxBus.gainLinear - 1.0f) > std::numeric_limits<float>::epsilon())
             auxBus.inputBuffer.applyGain(auxBus.gainLinear);
 
         for (std::size_t channel = 0; channel < auxBus.meterLevels.size(); ++channel)
@@ -1925,9 +1959,10 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 buffer.addFrom(channel, 0, auxBus.inputBuffer, channel, 0, auxBus.inputBuffer.getNumSamples());
     };
 
-    processAuxReturn(auxBus1);
-    processAuxReturn(auxBus2);
+    processAuxReturn(auxBus1, PerformanceMetrics::Stage::aux1);
+    processAuxReturn(auxBus2, PerformanceMetrics::Stage::aux2);
 
+    PerformanceMetrics::Scope masterTiming(performanceMetrics, PerformanceMetrics::Stage::master);
     const float outputGainLinear = masterGainLinear;
     if (std::abs(masterGainDb) > 0.0001f)
         buffer.applyGain(outputGainLinear);
@@ -2057,6 +2092,9 @@ juce::String TrackerMainProcessor::getUiModeString() const
             break;
         case SequencerEditorMode::mixer:
             modeStr = "mixer";
+            break;
+        case SequencerEditorMode::audioConfig:
+            modeStr = "audio";
             break;
         case SequencerEditorMode::help:
             modeStr = "help";
@@ -2206,7 +2244,21 @@ juce::var TrackerMainProcessor::getUiStateForCurrentPage()
         case SequencerEditorMode::configuringSequence:
             state->setProperty("sequenceConfigs", stringGridToVar(viewedSequencer->getSequenceConfigsAsGridOfStrings(seqEditor.getCurrentConfigHead())));
             break;
-        default:
+        case SequencerEditorMode::arrangingSong:
+        case SequencerEditorMode::machineConfig:
+        case SequencerEditorMode::mixer:
+            break;
+        case SequencerEditorMode::audioConfig:
+        {
+            const auto& cells = seqEditor.getAudioConfigCells();
+            std::vector<std::vector<std::string>> grid(cells.size());
+            for (std::size_t column = 0; column < cells.size(); ++column)
+                for (const auto& cell : cells[column]) grid[column].push_back(cell.text);
+            state->setProperty("audioConfigGrid", stringGridToVar(grid));
+            break;
+        }
+        case SequencerEditorMode::help:
+        case SequencerEditorMode::resetConfirmation:
             break;
     }
     return state.get();
@@ -2325,10 +2377,10 @@ void TrackerMainProcessor::restoreSingleSequencer(Sequencer& target, const juce:
         double machineId = static_cast<double>(seqObj.getProperty("machineId", seq->getMachineId()));
         if (machineId >= static_cast<double>(kMachineStackCount))
             machineId = std::fmod(machineId, static_cast<double>(kMachineStackCount));
-        double machineType = static_cast<double>(seqObj.getProperty("machineType", seq->getMachineType()));
-        if (machineType == static_cast<double>(CommandType::LegacyArpeggiator)
-            || machineType == static_cast<double>(CommandType::LegacyPolyArpeggiator))
-            machineType = static_cast<double>(CommandType::MidiNote);
+        int machineType = static_cast<int>(seqObj.getProperty("machineType", seq->getMachineType()));
+        if (machineType == static_cast<int>(CommandType::LegacyArpeggiator)
+            || machineType == static_cast<int>(CommandType::LegacyPolyArpeggiator))
+            machineType = static_cast<int>(CommandType::MidiNote);
 
         const auto stepsVar = seqObj.getProperty("steps", juce::var());
         if (stepsVar.isArray())
@@ -2421,6 +2473,10 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         if (sequenceSet != nullptr)
             sequenceSetStates.add(serializeSingleSequencer(*sequenceSet));
     root->setProperty("sequenceSets", sequenceSetStates);
+    juce::Array<juce::var> sequenceSetBpmsVar;
+    for (std::size_t setIndex = 0; setIndex < sequenceSets.size(); ++setIndex)
+        sequenceSetBpmsVar.add(setIndex < sequenceSetBpms.size() ? sequenceSetBpms[setIndex] : getBPM());
+    root->setProperty("sequenceSetBpms", sequenceSetBpmsVar);
 
     juce::Array<juce::var> machineEnableStateSets;
     for (std::size_t setIndex = 0; setIndex < sequenceSets.size(); ++setIndex)
@@ -2591,6 +2647,21 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
             restoreSingleSequencer(*sequenceSets.front(), legacySeqVar);
     }
 
+    // Per-set tempo is additive state. Older sessions had one global tempo,
+    // so each restored set deliberately inherits that saved value.
+    sequenceSetBpms.assign(sequenceSets.size(), juce::jlimit(1.0, 999.0, restoredBpm));
+    const auto sequenceSetBpmsVar = stateVar.getProperty("sequenceSetBpms", juce::var());
+    if (sequenceSetBpmsVar.isArray())
+    {
+        const auto restoredCount = std::min(sequenceSetBpms.size(), static_cast<std::size_t>(sequenceSetBpmsVar.getArray()->size()));
+        for (std::size_t setIndex = 0; setIndex < restoredCount; ++setIndex)
+        {
+            const double restoredSetBpm = static_cast<double>((*sequenceSetBpmsVar.getArray())[static_cast<int>(setIndex)]);
+            if (std::isfinite(restoredSetBpm))
+                sequenceSetBpms[setIndex] = juce::jlimit(1.0, 999.0, restoredSetBpm);
+        }
+    }
+
     // The property was added after sequence sets already existed in saved
     // sessions.  Empty states are normalised after stack restore below, which
     // makes those older sessions inherit their saved global slot state.
@@ -2713,6 +2784,8 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         seqEditor.setEditMode(SequencerEditorMode::configuringSequence);
     else if (mode == "machine")
         seqEditor.setEditMode(SequencerEditorMode::machineConfig);
+    else if (mode == "audio")
+        seqEditor.setEditMode(SequencerEditorMode::audioConfig);
     else
         seqEditor.setEditMode(SequencerEditorMode::selectingSeqAndStep);
 
@@ -2777,7 +2850,12 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
                                 case CommandType::ChannelStripFx: slot.enabled = static_cast<bool>(legacyStackState.getProperty("channelStripFxEnabled", slot.enabled)); break;
                                 case CommandType::AuxSend1Fx:
                                 case CommandType::AuxSend2Fx:
-                                default: break;
+                                case CommandType::FilterFx:
+                                case CommandType::ToggleAux1:
+                                case CommandType::ToggleAux2:
+                                case CommandType::FilterCutoff:
+                                case CommandType::ModulationMatrix:
+                                    break;
                             }
                             stack.slots.push_back(slot);
                         }
@@ -2811,6 +2889,8 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     }
 
     normaliseAllMachineEnableStates();
+    if (viewedSequenceSetIndex < sequenceSetBpms.size())
+        setBPM(sequenceSetBpms[viewedSequenceSetIndex]);
     applyMachineEnableStateForSequenceSet(viewedSequenceSetIndex);
 
     viewedSequencer->updateSeqStringGrid();
@@ -2866,7 +2946,11 @@ void TrackerMainProcessor::setViewedSequenceSetIndex(std::size_t index)
     // state until the next scheduled song boundary.  Browsing another set
     // must not change the sound early.
     if (!isSongPlaybackRunning())
+    {
+        if (viewedSequenceSetIndex < sequenceSetBpms.size())
+            setBPM(sequenceSetBpms[viewedSequenceSetIndex]);
         applyMachineEnableStateForSequenceSet(viewedSequenceSetIndex);
+    }
     bindViewedSequenceSetToEditor();
 }
 
@@ -2927,6 +3011,16 @@ int TrackerMainProcessor::getSongRowBeatCount(std::size_t row) const
     return songRows[row].beatCount;
 }
 
+int TrackerMainProcessor::getSongRowBpm(std::size_t row) const
+{
+    if (row >= songRows.size())
+        return static_cast<int>(std::lround(bpm.load(std::memory_order_relaxed)));
+    const auto setId = songRows[row].sequenceSetId;
+    return static_cast<int>(std::lround(setId < sequenceSetBpms.size()
+        ? sequenceSetBpms[setId]
+        : bpm.load(std::memory_order_relaxed)));
+}
+
 SongPlayMode TrackerMainProcessor::getSongPlayMode() const
 {
     return songPlayMode;
@@ -2957,6 +3051,7 @@ std::size_t TrackerMainProcessor::addSongRowByCloningViewedSet()
         ? sequenceSetMachineEnableStates[sourceSetIndex]
         : captureMachineEnableState();
     sequenceSets.push_back(std::move(newSequenceSet));
+    sequenceSetBpms.push_back(sourceSetIndex < sequenceSetBpms.size() ? sequenceSetBpms[sourceSetIndex] : getBPM());
     sequenceSetMachineEnableStates.push_back(sourceEnableState);
     const std::size_t newSetIndex = sequenceSets.size() - 1;
     songRows.push_back({ newSetIndex, 16 });
@@ -2984,6 +3079,8 @@ void TrackerMainProcessor::removeSongRow(std::size_t row)
     if (!setStillReferenced && removedSetId < sequenceSets.size() && sequenceSets.size() > 1)
     {
         sequenceSets.erase(sequenceSets.begin() + static_cast<std::ptrdiff_t>(removedSetId));
+        if (removedSetId < sequenceSetBpms.size())
+            sequenceSetBpms.erase(sequenceSetBpms.begin() + static_cast<std::ptrdiff_t>(removedSetId));
         if (removedSetId < sequenceSetMachineEnableStates.size())
             sequenceSetMachineEnableStates.erase(sequenceSetMachineEnableStates.begin() + static_cast<std::ptrdiff_t>(removedSetId));
         for (auto& songRow : songRows)
@@ -3043,6 +3140,25 @@ void TrackerMainProcessor::adjustSongRowBeatCount(std::size_t row, int direction
     songRows[row].beatCount = juce::jmax(1, songRows[row].beatCount + direction);
     if (row == currentSongRow)
         currentSongRowBeatCounter = juce::jmax(1, songRows[row].beatCount);
+}
+
+void TrackerMainProcessor::adjustSongRowBpm(std::size_t row, int direction)
+{
+    if (row >= songRows.size() || direction == 0)
+        return;
+    const auto setId = songRows[row].sequenceSetId;
+    if (setId >= sequenceSetBpms.size())
+        return;
+    setSequenceSetBpm(setId, sequenceSetBpms[setId] + static_cast<double>(direction));
+}
+
+void TrackerMainProcessor::setSequenceSetBpm(std::size_t setId, double newBpm)
+{
+    if (setId >= sequenceSetBpms.size() || !std::isfinite(newBpm))
+        return;
+    sequenceSetBpms[setId] = juce::jlimit(1.0, 999.0, newBpm);
+    if (setId == activePlaybackSequenceSetIndex && !isHostClockActive())
+        setBPM(sequenceSetBpms[setId]);
 }
 
 void TrackerMainProcessor::toggleSongPlayback()
@@ -3116,9 +3232,12 @@ std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
         case CommandType::AuxSend1Fx:
         case CommandType::AuxSend2Fx:
             return 1;
-        default:
+        case CommandType::ToggleAux1:
+        case CommandType::ToggleAux2:
+        case CommandType::FilterCutoff:
             return 0;
     }
+    return 0;
 }
 
 MachineInterface* TrackerMainProcessor::getMachine(CommandType type, std::size_t index)
@@ -3710,8 +3829,16 @@ MachineInterface* TrackerMainProcessor::getMachineForStackType(MachineStack& sta
         case CommandType::ModulationMatrix: return stack.modulationMatrix.get();
         case CommandType::AuxSend1Fx: return auxBus1.machine.get();
         case CommandType::AuxSend2Fx: return auxBus2.machine.get();
-        default: return nullptr;
+        case CommandType::MidiNote:
+        case CommandType::Log:
+        case CommandType::LegacyArpeggiator:
+        case CommandType::LegacyPolyArpeggiator:
+        case CommandType::ToggleAux1:
+        case CommandType::ToggleAux2:
+        case CommandType::FilterCutoff:
+            return nullptr;
     }
+    return nullptr;
 }
 
 // Read-only with respect to the stack and machines, so delegating from the
@@ -3734,11 +3861,16 @@ TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBusForType(Comma
         case CommandType::DistortionFx:
         case CommandType::DelayFx:
         case CommandType::ChannelStripFx:
+        case CommandType::FilterFx:
+        case CommandType::ToggleAux1:
+        case CommandType::ToggleAux2:
+        case CommandType::FilterCutoff:
+        case CommandType::ModulationMatrix:
             return nullptr;
         case CommandType::AuxSend1Fx: return &auxBus1;
         case CommandType::AuxSend2Fx: return &auxBus2;
-        default: return nullptr;
     }
+    return nullptr;
 }
 
 const TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBusForType(CommandType type) const
@@ -3754,11 +3886,16 @@ const TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBusForType
         case CommandType::DistortionFx:
         case CommandType::DelayFx:
         case CommandType::ChannelStripFx:
+        case CommandType::FilterFx:
+        case CommandType::ToggleAux1:
+        case CommandType::ToggleAux2:
+        case CommandType::FilterCutoff:
+        case CommandType::ModulationMatrix:
             return nullptr;
         case CommandType::AuxSend1Fx: return &auxBus1;
         case CommandType::AuxSend2Fx: return &auxBus2;
-        default: return nullptr;
     }
+    return nullptr;
 }
 
 TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBus(std::size_t auxIndex)

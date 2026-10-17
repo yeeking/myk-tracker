@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 #include "ModulationMatrixMachine.h"
+#include "MachineStateCodec.h"
 
 #include <cmath>
 
@@ -18,8 +19,9 @@ float sampleWave(ModulationMatrixMachine::Waveform waveform, double phase, float
         case ModulationMatrixMachine::Waveform::saw: return 2.0f * p - 1.0f;
         case ModulationMatrixMachine::Waveform::square: return p < 0.5f ? 1.0f : -1.0f;
         case ModulationMatrixMachine::Waveform::sampleHold: return held;
-        default: return 0.0f;
+        case ModulationMatrixMachine::Waveform::count: break;
     }
+    return 0.0f;
 }
 float rateForCoarse(int value) noexcept { return value <= 0 ? 0.0f : 0.1f * std::pow(10000.0f, static_cast<float>(value - 1) / 126.0f); }
 const std::array<float, 8193>& pitchTable()
@@ -184,7 +186,9 @@ void ModulationMatrixMachine::processModulationBlock(int samples, bool enabled, 
             {
                 const auto& route = compiledRoutes[d][static_cast<std::size_t>(routeIndex)];
                 const auto source = static_cast<ModulationSource>(route.source);
-                if (route.depth != 0.0f && isPulseSource(source) && sourceValue(source, destination, displayedValues, clocks, notePulse) != 0.0f)
+                if (std::abs(route.depth) > std::numeric_limits<float>::epsilon()
+                    && isPulseSource(source)
+                    && std::abs(sourceValue(source, destination, displayedValues, clocks, notePulse)) > std::numeric_limits<float>::epsilon())
                 { phases[static_cast<std::size_t>(target)] = 0.0; break; }
             }
         }
@@ -194,7 +198,7 @@ void ModulationMatrixMachine::processModulationBlock(int samples, bool enabled, 
         for (int i = 0; i < 4; ++i)
         {
             const float baseRate = baseRates[static_cast<std::size_t>(i)];
-            if (baseRate == 0.0f) continue;
+            if (baseRate <= 0.0f) continue;
             const auto destination = static_cast<ModulationDestination>(static_cast<int>(ModulationDestination::lfo1Frequency) + i);
             const double before = phases[static_cast<std::size_t>(i)];
             const double rate = juce::jlimit(0.1f, 1000.0f, baseRate * pitchRatio(routeSum(destination, lfos, clocks, notePulse, false), 4.0f));
@@ -230,7 +234,9 @@ std::vector<ModulationDestination> ModulationMatrixMachine::visibleDestinations(
     if (mask & 1u) { add(ModulationDestination::waveFrequency); add(ModulationDestination::waveSubFrequency); add(ModulationDestination::wavePosition); add(ModulationDestination::waveSubPosition); }
     if (mask & 2u) { add(ModulationDestination::filterCutoff); add(ModulationDestination::filterResonance); add(ModulationDestination::filterAttack); }
     add(ModulationDestination::lfo1Frequency); add(ModulationDestination::lfo2Frequency); add(ModulationDestination::lfo3Frequency); add(ModulationDestination::lfo4Frequency);
-    if (mask & 4u) add(ModulationDestination::samplerPosition); return result;
+    if (mask & 4u)
+        add(ModulationDestination::samplerPosition);
+    return result;
 }
 
 std::vector<std::vector<UIBox>> ModulationMatrixMachine::getUIBoxes(const MachineUiContext&)
@@ -298,7 +304,7 @@ std::vector<std::vector<UIBox>> ModulationMatrixMachine::getUIBoxes(const Machin
             cell.onAdjust = [this, source, destination, binary](int amount)
             { auto& value = depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)]; value = binary ? (amount > 0 ? 1 : 0) : juce::jlimit(-100, 100, value.load() + amount); touch(); };
             cell.onInsert = [this, source, destination, binary](double amount)
-            { depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)] = binary ? (amount == 0.0 ? 0 : 1) : juce::jlimit(-100, 100, static_cast<int>(std::lround(amount))); touch(); };
+            { depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)] = binary ? (std::abs(amount) <= std::numeric_limits<double>::epsilon() ? 0 : 1) : juce::jlimit(-100, 100, static_cast<int>(std::lround(amount))); touch(); };
         }
     }
     return boxes;
@@ -317,7 +323,13 @@ void ModulationMatrixMachine::getStateInformation(juce::MemoryBlock& out)
 }
 void ModulationMatrixMachine::setStateInformation(const void* data, int size)
 {
-    const auto parsed = juce::JSON::parse(juce::String::fromUTF8(static_cast<const char*>(data), size));
+    // Machine state arrives from persisted sessions and must not be assumed to
+    // be valid UTF-8.  Calling String::fromUTF8 directly here asserted in a
+    // Debug build when a corrupt or legacy blob was encountered.
+    const auto parsed = parseMachineStateJson(data, size);
+    if (parsed.isVoid())
+        return;
+
     const int version = static_cast<int>(parsed.getProperty("version", 0));
     for (auto& row : depths) for (auto& value : row) value = 0;
     const auto load = [&parsed](const char* name, auto& values, int low, int high) { if (const auto* array = parsed.getProperty(name, {}).getArray()) for (std::size_t i = 0; i < values.size() && i < static_cast<std::size_t>(array->size()); ++i) values[i] = juce::jlimit(low, high, static_cast<int>(array->getReference(static_cast<int>(i)))); };

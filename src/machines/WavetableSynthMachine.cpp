@@ -819,6 +819,7 @@ const char* WavetableSynthMachine::getWaveformName(WavetableSynthMachine::Wavefo
         case Waveform::add10: return "ADD10";
         case Waveform::eve5: return "EVE5";
         case Waveform::odd5: return "ODD5";
-        default: return "---";
+        case Waveform::count: break;
     }
+    return "---";
 }

@@ -244,7 +244,8 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
 
         const float cutoffMod = modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::filterCutoff, sample) : 0.0f;
         const double topOctaves = juce::jlimit(0.0, maxTopOctaves, baseTopOctaves + static_cast<double>(cutoffMod) * 4.0);
-        if (topOctaves != cachedTopOctaves || snap.amount != cachedAmount)
+        if (std::abs(topOctaves - cachedTopOctaves) > std::numeric_limits<double>::epsilon()
+            || std::abs(snap.amount - cachedAmount) > std::numeric_limits<float>::epsilon())
         {
             const double top = kMinCutoffHz * std::exp2(topOctaves);
             cachedLowEnd = kMinCutoffHz * std::pow(top / kMinCutoffHz, 1.0 - snap.amount);
@@ -254,7 +255,7 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
         }
         const float resonanceMod = modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::filterResonance, sample) : 0.0f;
         const float resonanceControl = juce::jlimit(0.0f, 1.0f, snap.resonance + resonanceMod);
-        if (resonanceControl != appliedResonance)
+        if (std::abs(resonanceControl - appliedResonance) > std::numeric_limits<float>::epsilon())
         {
             filter.setResonance(toFilterResonance(resonanceControl));
             appliedResonance = resonanceControl;
@@ -264,12 +265,12 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
         const double freq = cachedLowEnd * std::pow(cachedSweepRatio, t);
 
         const float cutoff = static_cast<float>(juce::jlimit(static_cast<double>(kMinCutoffHz), maxFreq, freq));
-        if (cutoff != appliedCutoff)
+        if (std::abs(cutoff - appliedCutoff) > std::numeric_limits<float>::epsilon())
         {
             filter.setCutoffFrequency(cutoff);
             appliedCutoff = cutoff;
         }
-        if (useSecondStage && cutoff != appliedSecondCutoff)
+        if (useSecondStage && std::abs(cutoff - appliedSecondCutoff) > std::numeric_limits<float>::epsilon())
         {
             secondFilter.setCutoffFrequency(cutoff);
             appliedSecondCutoff = cutoff;

@@ -44,6 +44,8 @@ public:
         juce::Colour color { PaletteDefaults::overlayText };
         juce::Colour glowColor { PaletteDefaults::overlayGlow };
         float glowStrength = 0.35f;
+        /** Compact page identifiers live in the fixed right-hand HUD strip. */
+        bool rightStrip = false;
     };
 
     /** A polyline drawn in the cell grid's own coordinate space.

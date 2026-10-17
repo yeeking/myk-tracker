@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "UIBox.h"
+#include "AudioConfiguration.h"
 
 // todo: remove this and just include the juce header instead 
 namespace juce
@@ -88,12 +89,14 @@ public:
   virtual void setSelectedSongRow(std::size_t row) = 0;
   virtual std::size_t getSongRowSequenceSetId(std::size_t row) const = 0;
   virtual int getSongRowBeatCount(std::size_t row) const = 0;
+  virtual int getSongRowBpm(std::size_t row) const = 0;
   virtual SongPlayMode getSongPlayMode() const = 0;
   virtual void setSongPlayMode(SongPlayMode mode) = 0;
   virtual std::size_t addSongRowByCloningViewedSet() = 0;
   virtual void removeSongRow(std::size_t row) = 0;
   virtual void adjustSongRowSequenceSetId(std::size_t row, int direction) = 0;
   virtual void adjustSongRowBeatCount(std::size_t row, int direction) = 0;
+  virtual void adjustSongRowBpm(std::size_t row, int direction) = 0;
   virtual void toggleSongPlayback() = 0;
   virtual void rewindSongTransport() = 0;
 };
@@ -145,6 +148,7 @@ enum class SequencerEditorMode
   editingStep,
   machineConfig,
   mixer,
+  audioConfig,
   help,
   resetConfirmation
 };
@@ -167,6 +171,7 @@ enum class SequencerEditorPage
   sequenceConfig,
   machine,
   mixer,
+  audioConfig,
   help,
   resetConfirmation
 };
@@ -201,8 +206,11 @@ public:
   SequencerEditorSubMode getEditSubMode() const;
   /** directly set major edit mode */
   void setEditMode(SequencerEditorMode mode);
+  void setAudioConfigurationHost(AudioConfigurationHost* host) { audioConfigurationHost = host; }
+  void setHostAudioFormat(double sampleRate, int blockSize) { hostSampleRate = sampleRate; hostBlockSize = blockSize; }
   void selectPage(SequencerEditorPage page);
   bool selectPageShortcut(int shortcut);
+  const std::vector<std::vector<UIBox>>& getAudioConfigCells();
     // -> enterMidiNoteData
     // -> enterNumberData
     // -> enterLengthData 
@@ -259,6 +267,7 @@ public:
   /** enter machine configuration page */
   void gotoMachineConfigPage();
   void gotoMixerPage();
+  void gotoAudioConfigPage();
   void gotoSequencePage();
   void gotoStepPage();
   void gotoResetConfirmationPage();
@@ -464,10 +473,18 @@ private:
   void moveMachineCursor(int deltaRow, int deltaCol);
   /** Move the cursor to the nearest cell it is allowed to rest on. */
   void snapMachineCursorToLandable();
+  void rebuildAudioConfigCells();
+  void moveAudioConfigCursor(int deltaRow, int deltaCol);
 
   SequencerAbs *sequencer;
   MachineHost *machineHost = nullptr;
   SongHost *songHost = nullptr;
+  AudioConfigurationHost* audioConfigurationHost = nullptr;
+  double hostSampleRate = 0.0;
+  int hostBlockSize = 0;
+  std::vector<std::vector<UIBox>> audioConfigCells;
+  std::size_t audioConfigCursorRow = 0;
+  std::size_t audioConfigCursorCol = 0;
   std::function<void()> resetConfirmationHandler;
   std::function<void()> quitConfirmationHandler;
   /** which sequence*/

@@ -1163,7 +1163,13 @@ void TrackerUIComponent::renderOverlayText(const juce::Matrix3D<float>& projecti
 
     const float baseDistance = 20.0f;
     const float cameraDistance = baseDistance / zoomCopy.zoomLevel;
-    const float viewX = -hudHalfWidth + padding;
+    // A compact page name belongs to a fixed right-side HUD strip; modal
+    // overlays retain the conventional left-aligned position for readability.
+    const float estimatedTextWidth = static_cast<float>(overlayCopy.text.size())
+        * textGeomParams.advance * scale;
+    const float viewX = overlayCopy.rightStrip
+        ? hudHalfWidth - padding - estimatedTextWidth
+        : -hudHalfWidth + padding;
     const float viewY = hudHalfHeight - padding - textHeightScaled;
     const float worldX = -dragCopy.panX + viewX;
     const float worldY = -dragCopy.panY + viewY;

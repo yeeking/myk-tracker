@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <memory>
+#include "../AudioConfiguration.h"
 
 class TrackerMcpServer;
 
@@ -11,7 +12,8 @@ namespace tracker::standalone
 class TrackerStandaloneProcessorPlayer;
 
 class StandalonePluginHolder : private juce::ChangeListener,
-                               private juce::Value::Listener
+                               private juce::Value::Listener,
+                               public AudioConfigurationHost
 {
 public:
     struct PluginInOuts
@@ -34,6 +36,15 @@ public:
     void savePluginState();
     bool getProcessorHasPotentialFeedbackLoop() const noexcept;
     juce::Value& getMuteInputValue() noexcept;
+    AudioConfigurationSnapshot getAudioConfigurationSnapshot() override;
+    void refreshAudioDevices() override;
+    void adjustAudioOutput(int direction) override;
+    void adjustAudioInput(int direction) override;
+    void adjustAudioSampleRate(int direction) override;
+    void adjustAudioBufferSize(int direction) override;
+    void applyAudioConfigurationAsync() override;
+    void revertAudioConfiguration() override;
+    void resetAudioPerformanceStats() override;
 
 private:
     void valueChanged(juce::Value& value) override;
@@ -51,6 +62,9 @@ private:
                            const juce::AudioDeviceManager::AudioDeviceSetup* preferredSetupOptions);
     void shutDownAudioDevices();
     void updateMidiOutput();
+    void initialiseAudioConfiguration();
+    void applyAudioConfiguration();
+    void cycleAudioChoice(juce::String& value, const juce::StringArray& choices, int direction);
     int getNumInputChannels() const;
     int getNumOutputChannels() const;
 
@@ -65,6 +79,15 @@ private:
     std::atomic<bool> muteInput { true };
     juce::Value shouldMuteInput;
     std::unique_ptr<juce::AudioDeviceManager::AudioDeviceSetup> options;
+    juce::AudioDeviceManager::AudioDeviceSetup pendingAudioSetup;
+    juce::StringArray availableAudioInputs, availableAudioOutputs;
+    juce::String audioConfigStatus;
+    bool audioConfigApplying = false;
+    int audioXrunBaseline = 0;
+    double audioPeakCpuUsage = 0.0;
+    double cachedAudioCpuUsage = 0.0;
+    int cachedAudioXruns = 0;
+    std::uint32_t lastAudioStatsUpdateMs = 0;
 
     inline static StandalonePluginHolder* currentInstance = nullptr;
 };

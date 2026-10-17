@@ -42,7 +42,7 @@ public:
         sustainLevel = juce::jlimit(0.0f, 1.0f, sanitizeFinite(parameters.sustain, 1.0f));
         releaseSeconds = sanitizePositive(parameters.release);
         const float newBend = juce::jlimit(-2.0f, 2.0f, sanitizeFinite(parameters.bend, 0.0f));
-        if (newBend != cachedBend)
+        if (std::abs(newBend - cachedBend) > std::numeric_limits<float>::epsilon())
             rebuildLut(newBend);
     }
 
@@ -150,7 +150,7 @@ public:
     {
         const float safeProgress = juce::jlimit(0.0f, 1.0f, sanitizeFinite(progress, 0.0f));
         const float safeBend = juce::jlimit(-2.0f, 2.0f, sanitizeFinite(bend, 0.0f));
-        if (safeBend == 0.0f)
+        if (std::abs(safeBend) <= std::numeric_limits<float>::epsilon())
             return safeProgress;
         const float exponent = 1.0f / (1.0f + 0.5f * safeBend);
         return static_cast<float>(std::pow(static_cast<double>(safeProgress), static_cast<double>(exponent)));
@@ -231,7 +231,7 @@ private:
         for (std::size_t i = 0; i < kLutSize; ++i)
         {
             const float progress = static_cast<float>(i) / static_cast<float>(kLutSize - 1);
-            lut[i] = (safeBend == 0.0f)
+            lut[i] = (std::abs(safeBend) <= std::numeric_limits<float>::epsilon())
                 ? progress
                 : static_cast<float>(std::pow(static_cast<double>(progress), static_cast<double>(exponent)));
         }
@@ -241,7 +241,7 @@ private:
     float shape(float progress) const
     {
         const float safeProgress = juce::jlimit(0.0f, 1.0f, sanitizeFinite(progress, 0.0f));
-        if (cachedBend == 0.0f)
+        if (std::abs(cachedBend) <= std::numeric_limits<float>::epsilon())
             return safeProgress;
         const float scaled = safeProgress * static_cast<float>(kLutSize - 1);
         const int index = juce::jmin(static_cast<int>(scaled), static_cast<int>(kLutSize - 2));

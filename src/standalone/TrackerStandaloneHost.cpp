@@ -3,6 +3,8 @@
 #include "../HTTPServer.h"
 
 #include <juce_audio_plugin_client/detail/juce_CreatePluginFilter.h>
+#include <array>
+#include <cmath>
 
 juce::JUCEApplicationBase* juce_CreateApplication();
 
@@ -454,7 +456,7 @@ public:
     {
         if (auto* processor = pluginHolder->getAudioProcessor())
         {
-            auto* editor = processor->createEditorIfNeeded();
+            auto* editor = processor->createEditorAndMakeActive();
 
             if (editor != nullptr)
             {
@@ -600,11 +602,14 @@ StandalonePluginHolder::StandalonePluginHolder(juce::PropertySet* settingsToUse,
     shouldMuteInput = true;
 
     handleCreatePlugin();
+    if (auto* trackerProcessor = dynamic_cast<TrackerMainProcessor*>(processor.get()))
+        trackerProcessor->getSequenceEditor()->setAudioConfigurationHost(this);
 
     if (preferredSetupOptions != nullptr)
         options = std::make_unique<juce::AudioDeviceManager::AudioDeviceSetup>(*preferredSetupOptions);
 
     setupAudioDevices(preferredDefaultDeviceName, options.get());
+    initialiseAudioConfiguration();
     reloadPluginState();
     if (auto* trackerProcessor = dynamic_cast<TrackerMainProcessor*>(processor.get()))
     {
@@ -622,6 +627,8 @@ StandalonePluginHolder::~StandalonePluginHolder()
         midiOutput->stopBackgroundThread();
 
     stopPlaying();
+    if (auto* trackerProcessor = dynamic_cast<TrackerMainProcessor*>(processor.get()))
+        trackerProcessor->getSequenceEditor()->setAudioConfigurationHost(nullptr);
     handleDeletePlugin();
     shutDownAudioDevices();
     currentInstance = nullptr;
@@ -759,6 +766,8 @@ void StandalonePluginHolder::saveAudioDeviceState()
     auto xml = deviceManager.createStateXml();
     settings->setValue("audioSetup", xml.get());
     settings->setValue("shouldMuteInput", static_cast<bool>(shouldMuteInput.getValue()));
+    if (auto* file = dynamic_cast<juce::PropertiesFile*>(settings.get()))
+        file->saveIfNeeded();
 }
 
 void StandalonePluginHolder::setupAudioDevices(const juce::String& preferredDefaultDeviceName,
@@ -822,6 +831,164 @@ void StandalonePluginHolder::showAudioSettingsDialog()
     launchOptions.useNativeTitleBar = true;
     launchOptions.resizable = false;
     launchOptions.launchAsync();
+}
+
+void StandalonePluginHolder::initialiseAudioConfiguration()
+{
+    refreshAudioDevices();
+    pendingAudioSetup = deviceManager.getAudioDeviceSetup();
+    audioConfigStatus = "OK";
+    resetAudioPerformanceStats();
+}
+
+void StandalonePluginHolder::refreshAudioDevices()
+{
+    availableAudioInputs.clear();
+    availableAudioOutputs.clear();
+    if (auto* type = deviceManager.getCurrentDeviceTypeObject())
+    {
+        type->scanForDevices();
+        availableAudioInputs = type->getDeviceNames(true);
+        availableAudioOutputs = type->getDeviceNames(false);
+    }
+    if (!availableAudioInputs.contains({}))
+        availableAudioInputs.insert(0, {});
+}
+
+void StandalonePluginHolder::cycleAudioChoice(juce::String& value, const juce::StringArray& choices, int direction)
+{
+    if (choices.isEmpty() || direction == 0)
+        return;
+    int index = choices.indexOf(value);
+    if (index < 0)
+        index = direction > 0 ? -1 : 0;
+    index = (index + (direction > 0 ? 1 : -1) + choices.size()) % choices.size();
+    value = choices[index];
+}
+
+void StandalonePluginHolder::adjustAudioOutput(int direction)
+{
+    cycleAudioChoice(pendingAudioSetup.outputDeviceName, availableAudioOutputs, direction);
+    audioConfigStatus = "PENDING";
+}
+
+void StandalonePluginHolder::adjustAudioInput(int direction)
+{
+    cycleAudioChoice(pendingAudioSetup.inputDeviceName, availableAudioInputs, direction);
+    audioConfigStatus = "PENDING";
+}
+
+void StandalonePluginHolder::adjustAudioSampleRate(int direction)
+{
+    static constexpr std::array<double, 3> rates { 44100.0, 48000.0, 96000.0 };
+    int index = -1;
+    for (int i = 0; i < static_cast<int>(rates.size()); ++i)
+        if (std::abs(rates[static_cast<std::size_t>(i)] - pendingAudioSetup.sampleRate) < 1.0) index = i;
+    if (index < 0) index = direction > 0 ? -1 : 0;
+    index = (index + (direction > 0 ? 1 : -1) + static_cast<int>(rates.size())) % static_cast<int>(rates.size());
+    pendingAudioSetup.sampleRate = rates[static_cast<std::size_t>(index)];
+    audioConfigStatus = "PENDING";
+}
+
+void StandalonePluginHolder::adjustAudioBufferSize(int direction)
+{
+    static constexpr std::array<int, 5> sizes { 128, 256, 512, 1024, 4096 };
+    int index = -1;
+    for (int i = 0; i < static_cast<int>(sizes.size()); ++i)
+        if (sizes[static_cast<std::size_t>(i)] == pendingAudioSetup.bufferSize) index = i;
+    if (index < 0) index = direction > 0 ? -1 : 0;
+    index = (index + (direction > 0 ? 1 : -1) + static_cast<int>(sizes.size())) % static_cast<int>(sizes.size());
+    pendingAudioSetup.bufferSize = sizes[static_cast<std::size_t>(index)];
+    audioConfigStatus = "PENDING";
+}
+
+void StandalonePluginHolder::revertAudioConfiguration()
+{
+    pendingAudioSetup = deviceManager.getAudioDeviceSetup();
+    audioConfigStatus = "OK";
+}
+
+void StandalonePluginHolder::resetAudioPerformanceStats()
+{
+    audioXrunBaseline = deviceManager.getXRunCount();
+    audioPeakCpuUsage = 0.0;
+    cachedAudioCpuUsage = 0.0;
+    cachedAudioXruns = 0;
+    lastAudioStatsUpdateMs = 0;
+}
+
+AudioConfigurationSnapshot StandalonePluginHolder::getAudioConfigurationSnapshot()
+{
+    AudioConfigurationSnapshot snapshot;
+    snapshot.standalone = true;
+    snapshot.applying = audioConfigApplying;
+    const auto active = deviceManager.getAudioDeviceSetup();
+    for (const auto& name : availableAudioInputs)
+        snapshot.inputDevices.push_back(name.toStdString());
+    for (const auto& name : availableAudioOutputs)
+        snapshot.outputDevices.push_back(name.toStdString());
+    snapshot.activeInput = active.inputDeviceName.toStdString();
+    snapshot.activeOutput = active.outputDeviceName.toStdString();
+    snapshot.pendingInput = pendingAudioSetup.inputDeviceName.toStdString();
+    snapshot.pendingOutput = pendingAudioSetup.outputDeviceName.toStdString();
+    snapshot.pendingSampleRate = pendingAudioSetup.sampleRate;
+    snapshot.pendingBufferSize = pendingAudioSetup.bufferSize;
+    snapshot.status = audioConfigStatus.toStdString();
+    snapshot.deviceType = deviceManager.getCurrentAudioDeviceType().toStdString();
+    const auto now = juce::Time::getMillisecondCounter();
+    if (lastAudioStatsUpdateMs == 0 || now - lastAudioStatsUpdateMs >= 250)
+    {
+        cachedAudioCpuUsage = deviceManager.getCpuUsage();
+        audioPeakCpuUsage = juce::jmax(audioPeakCpuUsage, cachedAudioCpuUsage);
+        cachedAudioXruns = juce::jmax(0, deviceManager.getXRunCount() - audioXrunBaseline);
+        lastAudioStatsUpdateMs = now;
+    }
+    snapshot.cpuUsage = cachedAudioCpuUsage;
+    snapshot.peakCpuUsage = audioPeakCpuUsage;
+    snapshot.xruns = cachedAudioXruns;
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        snapshot.activeSampleRate = device->getCurrentSampleRate();
+        snapshot.activeBufferSize = device->getCurrentBufferSizeSamples();
+        snapshot.inputLatencySamples = device->getInputLatencyInSamples();
+        snapshot.outputLatencySamples = device->getOutputLatencyInSamples();
+        snapshot.bitDepth = device->getCurrentBitDepth();
+    }
+    if (auto* tracker = dynamic_cast<TrackerMainProcessor*>(processor.get()))
+        snapshot.canApply = !audioConfigApplying && !tracker->getSequencer()->isPlaying() && !tracker->isMasterRecording();
+    return snapshot;
+}
+
+void StandalonePluginHolder::applyAudioConfigurationAsync()
+{
+    if (!getAudioConfigurationSnapshot().canApply)
+    {
+        audioConfigStatus = "STOP PLAY/REC";
+        return;
+    }
+    audioConfigApplying = true;
+    audioConfigStatus = "APPLYING";
+    juce::MessageManager::callAsync([this] { applyAudioConfiguration(); });
+}
+
+void StandalonePluginHolder::applyAudioConfiguration()
+{
+    const auto previous = deviceManager.getAudioDeviceSetup();
+    const auto error = deviceManager.setAudioDeviceSetup(pendingAudioSetup, true);
+    if (error.isNotEmpty())
+    {
+        const auto restoreError = deviceManager.setAudioDeviceSetup(previous, true);
+        audioConfigStatus = restoreError.isEmpty() ? "ERROR: " + error : "AUDIO UNAVAILABLE: " + error;
+    }
+    else
+    {
+        pendingAudioSetup = deviceManager.getAudioDeviceSetup();
+        refreshAudioDevices();
+        resetAudioPerformanceStats();
+        saveAudioDeviceState();
+        audioConfigStatus = "OK";
+    }
+    audioConfigApplying = false;
 }
 
 } // namespace tracker::standalone

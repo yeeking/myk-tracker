@@ -18,6 +18,11 @@
 #include <random>
 #include <set>
 
+// These fixtures intentionally compare exactly representable, discrete tracker
+// fields (MIDI notes, command IDs, and integer-valued settings) stored as double.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+
 namespace
 {
 struct TestClock final : ClockAbs
@@ -97,6 +102,29 @@ struct TestMachineHost final : MachineHost
     bool masterMuted = false;
     std::array<bool, 2> auxMuted { false, false };
     std::vector<std::size_t> silencedStacks;
+};
+
+struct TestAudioConfigurationHost final : AudioConfigurationHost
+{
+    AudioConfigurationSnapshot getAudioConfigurationSnapshot() override { return snapshot; }
+    void refreshAudioDevices() override { ++refreshes; }
+    void adjustAudioOutput(int direction) override { outputAdjust += direction; }
+    void adjustAudioInput(int direction) override { inputAdjust += direction; }
+    void adjustAudioSampleRate(int direction) override { rateAdjust += direction; }
+    void adjustAudioBufferSize(int direction) override { bufferAdjust += direction; }
+    void applyAudioConfigurationAsync() override { ++applies; }
+    void revertAudioConfiguration() override { ++reverts; }
+    void resetAudioPerformanceStats() override { ++resets; }
+
+    AudioConfigurationSnapshot snapshot {
+        true, false, true,
+        { "", "Input" }, { "Output" },
+        "", "Output", "", "Output",
+        48000.0, 48000.0, 256, 256,
+        128, 128, 24, 0.2, 0.4, 0, "ALSA", "OK"
+    };
+    int refreshes = 0, outputAdjust = 0, inputAdjust = 0, rateAdjust = 0, bufferAdjust = 0;
+    int applies = 0, reverts = 0, resets = 0;
 };
 
 void require(bool condition, const char* message)
@@ -761,5 +789,30 @@ int main()
     require(!routedSequence->isMuted() && !sequenceMuteHost.muted[1],
             "unmuting an effectively muted sequence clears a routed-stack-only mute");
 
+    Sequencer audioConfigSequencer(1, 4);
+    SequencerEditor audioConfigEditor(&audioConfigSequencer);
+    TestAudioConfigurationHost audioConfigHost;
+    audioConfigEditor.setAudioConfigurationHost(&audioConfigHost);
+    require(audioConfigEditor.selectPageShortcut(0)
+                && audioConfigEditor.getCurrentPage() == SequencerEditorPage::audioConfig,
+            "zero selects the audio configuration page");
+    require(audioConfigHost.refreshes == 1, "entering audio configuration refreshes device names");
+    audioConfigEditor.moveCursorDown();
+    audioConfigEditor.moveCursorRight();
+    audioConfigEditor.incrementAtCursor();
+    require(audioConfigHost.outputAdjust == 1, "audio output selector supports bracket adjustment");
+    audioConfigEditor.moveCursorLeft();
+    for (int i = 0; i < 4; ++i) audioConfigEditor.moveCursorDown();
+    audioConfigEditor.click();
+    require(audioConfigHost.applies == 1, "audio configuration apply activates through the grid");
+    const auto& audioCells = audioConfigEditor.getAudioConfigCells();
+    require(audioCells.size() == 4 && audioCells[3][4].text == "5.33MS",
+            "audio configuration reports current block duration");
+    audioConfigHost.snapshot.canApply = false;
+    audioConfigEditor.click();
+    require(audioConfigHost.applies == 1, "disabled audio apply does not activate");
+
     return 0;
 }
+
+#pragma GCC diagnostic pop

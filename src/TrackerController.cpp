@@ -48,8 +48,12 @@ std::vector<std::vector<std::string>> TrackerController::getControlPanelAsGridOf
         case SequencerEditorMode::resetConfirmation:
             viewMode = "Reset";
             break;
-        default:
+        case SequencerEditorMode::mixer:
+            viewMode = "Mix";
             break; 
+        case SequencerEditorMode::audioConfig:
+            viewMode = "Audio";
+            break;
              
     }
     const int quarterBeat = clock->getCurrentQuarterBeat();

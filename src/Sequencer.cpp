@@ -132,6 +132,8 @@ std::string Step::toStringFlat(const SequenceReadOnly* sequenceContext) const
 std::vector<std::vector<std::string>> Step::toStringGrid(const SequenceReadOnly* sequenceContext) const 
 {
 
+  juce::ignoreUnused(sequenceContext);
+
   // std::shared_lock<std::shared_mutex> lock(*rw_mutex);
 
   // each data sub vector should be on its own row

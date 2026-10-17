@@ -232,6 +232,8 @@ SequencerEditorPage SequencerEditor::getCurrentPage() const
     return SequencerEditorPage::machine;
   case SequencerEditorMode::mixer:
     return SequencerEditorPage::mixer;
+  case SequencerEditorMode::audioConfig:
+    return SequencerEditorPage::audioConfig;
   case SequencerEditorMode::help:
     return SequencerEditorPage::help;
   case SequencerEditorMode::resetConfirmation:
@@ -277,6 +279,9 @@ void SequencerEditor::selectPage(SequencerEditorPage page)
   case SequencerEditorPage::mixer:
     gotoMixerPage();
     break;
+  case SequencerEditorPage::audioConfig:
+    gotoAudioConfigPage();
+    break;
   case SequencerEditorPage::help:
     gotoHelpPage();
     break;
@@ -310,6 +315,9 @@ bool SequencerEditor::selectPageShortcut(int shortcut)
   case 7:
     selectPage(SequencerEditorPage::mixer);
     return true;
+  case 0:
+    selectPage(SequencerEditorPage::audioConfig);
+    return true;
   default:
     return false;
   }
@@ -335,6 +343,7 @@ void SequencerEditor::cycleEditMode()
     return;
   case SequencerEditorMode::machineConfig:
   case SequencerEditorMode::mixer:
+  case SequencerEditorMode::audioConfig:
   case SequencerEditorMode::help:
     return;
   case SequencerEditorMode::resetConfirmation:
@@ -369,6 +378,8 @@ void SequencerEditor::cycleAtCursor()
       else if (isMixerMasterSelected() && mixerRow == 2) machineHost->toggleMasterRecording();
     }
     break;
+  case SequencerEditorMode::audioConfig:
+    return;
 
   case SequencerEditorMode::selectingSeqAndStep:
   {
@@ -412,6 +423,11 @@ void SequencerEditor::click()
   case SequencerEditorPage::mixer:
     cycleAtCursor();
     break;
+  case SequencerEditorPage::audioConfig:
+    rebuildAudioConfigCells();
+    if (audioConfigCursorCol < audioConfigCells.size() && audioConfigCursorRow < audioConfigCells[audioConfigCursorCol].size())
+      if (auto& cell = audioConfigCells[audioConfigCursorCol][audioConfigCursorRow]; !cell.isDisabled && cell.onActivate) cell.onActivate();
+    break;
   case SequencerEditorPage::help:
     break;
   case SequencerEditorPage::resetConfirmation:
@@ -437,6 +453,9 @@ void SequencerEditor::resetAtCursor()
   case SequencerEditorPage::machine:
     break;
   case SequencerEditorPage::mixer:
+    break;
+  case SequencerEditorPage::audioConfig:
+    gotoSequencePage();
     break;
   case SequencerEditorPage::help:
     toggleHelpPage();
@@ -468,6 +487,9 @@ void SequencerEditor::enterAtCursor()
     break;
   case SequencerEditorPage::machine:
     machineEditMode = false;
+    gotoSequencePage();
+    break;
+  case SequencerEditorPage::audioConfig:
     gotoSequencePage();
     break;
   case SequencerEditorPage::mixer:
@@ -574,6 +596,7 @@ void SequencerEditor::incrementOctave()
   }
   case SequencerEditorMode::machineConfig:
   case SequencerEditorMode::mixer:
+  case SequencerEditorMode::audioConfig:
   {
     break;
   }
@@ -628,6 +651,7 @@ void SequencerEditor::decrementOctave()
   }
   case SequencerEditorMode::machineConfig:
   case SequencerEditorMode::mixer:
+  case SequencerEditorMode::audioConfig:
   {
     break;
   }
@@ -822,6 +846,7 @@ void SequencerEditor::moveCursorLeft()
   case SequencerEditorPage::sequenceConfig: moveCursorLeftOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorLeftOnMachinePage(); break;
   case SequencerEditorPage::mixer: if (mixerColumn > 0) --mixerColumn; break;
+  case SequencerEditorPage::audioConfig: moveAudioConfigCursor(0, -1); break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorLeftOnResetConfirmationPage(); break;
   }
@@ -837,6 +862,7 @@ void SequencerEditor::moveCursorRight()
   case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorRightOnMachinePage(); break;
   case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerColumn < machineHost->getMachineStackCount() + 2) ++mixerColumn; break;
+  case SequencerEditorPage::audioConfig: moveAudioConfigCursor(0, 1); break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorRightOnResetConfirmationPage(); break;
   }
@@ -852,6 +878,7 @@ void SequencerEditor::moveCursorUp()
   case SequencerEditorPage::sequenceConfig: moveCursorUpOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorUpOnMachinePage(); break;
   case SequencerEditorPage::mixer: if (mixerRow > 0) --mixerRow; break;
+  case SequencerEditorPage::audioConfig: moveAudioConfigCursor(-1, 0); break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorUpOnResetConfirmationPage(); break;
   }
@@ -867,6 +894,7 @@ void SequencerEditor::moveCursorDown()
   case SequencerEditorPage::sequenceConfig: moveCursorDownOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorDownOnMachinePage(); break;
   case SequencerEditorPage::mixer: mixerRow = std::min<std::size_t>(10, mixerRow + 1); break;
+  case SequencerEditorPage::audioConfig: moveAudioConfigCursor(1, 0); break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorDownOnResetConfirmationPage(); break;
   }
@@ -893,6 +921,8 @@ void SequencerEditor::addRow()
     break;
   case SequencerEditorPage::mixer:
     break;
+  case SequencerEditorPage::audioConfig:
+    break;
   case SequencerEditorPage::help:
     break;
   case SequencerEditorPage::resetConfirmation:
@@ -918,6 +948,8 @@ void SequencerEditor::removeRow()
     machineRemoveEntry();
     break;
   case SequencerEditorPage::mixer:
+    break;
+  case SequencerEditorPage::audioConfig:
     break;
   case SequencerEditorPage::help:
     break;
@@ -960,6 +992,11 @@ void SequencerEditor::incrementAtCursor()
       else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) + 1.0f);
     }
     break;
+  case SequencerEditorPage::audioConfig:
+    rebuildAudioConfigCells();
+    if (audioConfigCursorCol < audioConfigCells.size() && audioConfigCursorRow < audioConfigCells[audioConfigCursorCol].size())
+      if (auto& cell = audioConfigCells[audioConfigCursorCol][audioConfigCursorRow]; !cell.isDisabled && cell.onAdjust) cell.onAdjust(1);
+    break;
   case SequencerEditorPage::help:
     break;
   case SequencerEditorPage::resetConfirmation:
@@ -999,6 +1036,11 @@ void SequencerEditor::decrementAtCursor()
       else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, false);
       else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) - 1.0f);
     }
+    break;
+  case SequencerEditorPage::audioConfig:
+    rebuildAudioConfigCells();
+    if (audioConfigCursorCol < audioConfigCells.size() && audioConfigCursorRow < audioConfigCells[audioConfigCursorCol].size())
+      if (auto& cell = audioConfigCells[audioConfigCursorCol][audioConfigCursorRow]; !cell.isDisabled && cell.onAdjust) cell.onAdjust(-1);
     break;
   case SequencerEditorPage::help:
     break;
@@ -1334,7 +1376,7 @@ void SequencerEditor::moveCursorLeftOnSongPage()
 
 void SequencerEditor::moveCursorRightOnSongPage()
 {
-  const std::size_t maxCol = currentSongRow == 0 ? 1u : 3u;
+  const std::size_t maxCol = currentSongRow == 0 ? 1u : 4u;
   if (currentSongCol < maxCol)
     ++currentSongCol;
 }
@@ -1345,7 +1387,7 @@ void SequencerEditor::moveCursorUpOnSongPage()
     return;
 
   --currentSongRow;
-  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 3u);
+  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 4u);
   if (songHost != nullptr)
     songHost->setSelectedSongRow(currentSongRow == 0 ? 0u : currentSongRow - 1);
 }
@@ -1357,7 +1399,7 @@ void SequencerEditor::moveCursorDownOnSongPage()
     return;
 
   ++currentSongRow;
-  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 3u);
+  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 4u);
   if (songHost != nullptr && currentSongRow > 0)
     songHost->setSelectedSongRow(currentSongRow - 1);
 }
@@ -1621,7 +1663,7 @@ void SequencerEditor::clickOnSongPage()
   if (songRowIndex >= songHost->getSongRowCount())
     return;
 
-  if (currentSongCol == 2)
+  if (currentSongCol == 3)
   {
     songHost->setSelectedSongRow(songRowIndex);
     songHost->setViewedSequenceSetIndex(songHost->getSongRowSequenceSetId(songRowIndex));
@@ -1630,7 +1672,7 @@ void SequencerEditor::clickOnSongPage()
     gotoSequencePage();
     return;
   }
-  if (currentSongCol == 3)
+  if (currentSongCol == 4)
   {
     songHost->removeSongRow(songRowIndex);
     currentSongRow = std::min<std::size_t>(currentSongRow, songHost->getSongRowCount());
@@ -1700,6 +1742,8 @@ void SequencerEditor::incrementOnSongPage()
     songHost->adjustSongRowSequenceSetId(songRowIndex, 1);
   else if (currentSongCol == 1)
     songHost->adjustSongRowBeatCount(songRowIndex, 1);
+  else if (currentSongCol == 2)
+    songHost->adjustSongRowBpm(songRowIndex, 1);
 }
 
 void SequencerEditor::incrementOnSequenceConfigPage()
@@ -1757,6 +1801,8 @@ void SequencerEditor::decrementOnSongPage()
     songHost->adjustSongRowSequenceSetId(songRowIndex, -1);
   else if (currentSongCol == 1)
     songHost->adjustSongRowBeatCount(songRowIndex, -1);
+  else if (currentSongCol == 2)
+    songHost->adjustSongRowBpm(songRowIndex, -1);
 }
 
 void SequencerEditor::decrementOnSequenceConfigPage()
@@ -1955,6 +2001,140 @@ void SequencerEditor::gotoMixerPage()
   if (machineHost != nullptr)
     mixerColumn = std::min(mixerColumn, machineHost->getMachineStackCount() + 2);
   mixerRow = std::min<std::size_t>(10, mixerRow);
+}
+
+void SequencerEditor::gotoAudioConfigPage()
+{
+  dismissMachineTransientUiIfNeeded();
+  setEditMode(SequencerEditorMode::audioConfig);
+  if (audioConfigurationHost != nullptr)
+    audioConfigurationHost->refreshAudioDevices();
+  rebuildAudioConfigCells();
+}
+
+void SequencerEditor::rebuildAudioConfigCells()
+{
+  AudioConfigurationSnapshot snapshot;
+  if (audioConfigurationHost != nullptr)
+    snapshot = audioConfigurationHost->getAudioConfigurationSnapshot();
+  else
+  {
+    snapshot.activeSampleRate = hostSampleRate;
+    snapshot.pendingSampleRate = hostSampleRate;
+    snapshot.activeBufferSize = hostBlockSize;
+    snapshot.pendingBufferSize = hostBlockSize;
+    snapshot.status = "HOST CONTROLLED";
+  }
+
+  constexpr std::size_t rows = 11;
+  audioConfigCells.assign(4, std::vector<UIBox>(rows));
+  const auto set = [this](std::size_t col, std::size_t row, const std::string& text)
+  {
+    auto& cell = audioConfigCells[col][row];
+    cell.kind = UIBox::Kind::TrackerCell;
+    cell.text = text;
+    cell.isSelected = col == audioConfigCursorCol && row == audioConfigCursorRow;
+    return &cell;
+  };
+  const auto formatRate = [](double rate) { return rate > 0.0 ? std::to_string(static_cast<int>(std::lround(rate))) : std::string("-"); };
+  const auto formatMs = [](int samples, double rate)
+  {
+    if (samples <= 0 || rate <= 0.0) return std::string("-");
+    return juce::String(1000.0 * static_cast<double>(samples) / rate, 2).toStdString() + "MS";
+  };
+  const bool editable = snapshot.standalone && !snapshot.applying;
+  set(0, 0, "AUDIO CONFIG")->isHighlighted = true;
+  set(2, 0, "PERFORMANCE")->isHighlighted = true;
+  auto* output = set(0, 1, "OUTPUT");
+  auto* outputValue = set(1, 1, snapshot.pendingOutput.empty() ? "-" : snapshot.pendingOutput);
+  auto* input = set(0, 2, "INPUT");
+  auto* inputValue = set(1, 2, snapshot.pendingInput.empty() ? "NONE" : snapshot.pendingInput);
+  auto* rate = set(0, 3, "RATE");
+  auto* rateValue = set(1, 3, formatRate(snapshot.pendingSampleRate));
+  auto* buffer = set(0, 4, "BUFFER");
+  auto* bufferValue = set(1, 4, snapshot.pendingBufferSize > 0 ? std::to_string(snapshot.pendingBufferSize) : "-");
+  juce::ignoreUnused(output, input, rate, buffer);
+  for (auto* cell : { outputValue, inputValue, rateValue, bufferValue }) cell->isDisabled = !editable;
+  if (audioConfigurationHost != nullptr)
+  {
+    outputValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioOutput(d); rebuildAudioConfigCells(); };
+    inputValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioInput(d); rebuildAudioConfigCells(); };
+    rateValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioSampleRate(d); rebuildAudioConfigCells(); };
+    bufferValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioBufferSize(d); rebuildAudioConfigCells(); };
+  }
+  auto* apply = set(0, 5, snapshot.applying ? "APPLYING" : "APPLY");
+  auto* revert = set(1, 5, "REVERT");
+  const bool applyAllowed = editable && snapshot.canApply;
+  apply->isDisabled = !applyAllowed;
+  revert->isDisabled = !editable;
+  if (audioConfigurationHost != nullptr)
+  {
+    apply->onActivate = [this] { audioConfigurationHost->applyAudioConfigurationAsync(); rebuildAudioConfigCells(); };
+    revert->onActivate = [this] { audioConfigurationHost->revertAudioConfiguration(); rebuildAudioConfigCells(); };
+  }
+  auto* refresh = set(0, 6, "REFRESH");
+  auto* reset = set(1, 6, "RESET STATS");
+  refresh->isDisabled = !editable;
+  if (audioConfigurationHost != nullptr)
+  {
+    refresh->onActivate = [this] { audioConfigurationHost->refreshAudioDevices(); rebuildAudioConfigCells(); };
+    reset->onActivate = [this] { audioConfigurationHost->resetAudioPerformanceStats(); rebuildAudioConfigCells(); };
+  }
+  set(0, 7, "STATUS");
+  auto* status = set(1, 7, snapshot.status.empty() ? "OK" : snapshot.status);
+  status->isActive = snapshot.applying;
+  set(2, 1, "AUDIO CPU");
+  auto* cpu = set(3, 1, snapshot.cpuUsage < 0.0 ? "N/A" : juce::String(snapshot.cpuUsage * 100.0, 1).toStdString() + "%");
+  set(2, 2, "PEAK CPU");
+  set(3, 2, snapshot.peakCpuUsage < 0.0 ? "N/A" : juce::String(snapshot.peakCpuUsage * 100.0, 1).toStdString() + "%");
+  set(2, 3, "XRUNS");
+  auto* xruns = set(3, 3, snapshot.xruns < 0 ? "N/A" : std::to_string(snapshot.xruns));
+  set(2, 4, "BLOCK");
+  set(3, 4, formatMs(snapshot.activeBufferSize, snapshot.activeSampleRate));
+  set(2, 5, "OUT LAT");
+  set(3, 5, formatMs(snapshot.outputLatencySamples, snapshot.activeSampleRate));
+  set(2, 6, "IN LAT");
+  set(3, 6, formatMs(snapshot.inputLatencySamples, snapshot.activeSampleRate));
+  set(2, 7, "FORMAT");
+  set(3, 7, snapshot.bitDepth > 0 ? std::to_string(snapshot.bitDepth) + " BIT" : "N/A");
+  set(2, 8, "BACKEND");
+  set(3, 8, snapshot.deviceType.empty() ? "HOST" : snapshot.deviceType);
+  set(0, 9, "ACTIVE OUT");
+  set(1, 9, snapshot.activeOutput.empty() ? "-" : snapshot.activeOutput);
+  set(2, 9, "ACTIVE IN");
+  set(3, 9, snapshot.activeInput.empty() ? "NONE" : snapshot.activeInput);
+  set(0, 10, "ACTIVE RATE");
+  set(1, 10, formatRate(snapshot.activeSampleRate));
+  set(2, 10, "ACTIVE BUF");
+  set(3, 10, snapshot.activeBufferSize > 0 ? std::to_string(snapshot.activeBufferSize) : "-");
+  if (snapshot.cpuUsage >= 0.0)
+  {
+    const auto colour = snapshot.cpuUsage >= 0.75 ? juce::Colours::red
+        : snapshot.cpuUsage >= 0.50 ? juce::Colours::yellow : juce::Colours::green;
+    cpu->useCustomFillColour = true;
+    cpu->customFillArgb = colour.withAlpha(0.25f).getARGB();
+  }
+  if (snapshot.xruns > 0)
+  {
+    xruns->useCustomFillColour = true;
+    xruns->customFillArgb = juce::Colours::red.withAlpha(0.30f).getARGB();
+    xruns->isHighlighted = true;
+  }
+}
+
+const std::vector<std::vector<UIBox>>& SequencerEditor::getAudioConfigCells()
+{
+  rebuildAudioConfigCells();
+  return audioConfigCells;
+}
+
+void SequencerEditor::moveAudioConfigCursor(int deltaRow, int deltaCol)
+{
+  constexpr int maxRow = 10;
+  constexpr int maxCol = 3;
+  audioConfigCursorRow = static_cast<std::size_t>(juce::jlimit(0, maxRow, static_cast<int>(audioConfigCursorRow) + deltaRow));
+  audioConfigCursorCol = static_cast<std::size_t>(juce::jlimit(0, maxCol, static_cast<int>(audioConfigCursorCol) + deltaCol));
+  rebuildAudioConfigCells();
 }
 
 void SequencerEditor::gotoSequencePage()
@@ -3253,9 +3433,9 @@ void SequencerEditor::moveMachineCursor(int deltaRow, int deltaCol)
          col >= 0 && col <= maxCol;
          col += deltaCol)
     {
-      if (machineCursorRow >= machineCells[col].size())
+      if (machineCursorRow >= machineCells[static_cast<std::size_t>(col)].size())
         continue;
-      if (isMachineCellLandable(machineCells[col][machineCursorRow]))
+      if (isMachineCellLandable(machineCells[static_cast<std::size_t>(col)][machineCursorRow]))
       {
         nextCol = static_cast<std::size_t>(col);
         break;

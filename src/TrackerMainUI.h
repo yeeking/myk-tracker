@@ -11,6 +11,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include <cstdint>
+#include <chrono>
 #include <unordered_map>
 #include "TrackerMainProcessor.h"
 #include "TrackerControlService.h"
@@ -97,6 +98,7 @@ private:
                             const std::string& traceCacheId = {},
                             std::uint64_t traceCacheRevision = 0);
     void prepareMixerView();
+    void prepareAudioConfigView();
     void prepareHelpView();
     void prepareResetConfirmationView();
     void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
@@ -119,6 +121,9 @@ private:
     void closeStateDialog();
     bool handleStateDialogKey(const juce::KeyPress& key);
     void prepareStateDialogView();
+    void recordUiBenchmarkSample(std::atomic<std::uint64_t>& total, std::atomic<std::uint64_t>& maximum,
+                                 std::atomic<std::uint64_t>& count, std::uint64_t elapsedNs) noexcept;
+    void writeUiBenchmarkReport();
     void rebuildStateDialogBoxes();
     void activateStateDialogCell();
     void moveStateDialogCursor(int rowDelta, int colDelta);
@@ -152,8 +157,6 @@ private:
     size_t lastStartCol = 0;
     size_t lastStartRow = 0;
     TrackerUIComponent::OverlayState overlayState;
-    int lastHudBpm = -1;
-    bool lastHudInternalClock = true;
     float zoomLevel = 1.0f;
     juce::Point<int> lastDragPosition;
     float panOffsetX = 0.0f;
@@ -216,6 +219,12 @@ private:
     bool stateFilenameEditing = false;
 
     std::atomic<bool> waitingForPaint { false };
+    bool uiBenchmarkEnabled = false;
+    juce::File uiBenchmarkReportFile;
+    std::array<std::atomic<std::uint64_t>, 9> uiPageTotalNs {};
+    std::array<std::atomic<std::uint64_t>, 9> uiPageMaxNs {};
+    std::array<std::atomic<std::uint64_t>, 9> uiPageCount {};
+    std::atomic<std::uint64_t> uiRenderTotalNs { 0 }, uiRenderMaxNs { 0 }, uiRenderCount { 0 };
     juce::CriticalSection screenshotLock;
     std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> pendingScreenshot;
     // This reference is provided as a quick way for your editor to

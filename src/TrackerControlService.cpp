@@ -679,7 +679,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 {
                     const auto bpm = numberArg(args, "bpm");
                     if (bpm <= 0.0) return fail("invalid_argument", "bpm must be positive");
-                    processor.setBPM(bpm);
+                    processor.setSequenceSetBpm(processor.getViewedSequenceSetIndex(), bpm);
                     contentChanged = true;
                 }
                 if (hasArg(args, "internalClock")) { processor.setInternalClockEnabled(boolArg(args, "internalClock")); contentChanged = true; }
@@ -1299,6 +1299,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     }
                     else if (keyCode == juce::KeyPress::spaceKey) { editor.togglePlayback(); handled = true; }
                     else if (keyCode == '5') { handled = editor.enterMachineDetailFromAnywhere(); viewChanged = handled; }
+                    else if (keyCode == '0') { handled = editor.selectPageShortcut(0); viewChanged = handled; }
                     else if (keyCode >= '1' && keyCode <= '7') { handled = editor.selectPageShortcut(keyCode - '0'); viewChanged = handled; }
                     else if (editor.handleChordKey(key) || editor.handleControlKey(key) || editor.handleNoteKey(key))
                     {
@@ -1343,8 +1344,6 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     }
                     else if (key == '-') { editor.removeRow(); contentChanged = true; handled = true; }
                     else if (key == '=') { editor.addRow(); contentChanged = true; handled = true; }
-                    else if (key == '_') { processor.setBPM(juce::jmax(1.0, processor.getBPM() - 1.0)); contentChanged = true; handled = true; }
-                    else if (key == '+') { processor.setBPM(processor.getBPM() + 1.0); contentChanged = true; handled = true; }
                     else if (key == '[') { editor.decrementAtCursor(); contentChanged = true; handled = true; }
                     else if (key == ']') { editor.incrementAtCursor(); contentChanged = true; handled = true; }
                     else if (key == ',') { editor.decrementOctave(); viewChanged = true; handled = true; }

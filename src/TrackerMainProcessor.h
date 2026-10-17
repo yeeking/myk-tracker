@@ -33,6 +33,7 @@
 #include "machines/AuxReverbMachine.h"
 #include "machines/FilterFxMachine.h"
 #include "machines/ModulationMatrixMachine.h"
+#include "PerformanceMetrics.h"
 
 class TrackerControlService;
 
@@ -75,6 +76,8 @@ public:
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
+    PerformanceMetrics& getPerformanceMetrics() noexcept { return performanceMetrics; }
+    const PerformanceMetrics& getPerformanceMetrics() const noexcept { return performanceMetrics; }
 
    #ifndef JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
@@ -167,12 +170,16 @@ public:
     void setSelectedSongRow(std::size_t row) override;
     std::size_t getSongRowSequenceSetId(std::size_t row) const override;
     int getSongRowBeatCount(std::size_t row) const override;
+    int getSongRowBpm(std::size_t row) const override;
     SongPlayMode getSongPlayMode() const override;
     void setSongPlayMode(SongPlayMode mode) override;
     std::size_t addSongRowByCloningViewedSet() override;
     void removeSongRow(std::size_t row) override;
     void adjustSongRowSequenceSetId(std::size_t row, int direction) override;
     void adjustSongRowBeatCount(std::size_t row, int direction) override;
+    void adjustSongRowBpm(std::size_t row, int direction) override;
+    /** Set the stored tempo for a sequence set, applying it immediately when active. */
+    void setSequenceSetBpm(std::size_t setIndex, double bpm);
     void toggleSongPlayback() override;
     void rewindSongTransport() override;
     void sendCurrentCellValueOverOscIfChanged(bool refreshMachineCells = true);
@@ -250,6 +257,8 @@ private:
         std::vector<bool> modulationEnabled;
     };
     std::vector<std::unique_ptr<Sequencer>> sequenceSets;
+    /** Persistent tempo per sequence set; Song rows reference these values by set ID. */
+    std::vector<double> sequenceSetBpms;
     std::vector<SequenceSetMachineEnableState> sequenceSetMachineEnableStates;
     std::vector<SongRow> songRows;
     SongPlayMode songPlayMode = SongPlayMode::sequence;
@@ -307,7 +316,7 @@ private:
             float linear = 1.0f;
             float get(float nextDb)
             {
-                if (nextDb != db)
+                if (std::abs(nextDb - db) > std::numeric_limits<float>::epsilon())
                 {
                     db = nextDb;
                     linear = std::pow(10.0f, db / 20.0f);
@@ -551,6 +560,7 @@ private:
     bool oscSenderReady = false;
     std::mutex pendingZoomMutex;
     std::deque<PendingZoomCommand> pendingZoomCommands;
+    PerformanceMetrics performanceMetrics;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackerMainProcessor)
 };

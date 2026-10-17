@@ -186,6 +186,7 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd,
             Step::lengthInd,
             [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                juce::ignoreUnused(stepData);
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
                 assert(CommandData::machineUtils != nullptr);
@@ -202,6 +203,7 @@ void CommandProcessor::initialiseCommands() {
             Step::noteInd,
             Step::lengthInd,
             [](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                juce::ignoreUnused(stepData);
                 assert(stepData->size() == Step::maxInd + 1);
                 assert(sequenceContext != nullptr);
                 assert(CommandData::machineUtils != nullptr);

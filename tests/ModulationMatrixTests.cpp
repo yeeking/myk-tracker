@@ -71,5 +71,12 @@ int main()
     for (int i = 0; i < 4; ++i) restored.navigateRight();
     cells = restored.getUIBoxes({});
     require(cells[7][5].text == "1", "new matrix state preserves NOTE reset route");
+
+    // Persisted machine state is external data: invalid UTF-8 must be ignored
+    // safely instead of reaching JUCE String::fromUTF8's Debug assertion.
+    const unsigned char invalidUtf8[] = { 0xff, 0xfe };
+    restored.setStateInformation(invalidUtf8, static_cast<int>(sizeof(invalidUtf8)));
+    cells = restored.getUIBoxes({});
+    require(cells[7][5].text == "1", "invalid matrix state leaves existing settings intact");
     return 0;
 }

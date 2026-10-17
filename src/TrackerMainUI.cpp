@@ -23,7 +23,7 @@
 namespace
 {
 #if JucePlugin_Build_Standalone
-void showStandaloneAudioMidiSettings()
+[[maybe_unused]] void showStandaloneAudioMidiSettings()
 {
     juce::MessageManager::callAsync([]()
     {
@@ -62,19 +62,21 @@ bool isSimpleMachineDetail(CommandType type)
         || type == CommandType::MidiNote;
 }
 
-std::string makeSequenceTitle(std::size_t sequenceIndex, std::size_t stepIndex, std::size_t stepCount, int bpmInt)
+std::string compactPageLabel(SequencerEditorMode mode)
 {
-    return "Sequence [" + std::to_string(sequenceIndex + 1)
-        + "-" + std::to_string(stepIndex + 1)
-        + "/" + std::to_string(stepCount) + "] "
-        + std::to_string(bpmInt) + " BPM";
-}
-
-std::string makeStepTitle(std::size_t sequenceIndex, std::size_t stepIndex, std::size_t stepCount)
-{
-    return "Step [" + std::to_string(sequenceIndex + 1)
-        + "-" + std::to_string(stepIndex + 1)
-        + "/" + std::to_string(stepCount) + "]";
+    switch (mode)
+    {
+        case SequencerEditorMode::arrangingSong: return "SONG";
+        case SequencerEditorMode::selectingSeqAndStep: return "SEQ";
+        case SequencerEditorMode::editingStep: return "STEP";
+        case SequencerEditorMode::configuringSequence: return "CONF";
+        case SequencerEditorMode::machineConfig: return "MACH";
+        case SequencerEditorMode::mixer: return "MIX";
+        case SequencerEditorMode::audioConfig: return "AUD";
+        case SequencerEditorMode::help: return "HELP";
+        case SequencerEditorMode::resetConfirmation: return "CONF";
+    }
+    return "MYK";
 }
 
 std::string formatSignedGain(float gainDb)
@@ -162,25 +164,6 @@ juce::Colour getSeqConfigCellText(std::size_t row,
     return p.seqConfigTextMuted;
 }
 
-std::string makeSequenceConfigTitle(std::size_t sequenceIndex,
-                                    std::size_t paramIndex,
-                                    std::size_t configHead,
-                                    std::size_t headCount,
-                                    const std::vector<Parameter>& seqConfigSpecs,
-                                    std::size_t startCol,
-                                    std::size_t visibleCols,
-                                    std::size_t totalSequences)
-{
-    const auto param = paramIndex < seqConfigSpecs.size()
-        ? seqConfigSpecs[paramIndex].shortName
-        : "?";
-    const auto viewEnd = std::min(totalSequences, startCol + visibleCols);
-    return "Sequence Config [" + std::to_string(sequenceIndex + 1) + "] "
-        + param
-        + " HEAD " + std::to_string(configHead + 1) + "/" + std::to_string(headCount)
-        + " VIEW " + std::to_string(startCol + 1) + "-" + std::to_string(viewEnd)
-        + "/" + std::to_string(totalSequences);
-}
 }
 
 //==============================================================================
@@ -226,13 +209,24 @@ TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
     });
 #endif
 
-    startTimer(1000 / 25);
+    // Benchmark-only runtime override.  Normal launches retain the 25 FPS
+    // update cadence; invalid values are clamped rather than allowing a busy timer.
+    const int requestedFps = juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_UI_FPS", "25").getIntValue();
+    const int uiFps = juce::jlimit(1, 120, requestedFps > 0 ? requestedFps : 25);
+    const auto reportPath = juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_UI_PERF_REPORT", {});
+    if (reportPath.isNotEmpty())
+    {
+        uiBenchmarkEnabled = true;
+        uiBenchmarkReportFile = juce::File(reportPath);
+    }
+    startTimer(juce::jmax(1, 1000 / uiFps));
 
 }
 
 TrackerMainUI::~TrackerMainUI()
 {
   stopTimer();
+  writeUiBenchmarkReport();
   {
     const juce::ScopedLock lock(screenshotLock);
     if (pendingScreenshot != nullptr)
@@ -252,6 +246,7 @@ void TrackerMainUI::newOpenGLContextCreated()
 
 void TrackerMainUI::renderOpenGL()
 {
+    const auto started = uiBenchmarkEnabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
     uiComponent.setViewportBounds(seqViewBounds,
                                   getHeight(),
                                   static_cast<float>(openGLContext.getRenderingScale()));
@@ -266,6 +261,11 @@ void TrackerMainUI::renderOpenGL()
     }
     if (request != nullptr)
         captureScreenshotFrame(request);
+    if (uiBenchmarkEnabled)
+    {
+        const auto elapsed = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count());
+        recordUiBenchmarkSample(uiRenderTotalNs, uiRenderMaxNs, uiRenderCount, elapsed);
+    }
 }
 
 juce::String TrackerMainUI::requestScreenshot(std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> request)
@@ -367,6 +367,7 @@ void TrackerMainUI::resized()
 
 void TrackerMainUI::timerCallback ()
 {
+    const auto started = uiBenchmarkEnabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
     if (!isShowing())
         return;
     ++framesDrawn;
@@ -389,6 +390,7 @@ void TrackerMainUI::timerCallback ()
   else if (snapshotMode == "config") editMode = SequencerEditorMode::configuringSequence;
   else if (snapshotMode == "machine") editMode = SequencerEditorMode::machineConfig;
   else if (snapshotMode == "mixer") editMode = SequencerEditorMode::mixer;
+  else if (snapshotMode == "audio") editMode = SequencerEditorMode::audioConfig;
   else if (snapshotMode == "help") editMode = SequencerEditorMode::help;
   else if (snapshotMode == "reset") editMode = SequencerEditorMode::resetConfirmation;
   const bool isPlaying = static_cast<bool>(snapshotUi.getProperty("isPlaying", false));
@@ -438,6 +440,11 @@ void TrackerMainUI::timerCallback ()
           prepareMixerView();
           break;
       }
+      case SequencerEditorMode::audioConfig:
+      {
+          prepareAudioConfigView();
+          break;
+      }
       case SequencerEditorMode::help:
       {
           prepareHelpView();
@@ -453,42 +460,10 @@ void TrackerMainUI::timerCallback ()
   // rest, but render a steady glow during playback so meters and active cells
   // do not throb in time with the UI animation.
   uiComponent.setGlowPulseEnabled(!isPlaying);
-    if (stateDialogMode == StateDialogMode::none
-        && editMode != SequencerEditorMode::machineConfig
-        && editMode != SequencerEditorMode::arrangingSong
-        && editMode != SequencerEditorMode::resetConfirmation)
-    {
-      const int bpmInt = static_cast<int>(std::lround(audioProcessor.getBPM()));
-      std::string hudTitle;
-      audioProcessor.withAudioThreadExclusive([&]()
-      {
-          const auto sequenceIndex = seqEditor->getCurrentSequence();
-          const auto stepIndex = seqEditor->getCurrentStep();
-          const auto stepCount = audioProcessor.getSequencer()->howManySteps(sequenceIndex);
-          if (editMode == SequencerEditorMode::selectingSeqAndStep)
-              hudTitle = makeSequenceTitle(sequenceIndex, stepIndex, stepCount, bpmInt);
-          else if (editMode == SequencerEditorMode::editingStep)
-              hudTitle = makeStepTitle(sequenceIndex, stepIndex, stepCount);
-          else if (editMode == SequencerEditorMode::configuringSequence)
-          {
-              auto* sequencer = audioProcessor.getSequencer();
-              auto* sequence = sequencer->getSequence(sequenceIndex);
-              const auto headCount = sequence != nullptr ? sequence->getReadHeadCount() : 1u;
-              hudTitle = makeSequenceConfigTitle(sequenceIndex,
-                                                 seqEditor->getCurrentSeqParam(),
-                                                 seqEditor->getCurrentConfigHead(),
-                                                 headCount,
-                                                 sequencer->getSeqConfigSpecs(),
-                                                 startCol,
-                                                 visibleCols,
-                                                 sequencer->howManySequences());
-          }
-      });
-
-      if (overlayState.text != hudTitle)
-          overlayState.text = hudTitle;
-      lastHudBpm = bpmInt;
-  }
+  overlayState.rightStrip = stateDialogMode == StateDialogMode::none
+      && editMode != SequencerEditorMode::resetConfirmation;
+  if (overlayState.rightStrip)
+      overlayState.text = compactPageLabel(editMode);
 
   overlayState.color = palette.textPrimary;
   overlayState.glowColor = palette.gridPlayhead;
@@ -516,6 +491,47 @@ void TrackerMainUI::timerCallback ()
     });
   }
   openGLContext.triggerRepaint();
+  if (uiBenchmarkEnabled)
+  {
+      const auto elapsed = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count());
+      const auto index = static_cast<std::size_t>(editMode);
+      if (index < uiPageCount.size())
+          recordUiBenchmarkSample(uiPageTotalNs[index], uiPageMaxNs[index], uiPageCount[index], elapsed);
+  }
+}
+
+void TrackerMainUI::recordUiBenchmarkSample(std::atomic<std::uint64_t>& total,
+                                            std::atomic<std::uint64_t>& maximum,
+                                            std::atomic<std::uint64_t>& count,
+                                            std::uint64_t elapsedNs) noexcept
+{
+    total.fetch_add(elapsedNs, std::memory_order_relaxed);
+    count.fetch_add(1, std::memory_order_relaxed);
+    auto current = maximum.load(std::memory_order_relaxed);
+    while (current < elapsedNs && !maximum.compare_exchange_weak(current, elapsedNs, std::memory_order_relaxed)) {}
+}
+
+void TrackerMainUI::writeUiBenchmarkReport()
+{
+    if (!uiBenchmarkEnabled || uiBenchmarkReportFile == juce::File())
+        return;
+    static constexpr const char* names[] = { "song", "sequence", "config", "step", "machine", "mixer", "audio", "help", "reset" };
+    juce::String text("{\n  \"pages\": {\n");
+    for (std::size_t index = 0; index < uiPageCount.size(); ++index)
+    {
+        const auto count = uiPageCount[index].load(std::memory_order_relaxed);
+        const auto total = uiPageTotalNs[index].load(std::memory_order_relaxed);
+        const auto maximum = uiPageMaxNs[index].load(std::memory_order_relaxed);
+        text << "    \"" << names[index] << "\": {\"frames\": " << static_cast<juce::int64>(count)
+             << ", \"meanUs\": " << (count == 0 ? 0.0 : static_cast<double>(total) / static_cast<double>(count) / 1000.0)
+             << ", \"maxUs\": " << static_cast<double>(maximum) / 1000.0 << "}" << (index + 1 == uiPageCount.size() ? "\n" : ",\n");
+    }
+    const auto renderCount = uiRenderCount.load(std::memory_order_relaxed);
+    text << "  },\n  \"render\": {\"frames\": " << static_cast<juce::int64>(renderCount)
+         << ", \"meanUs\": " << (renderCount == 0 ? 0.0 : static_cast<double>(uiRenderTotalNs.load(std::memory_order_relaxed)) / static_cast<double>(renderCount) / 1000.0)
+         << ", \"maxUs\": " << static_cast<double>(uiRenderMaxNs.load(std::memory_order_relaxed)) / 1000.0 << "}\n}\n";
+    uiBenchmarkReportFile.getParentDirectory().createDirectory();
+    uiBenchmarkReportFile.replaceWithText(text);
 }
 
 
@@ -1510,7 +1526,7 @@ void TrackerMainUI::prepareSongView()
         playMode = audioProcessor.getSongPlayMode();
     });
 
-    std::vector<std::vector<UIBox>> boxes(4, std::vector<UIBox>(rowCount));
+    std::vector<std::vector<UIBox>> boxes(5, std::vector<UIBox>(rowCount));
 
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
     boxes[0][0].text = "PLAY SONG";
@@ -1522,6 +1538,8 @@ void TrackerMainUI::prepareSongView()
     boxes[2][0].isDisabled = true;
     boxes[3][0].kind = UIBox::Kind::None;
     boxes[3][0].isDisabled = true;
+    boxes[4][0].kind = UIBox::Kind::None;
+    boxes[4][0].isDisabled = true;
 
     audioProcessor.withAudioThreadExclusive([&]()
     {
@@ -1533,9 +1551,11 @@ void TrackerMainUI::prepareSongView()
             boxes[1][displayRow].kind = UIBox::Kind::TrackerCell;
             boxes[1][displayRow].text = "BEAT " + std::to_string(audioProcessor.getSongRowBeatCount(row));
             boxes[2][displayRow].kind = UIBox::Kind::TrackerCell;
-            boxes[2][displayRow].text = "EDIT";
+            boxes[2][displayRow].text = "BPM " + std::to_string(audioProcessor.getSongRowBpm(row));
             boxes[3][displayRow].kind = UIBox::Kind::TrackerCell;
-            boxes[3][displayRow].text = "DEL";
+            boxes[3][displayRow].text = "EDIT";
+            boxes[4][displayRow].kind = UIBox::Kind::TrackerCell;
+            boxes[4][displayRow].text = "DEL";
 
             if (playMode == SongPlayMode::song && row == playbackSongRow)
             {
@@ -1543,19 +1563,41 @@ void TrackerMainUI::prepareSongView()
                 boxes[1][displayRow].isHighlighted = true;
                 boxes[2][displayRow].isHighlighted = true;
                 boxes[3][displayRow].isHighlighted = true;
+                boxes[4][displayRow].isHighlighted = true;
             }
         }
     });
 
     currentSongRow = std::min(currentSongRow, rowCount - 1);
-    currentSongCol = std::min(currentSongCol, static_cast<std::size_t>(currentSongRow == 0 ? 1 : 3));
+    currentSongCol = std::min(currentSongCol, static_cast<std::size_t>(currentSongRow == 0 ? 1 : 4));
     boxes[currentSongCol][currentSongRow].isSelected = true;
 
-    updateCellStates(boxes, rowCount, 4);
+    updateCellStates(boxes, rowCount, 5);
     overlayState.text = "Song";
     overlayState.color = palette.textPrimary;
     overlayState.glowColor = palette.gridPlayhead;
     overlayState.glowStrength = 0.25f;
+}
+
+void TrackerMainUI::prepareAudioConfigView()
+{
+    samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
+    samplerColumnWidths.clear();
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
+    auto boxes = seqEditor->getAudioConfigCells();
+    updateCellStates(boxes, rowsInUI - 1, 4);
+    overlayState.text = "AUDIO CONFIG";
+    overlayState.color = palette.textPrimary;
+    overlayState.glowColor = palette.gridPlayhead;
+    overlayState.glowStrength = 0.35f;
 }
 
 void TrackerMainUI::prepareHelpView()
@@ -1577,7 +1619,7 @@ void TrackerMainUI::prepareHelpView()
         {"SPACE", "PLAY/STOP", "ARROWS", "MOVE", "ENTER", "ACT/REC"},
         {"BACK", "RESET/EXIT", "TAB", "STEP", "[ ]", "ADJUST"},
         {"+/-", "ROWS", "S+C", "CLOCK", "R", "REWIND"},
-        {"1-7", "PAGES", "S+I", "INSERT", "S+K", "DELETE"},
+        {"0-7", "PAGES", "S+I", "INSERT", "S+K", "DELETE"},
         {"S+H", "HELP", "S+UP/DN", "SELECT", "C+C", "COPY"},
         {"C+V", "PASTE", "C+=", "SHIFT +", "C+-", "SHIFT -"},
         {"S+S", "SOLO", "S+M", "MUTE", "S+E/G", "XPL/IMP"},
@@ -2105,6 +2147,10 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         {
             handled = seqEditor->enterMachineDetailFromAnywhere();
         }
+        else if (keyCode == '0')
+        {
+            handled = seqEditor->selectPageShortcut(0);
+        }
         else if (keyCode >= '1' && keyCode <= '7')
         {
             handled = seqEditor->selectPageShortcut(keyCode - '0');
@@ -2208,19 +2254,6 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
                     seqEditor->addRow();
                     handled = true;
                     break;
-                case '_':
-                {
-                    const double bpm = audioProcessor.getBPM();
-                    audioProcessor.setBPM(bpm <= 1.0 ? 1.0 : bpm - 1.0);
-                    handled = true;
-                    break;
-                }
-                case '+':
-                {
-                    audioProcessor.setBPM(audioProcessor.getBPM() + 1.0);
-                    handled = true;
-                    break;
-                }
                 case '[':
                     seqEditor->decrementAtCursor();
                     handled = true;

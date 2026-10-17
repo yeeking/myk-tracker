@@ -125,6 +125,22 @@ target_link_libraries(myk-tracker-plug
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+option(MYK_TRACKER_BUILD_PERFORMANCE_BENCHMARK "Build the standalone dynamic-performance benchmark" OFF)
+if (MYK_TRACKER_BUILD_PERFORMANCE_BENCHMARK)
+    target_compile_definitions(myk-tracker-plug PRIVATE MYK_TRACKER_PERFORMANCE_INSTRUMENTATION=1)
+    add_executable(myk-tracker-performance-benchmark tools/PerformanceBenchmark.cpp)
+    target_include_directories(myk-tracker-performance-benchmark PRIVATE
+        src src/machines
+        "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE/modules"
+        "${CMAKE_CURRENT_BINARY_DIR}/myk-tracker-plug_artefacts/JuceLibraryCode")
+    target_compile_features(myk-tracker-performance-benchmark PRIVATE cxx_std_17)
+    target_compile_definitions(myk-tracker-performance-benchmark PRIVATE MYK_TRACKER_PERFORMANCE_INSTRUMENTATION=1)
+    target_link_libraries(myk-tracker-performance-benchmark PRIVATE
+        myk-tracker-plug
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+endif()
+
 include(CTest)
 if (BUILD_TESTING)
     juce_add_console_app(sequence-read-head-tests PRODUCT_NAME "Sequence Read Head Tests")
