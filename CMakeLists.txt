@@ -189,4 +189,19 @@ if (BUILD_TESTING)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
     add_test(NAME modulation-matrix-tests COMMAND modulation-matrix-tests)
+
+    juce_add_console_app(wavetable-synth-tests PRODUCT_NAME "Wavetable Synth Tests")
+    juce_generate_juce_header(wavetable-synth-tests)
+    target_sources(wavetable-synth-tests PRIVATE
+        tests/WavetableSynthTests.cpp
+        src/machines/WavetableSynthMachine.cpp
+        src/machines/ModulationMatrixMachine.cpp)
+    target_include_directories(wavetable-synth-tests PRIVATE src)
+    target_compile_features(wavetable-synth-tests PRIVATE cxx_std_17)
+    target_compile_definitions(wavetable-synth-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(wavetable-synth-tests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME wavetable-synth-tests COMMAND wavetable-synth-tests)
 endif()

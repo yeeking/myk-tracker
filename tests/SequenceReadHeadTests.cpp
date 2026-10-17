@@ -37,6 +37,10 @@ struct TestMachines final : MachineUtilsAbs
     void allNotesOff() override {}
     void sendMessageToMachine(CommandType, unsigned short, unsigned short note,
                               unsigned short, unsigned short) override { notes.push_back(note); }
+    void beginHeldNote(CommandType, unsigned short, unsigned short note,
+                       unsigned short) override { notes.push_back(note); heldNotes.push_back(note); }
+    void endHeldNote(CommandType, unsigned short, unsigned short note) override
+    { releasedNotes.push_back(note); }
     std::string describeStepNote(CommandType, unsigned short, unsigned short note) const override
     { return std::to_string(note); }
     void sendQueuedMessages(long) override {}
@@ -45,6 +49,8 @@ struct TestMachines final : MachineUtilsAbs
     void setFilterCutoffHzForStack(unsigned short machineId, double cutoffHz) override
     { cutoffs.emplace_back(machineId, cutoffHz); }
     std::vector<unsigned short> notes;
+    std::vector<unsigned short> heldNotes;
+    std::vector<unsigned short> releasedNotes;
     std::vector<std::pair<unsigned short, bool>> auxToggles;
     std::vector<std::pair<unsigned short, double>> cutoffs;
 };
@@ -70,6 +76,8 @@ struct TestMachineHost final : MachineHost
     float getStackMeterLevel(std::size_t stack) const override { return meters[stack]; }
     float getStackGainDb(std::size_t stack) const override { return gains[stack]; }
     void setStackGainDb(std::size_t stack, float gainDb) override { gains[stack] = gainDb; }
+    float getStackPan(std::size_t stack) const override { return stackPans[stack]; }
+    void setStackPan(std::size_t stack, float pan) override { stackPans[stack] = MixerState::clampPan(pan); }
     float getMasterMeterLevel(std::size_t channel) const override { return masterMeters[channel]; }
     float getMasterGainDb() const override { return masterGain; }
     void setMasterGainDb(float gainDb) override { masterGain = MixerState::clampMasterGainDb(gainDb); }
@@ -80,6 +88,8 @@ struct TestMachineHost final : MachineHost
     float getAuxReturnMeterLevel(std::size_t aux, std::size_t channel) const override { return auxMeters[aux][channel]; }
     float getAuxReturnGainDb(std::size_t aux) const override { return auxGains[aux]; }
     void setAuxReturnGainDb(std::size_t aux, float gainDb) override { auxGains[aux] = MixerState::clampMasterGainDb(gainDb); }
+    float getAuxReturnPan(std::size_t aux) const override { return auxPans[aux]; }
+    void setAuxReturnPan(std::size_t aux, float pan) override { auxPans[aux] = MixerState::clampPan(pan); }
     bool isAuxReturnMuted(std::size_t aux) const override { return auxMuted[aux]; }
     void setAuxReturnMuted(std::size_t aux, bool value) override { auxMuted[aux] = value; }
     bool isStackMuted(std::size_t stack) const override { return muted[stack]; }
@@ -94,10 +104,12 @@ struct TestMachineHost final : MachineHost
     std::vector<bool> solo { false, false };
     std::vector<float> meters { 0.0f, 0.0f };
     std::vector<float> gains { 0.0f, 0.0f };
+    std::vector<float> stackPans { 0.0f, 0.0f };
     std::array<float, 2> masterMeters { 0.0f, 0.0f };
     std::array<std::array<float, 2>, 2> auxMeters {};
     float masterGain = 0.0f;
     std::array<float, 2> auxGains { 0.0f, 0.0f };
+    std::array<float, 2> auxPans { 0.0f, 0.0f };
     bool masterRecording = false;
     bool masterMuted = false;
     std::array<bool, 2> auxMuted { false, false };
@@ -468,6 +480,9 @@ int main()
                 && sequenceChord[1][Step::noteInd] == 64.0 && sequenceChord[2][Step::noteInd] == 67.0,
             "sequence-page chord key writes the expected major chord");
     require(machines.notes.size() == 3, "sequence-page chord auditions while stopped");
+    keyboardEditor.releaseKeyboardAuditionKey('q');
+    require(machines.releasedNotes.size() == 3,
+            "releasing an auditioned chord key sends one note-off per chord note");
 
     keyboardEditor.gotoMixerPage();
     const auto beforePreview = keyboardSequencer.getStepData(0, 0);
@@ -481,6 +496,12 @@ int main()
                 && machines.notes[2] == machines.notes[0] + 4
                 && machines.notes[3] == machines.notes[0] + 7,
             "preview-only chord root follows the last auditioned piano key");
+    const auto auditionCount = machines.notes.size();
+    require(keyboardEditor.handleNoteKey('z'), "repeated held piano key is handled");
+    require(machines.notes.size() == auditionCount,
+            "repeated piano-key press does not retrigger an existing held audition");
+    keyboardEditor.releaseKeyboardAuditionKey('z');
+    keyboardEditor.releaseKeyboardAuditionKey('q');
 
     keyboardEditor.gotoSequencePage();
     keyboardEditor.setCurrentStep(1);
@@ -533,6 +554,28 @@ int main()
             "TPS decrement updates the selected read head");
     require(tpsHost.silencedStacks.empty(),
             "TPS edits preserve active stack voices and pending note-offs");
+    tpsEditor.moveCursorUp();
+    tpsEditor.moveCursorUp();
+    require(tpsEditor.getCurrentSeqParam() == Sequence::headCountConfig,
+            "HEADS row is reachable after TPS");
+    tpsEditor.incrementAtCursor();
+    require(tpsHost.silencedStacks.empty()
+                && tpsSequencer.getSequence(0)->isWaitingForQuarterBeatResync(),
+            "HEADS edits retain locked resync without silencing active voices");
+    tpsEditor.moveCursorDown();
+    tpsEditor.moveCursorDown();
+    tpsEditor.moveCursorDown();
+    require(tpsEditor.getCurrentSeqParam() == Sequence::modeConfig,
+            "MODE row is reachable after HEADS");
+    tpsEditor.incrementAtCursor();
+    require(tpsHost.silencedStacks.empty(), "MODE edits do not silence active voices");
+    tpsEditor.moveCursorDown();
+    tpsEditor.moveCursorDown();
+    tpsEditor.moveCursorDown();
+    require(tpsEditor.getCurrentSeqParam() == Sequence::rhythmConfig,
+            "RHY row is reachable after MODE");
+    tpsEditor.incrementAtCursor();
+    require(tpsHost.silencedStacks.empty(), "RHY edits do not silence active voices");
 
     Sequencer navigationSequencer(1, 4);
     SequencerEditor navigationEditor(&navigationSequencer);
@@ -752,8 +795,15 @@ int main()
     mixerEditor.moveCursorRight();
     require(mixerEditor.getSelectedMixerAux() == std::optional<std::size_t>(0),
             "first aux return follows the master column");
+    mixerEditor.moveCursorUp();
+    mixerEditor.moveCursorUp();
     mixerEditor.incrementAtCursor();
     require(mixerHost.auxGains[0] == 1.0f, "aux gain row adjusts by one decibel");
+    mixerEditor.moveCursorDown();
+    mixerEditor.moveCursorDown();
+    mixerEditor.incrementAtCursor();
+    require(std::abs(mixerHost.auxPans[0] - 0.05f) < 0.0001f,
+            "aux PAN row adjusts in five-percent steps");
     mixerEditor.toggleMuteCurrentMixerStack();
     mixerEditor.toggleSoloCurrentMixerStack();
     require(mixerHost.auxMuted[0] && !mixerHost.solo[0],
@@ -764,6 +814,9 @@ int main()
     mixerEditor.moveCursorRight();
     require(mixerEditor.getSelectedMixerStack() == std::optional<std::size_t>(0),
             "first stack retains stack id zero after master and aux insertions");
+    mixerEditor.incrementAtCursor();
+    require(std::abs(mixerHost.stackPans[0] - 0.05f) < 0.0001f,
+            "stack PAN row adjusts in five-percent steps");
     mixerEditor.toggleMuteCurrentMixerStack();
     mixerEditor.toggleSoloCurrentMixerStack();
     require(mixerHost.muted[0] && mixerHost.solo[0],

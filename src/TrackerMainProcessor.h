@@ -61,6 +61,8 @@ public:
     // the MachineUtils interface 
     void allNotesOff() override;
     void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) override; 
+    void beginHeldNote(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity) override;
+    void endHeldNote(CommandType machineType, unsigned short machineId, unsigned short note) override;
     std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const override;
     void sendQueuedMessages(long tick) override; 
     void toggleAuxSendForStack(unsigned short machineId, bool isAux1) override;
@@ -142,6 +144,8 @@ public:
     float getStackMeterLevel(std::size_t stackIndex) const override;
     float getStackGainDb(std::size_t stackIndex) const override;
     void setStackGainDb(std::size_t stackIndex, float gainDb) override;
+    float getStackPan(std::size_t stackIndex) const override;
+    void setStackPan(std::size_t stackIndex, float pan) override;
     float getMasterMeterLevel(std::size_t channel) const override;
     float getMasterGainDb() const override;
     void setMasterGainDb(float gainDb) override;
@@ -152,6 +156,8 @@ public:
     float getAuxReturnMeterLevel(std::size_t auxIndex, std::size_t channel) const override;
     float getAuxReturnGainDb(std::size_t auxIndex) const override;
     void setAuxReturnGainDb(std::size_t auxIndex, float gainDb) override;
+    float getAuxReturnPan(std::size_t auxIndex) const override;
+    void setAuxReturnPan(std::size_t auxIndex, float pan) override;
     bool isAuxReturnMuted(std::size_t auxIndex) const override;
     void setAuxReturnMuted(std::size_t auxIndex, bool muted) override;
     bool isStackMuted(std::size_t stackIndex) const override;
@@ -295,6 +301,7 @@ private:
         unsigned short note = 0;
         unsigned short velocity = 0;
         unsigned short durationTicks = 0;
+        bool isNoteOff = false;
         int samplePosition = 0;
     };
     /** Pending + scratch buffers for one note-event pipeline (message-thread enqueue, audio-thread drain). */
@@ -362,6 +369,12 @@ private:
         int midiOutputChannel = 1;
         float gainDb = 0.0f;
         GainCache gain;
+        float pan = 0.0f;
+        float panCurrent = 0.0f;
+        float panTarget = 0.0f;
+        /** Smoothed final pan after audio-rate modulation. */
+        float panSmoothed = 0.0f;
+        int panRampSamples = 0;
         float meterLevel = 0.0f;
         /** Audio-thread ring buffer of the stack's final mono output (L+R)/2 for the
             UI oscilloscope. Allocated in prepareToPlay; the UI reads it via
@@ -390,6 +403,10 @@ private:
         std::array<float, 2> meterLevels { 0.0f, 0.0f };
         float gainDb = 0.0f;
         float gainLinear = 1.0f;
+        float pan = 0.0f;
+        float panCurrent = 0.0f;
+        float panTarget = 0.0f;
+        int panRampSamples = 0;
         bool muted = false;
         int id = 0;
     };
@@ -408,6 +425,8 @@ private:
     float masterGainDb = 0.0f;
     float masterGainLinear = 1.0f;
     bool masterMuted = false;
+    double preparedSampleRate = 44100.0;
+    float panModulationSmoothing = 0.0f;
     std::array<float, 2> masterMeterLevels { 0.0f, 0.0f };
     struct RecordingSession
     {
@@ -536,7 +555,8 @@ private:
                           std::size_t stackIndex,
                           unsigned short note,
                           unsigned short velocity,
-                          unsigned short durInTicks);
+                          unsigned short durInTicks,
+                          bool isNoteOff = false);
     /** Delivers queued note events that fall inside the current block and keeps the
         per-stack delivery vector sorted for the machine's cursor walk. */
     void distributeNoteEvents(NoteEventQueue& queue,
@@ -550,7 +570,8 @@ private:
                                   unsigned short note,
                                   unsigned short velocity,
                                   unsigned short durInTicks,
-                                  std::size_t startSlotIndex = 0);
+                                  std::size_t startSlotIndex = 0,
+                                  bool held = false);
     void allNotesOffForStack(std::size_t stackIndex);
     //==============================================================================
     juce::OSCReceiver oscReceiver;

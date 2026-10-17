@@ -16,6 +16,12 @@ class MachineUtilsAbs{
          * and schedule a note off for later
          */
          virtual void sendMessageToMachine(CommandType machineType, unsigned short machineId, unsigned short note, unsigned short velocity, unsigned short durInTicks) = 0;
+         /** Starts a computer-keyboard audition which remains active until its
+          * matching endHeldNote. Lightweight hosts keep one-shot semantics. */
+         virtual void beginHeldNote(CommandType machineType, unsigned short machineId,
+                                    unsigned short note, unsigned short velocity)
+         { sendMessageToMachine(machineType, machineId, note, velocity, 1); }
+         virtual void endHeldNote(CommandType, unsigned short, unsigned short) {}
          virtual std::string describeStepNote(CommandType machineType, unsigned short machineId, unsigned short note) const = 0;
          /** toggle the enabled state of an aux send slot on the sent stack */
          virtual void toggleAuxSendForStack(unsigned short, bool) {}

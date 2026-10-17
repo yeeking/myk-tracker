@@ -5,6 +5,7 @@
 #include <optional>
 #include <limits>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "UIBox.h"
@@ -27,6 +28,7 @@ enum class SongPlayMode
   sequence
 };
 struct Parameter;
+struct SequenceReadOnly;
 
 // Interface for machine access from the editor.
 class MachineHost
@@ -54,6 +56,8 @@ public:
   virtual float getStackMeterLevel(std::size_t stackIndex) const = 0;
   virtual float getStackGainDb(std::size_t stackIndex) const = 0;
   virtual void setStackGainDb(std::size_t stackIndex, float gainDb) = 0;
+  virtual float getStackPan(std::size_t stackIndex) const = 0;
+  virtual void setStackPan(std::size_t stackIndex, float pan) = 0;
   virtual float getMasterMeterLevel(std::size_t channel) const = 0;
   virtual float getMasterGainDb() const = 0;
   virtual void setMasterGainDb(float gainDb) = 0;
@@ -64,6 +68,8 @@ public:
   virtual float getAuxReturnMeterLevel(std::size_t auxIndex, std::size_t channel) const = 0;
   virtual float getAuxReturnGainDb(std::size_t auxIndex) const = 0;
   virtual void setAuxReturnGainDb(std::size_t auxIndex, float gainDb) = 0;
+  virtual float getAuxReturnPan(std::size_t auxIndex) const = 0;
+  virtual void setAuxReturnPan(std::size_t auxIndex, float pan) = 0;
   virtual bool isAuxReturnMuted(std::size_t auxIndex) const = 0;
   virtual void setAuxReturnMuted(std::size_t auxIndex, bool muted) = 0;
   virtual bool isStackMuted(std::size_t stackIndex) const = 0;
@@ -292,6 +298,10 @@ public:
   bool handleChordKey(char key);
   bool handleControlKey(char key);
   bool handleNoteKey(char key);
+  /** Releases the held audition(s) started by a physical computer key. */
+  void releaseKeyboardAuditionKey(char key);
+  /** Releases audition keys which are no longer physically held. */
+  void releaseKeyboardAuditionsExcept(const std::string& stillHeldKeys);
   /** Audition every event in the focused Sequence/Step-page step while stopped. */
   bool triggerCurrentStep();
   bool enterSelectedMachineDetail();
@@ -410,10 +420,12 @@ private:
   bool currentSequenceControlMode() const;
   bool currentStepIsControlCommand() const;
   void enterControlCommand(CommandType command);
-  void previewEnteredNote(double midiNote);
+  void previewEnteredNote(double midiNote, char physicalKey);
+  void beginKeyboardAudition(char physicalKey, const std::vector<std::vector<double>>& rows,
+                             const SequenceReadOnly& context);
   void syncOctaveFromMidiNote(double midiNote);
   void clampStepCursorToCurrentStep();
-  bool applyChordToCurrentStep(const std::vector<int>& intervals);
+  bool applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals);
   std::vector<std::vector<UIBox>> buildMachineStackCells(std::size_t stackIndex);
   std::optional<CommandType> getSelectedStackMachineType() const;
   void leaveMachineDetail();
@@ -514,6 +526,13 @@ private:
   double octave;
   /** Last piano-key note actually auditioned while stopped; roots preview-only chords. */
   std::optional<double> lastAuditionedMidiNote;
+  struct HeldKeyboardNote
+  {
+    CommandType machineType;
+    unsigned short machineId = 0;
+    unsigned short note = 0;
+  };
+  std::unordered_map<char, std::vector<HeldKeyboardNote>> heldKeyboardNotes;
   std::vector<std::vector<UIBox>> machineCells;
   std::size_t machineCursorRow = 0;
   std::size_t machineCursorCol = 0;

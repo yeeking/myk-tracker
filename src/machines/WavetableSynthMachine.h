@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <mutex>
 #include <vector>
 
@@ -81,6 +82,8 @@ public:
                              float& maxAttack, float& maxDecay, float& maxRelease) const;
     /** Returns all waveform and envelope preview settings under one state lock. */
     UiPreviewState getUiPreviewState() const;
+    /** Configured polyphony limit, from one monophonic voice to sixteen voices. */
+    int getVoiceCount() const;
 
 private:
     /** Available base waveforms for wavetable morphing. Indices are persisted
@@ -119,6 +122,12 @@ private:
         int midiNote = -1;
         /** Normalised voice velocity. */
         float velocity = 0.0f;
+        /** Target velocity used by the short mono retrigger smoothing ramp. */
+        float targetVelocity = 0.0f;
+        /** Per-sample mono velocity ramp increment. */
+        float velocityRampStep = 0.0f;
+        /** Samples remaining in the mono velocity ramp. */
+        int velocityRampSamplesRemaining = 0;
         /** Current oscillator phase. */
         double phase = 0.0;
         /** Phase increment per sample. */
@@ -131,6 +140,8 @@ private:
         double subPhaseDelta = 0.0;
         /** Age of the note in samples. */
         int ageSamples = 0;
+        /** Monotonic allocation serial used to preserve the newest voice when entering mono. */
+        std::uint64_t triggerOrder = 0;
         /** Total scheduled note duration in samples. */
         int noteDurationSamples = 0;
         /** Remaining samples before the release stage begins. */
@@ -147,15 +158,16 @@ private:
     static constexpr int kTableSize = 128;
     /** Number of available base waveforms. */
     static constexpr std::size_t kWaveformCount = static_cast<std::size_t>(Waveform::count);
-    /** Fixed number of polyphonic voices. */
-    static constexpr int kVoiceCount = 8;
+    /** Maximum fixed voice-pool size. The configured active limit may be lower. */
+    static constexpr int kMaxVoiceCount = 8;
+    static constexpr int kDefaultVoiceCount = 4;
     /** Maximum number of wavetable steps in the morph sequence. */
     static constexpr int kMaxWaveSteps = static_cast<int>(kUiWaveStepCapacity);
 
     /** Precomputed waveform tables. */
     std::array<std::array<float, kTableSize>, kWaveformCount> tables {};
     /** Fixed voice pool. */
-    std::array<Voice, kVoiceCount> voices {};
+    std::array<Voice, kMaxVoiceCount> voices {};
     /** Selected waveform at each wavetable step. */
     std::array<Waveform, kMaxWaveSteps> waveSteps {
         Waveform::sine,
@@ -183,6 +195,9 @@ private:
     double currentSecondsPerTick = kDefaultTrackerSecondsPerTick;
     /** Round-robin voice allocation cursor. */
     int nextVoiceIndex = 0;
+    std::uint64_t nextVoiceTriggerOrder = 0;
+    /** Number of voices available for new note allocation. */
+    int voiceCount = kDefaultVoiceCount;
     /** Number of active wavetable steps. */
     int waveStepCount = 2;
     /** Clock source for the waveform cycler. */
@@ -245,6 +260,16 @@ private:
         Message-thread only (ctor, UI adjust, state restore); the audio path
         only ever multiplies. */
     void updateMainDetuneMultiplier();
+    /** Applies a clamped voice limit while stateMutex is already held. */
+    void setVoiceCountLocked(int newVoiceCount);
+    /** Starts or smoothly retriggers the persistent monophonic voice. */
+    void triggerMonoVoice(Voice& voice, const MachineScheduledNote& event);
+    /** Initialises a polyphonic voice with the existing hard-trigger behaviour. */
+    void triggerPolyVoice(Voice& voice, const MachineScheduledNote& event);
+    /** Begins release for voices matching a held computer-keyboard note. */
+    void releaseHeldNote(unsigned short note);
+    /** Updates oscillator pitch and scheduled release timing for a note. */
+    void configureVoiceForNote(Voice& voice, const MachineScheduledNote& event);
     /** Allocates the next voice, stealing if needed. */
     Voice& allocateVoice();
     /** Samples one voice and advances its lifecycle. */

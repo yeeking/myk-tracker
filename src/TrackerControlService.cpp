@@ -1095,6 +1095,11 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
             case CommandKind::uiAction:
             {
                 const auto action = stringArg(args, "action");
+                if (action == "release_audition_keys")
+                {
+                    editor.releaseKeyboardAuditionsExcept(stringArg(args, "keys").toStdString());
+                    return success();
+                }
                 if (action == "key")
                 {
                     const int keyCode = intArg(args, "keyCode");

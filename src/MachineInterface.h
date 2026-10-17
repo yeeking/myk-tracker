@@ -41,6 +41,8 @@ struct MachineScheduledNote
     unsigned short velocity = 0;
     /** Note duration in tracker ticks. */
     unsigned short durationTicks = 0;
+    /** Explicit release for a held computer-keyboard audition. */
+    bool isNoteOff = false;
 };
 
 // Interface for stack instruments and audio processors.

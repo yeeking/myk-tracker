@@ -24,6 +24,41 @@ constexpr const char* zoomInAddress = "/zoom_in";
 constexpr const char* zoomOutAddress = "/zoom_out";
 constexpr const char* incrementAddress = "/increment";
 constexpr const char* decrementAddress = "/decrement";
+constexpr std::size_t kPanTableSize = 2049;
+struct PanGains { float left = 0.70710678f, right = 0.70710678f; };
+const std::array<PanGains, kPanTableSize>& equalPowerPanTable()
+{
+    static const std::array<PanGains, kPanTableSize> table = []
+    {
+        std::array<PanGains, kPanTableSize> values {};
+        for (std::size_t i = 0; i < values.size(); ++i)
+        {
+            const float fraction = static_cast<float>(i) / static_cast<float>(values.size() - 1);
+            const float angle = fraction * juce::MathConstants<float>::halfPi;
+            values[i] = { std::cos(angle), std::sin(angle) };
+        }
+        return values;
+    }();
+    return table;
+}
+PanGains equalPowerPan(float pan) noexcept
+{
+    const float position = (MixerState::clampPan(pan) + 1.0f) * 0.5f * static_cast<float>(kPanTableSize - 1);
+    const int index = juce::jlimit(0, static_cast<int>(kPanTableSize - 2), static_cast<int>(position));
+    const float fraction = position - static_cast<float>(index);
+    const auto& table = equalPowerPanTable();
+    return { table[static_cast<std::size_t>(index)].left + (table[static_cast<std::size_t>(index + 1)].left - table[static_cast<std::size_t>(index)].left) * fraction,
+             table[static_cast<std::size_t>(index)].right + (table[static_cast<std::size_t>(index + 1)].right - table[static_cast<std::size_t>(index)].right) * fraction };
+}
+float advancePan(float& current, float target, int& remaining) noexcept
+{
+    if (remaining > 0)
+    {
+        current += (target - current) / static_cast<float>(remaining--);
+        if (remaining == 0) current = target;
+    }
+    return current;
+}
 std::string formatMidiNoteLabel(unsigned short note)
 {
     const std::size_t noteIndex = static_cast<std::size_t>(note % 12);
@@ -627,9 +662,10 @@ void TrackerMainProcessor::enqueueStackNote(NoteEventQueue& queue,
                                              std::size_t stackIndex,
                                              unsigned short note,
                                              unsigned short velocity,
-                                             unsigned short durInTicks)
+                                             unsigned short durInTicks,
+                                             bool isNoteOff)
 {
-    queue.pending.push_back({ stackIndex, note, velocity, durInTicks, elapsedSamples });
+    queue.pending.push_back({ stackIndex, note, velocity, durInTicks, isNoteOff, elapsedSamples });
 }
 
 void TrackerMainProcessor::distributeNoteEvents(NoteEventQueue& queue,
@@ -662,7 +698,7 @@ void TrackerMainProcessor::distributeNoteEvents(NoteEventQueue& queue,
         {
             const std::size_t safeStackIndex = event.stackIndex < machineStacks.size() ? event.stackIndex : 0u;
             (machineStacks[safeStackIndex].*blockNotesMember).push_back(
-                { sampleOffset, event.note, event.velocity, event.durationTicks });
+                { sampleOffset, event.note, event.velocity, event.durationTicks, event.isNoteOff });
         }
         else
         {
@@ -695,7 +731,8 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                                                     unsigned short note,
                                                     unsigned short velocity,
                                                     unsigned short durInTicks,
-                                                    std::size_t startSlotIndex)
+                                                    std::size_t startSlotIndex,
+                                                    bool held)
 {
     auto* stack = getMachineStack(stackIndex);
     if (stack == nullptr || !isStackAudible(stackIndex))
@@ -726,23 +763,29 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
         switch (slotType)
         {
             case CommandType::MidiNote:
-                enqueueMachineMidi(midiToSend,
-                                   static_cast<unsigned short>(getStackMidiOutputChannel(stackIndex)),
-                                   note,
-                                   velocity,
-                                   durInTicks);
+                if (held)
+                    midiToSend.addEvent(MidiMessage::noteOn(getStackMidiOutputChannel(stackIndex), static_cast<int>(note), static_cast<uint8>(velocity)), elapsedSamples);
+                else
+                    enqueueMachineMidi(midiToSend,
+                                       static_cast<unsigned short>(getStackMidiOutputChannel(stackIndex)),
+                                       note,
+                                       velocity,
+                                       durInTicks);
                 anyTerminalTriggered = true;
                 break;
             case CommandType::LegacyArpeggiator:
             case CommandType::LegacyPolyArpeggiator:
                 return;
             case CommandType::Sampler:
-                enqueueStackSamplerMidi(stackIndex, note, velocity, durInTicks);
+                if (held)
+                    samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOn(1, static_cast<int>(note), static_cast<uint8>(velocity)), elapsedSamples });
+                else
+                    enqueueStackSamplerMidi(stackIndex, note, velocity, durInTicks);
                 anyTerminalTriggered = true;
                 break;
             case CommandType::WavetableSynth:
                 // Notes are queued and applied sample-accurately in the synth's processBlock.
-                enqueueStackNote(wavetableEvents, stackIndex, note, velocity, durInTicks);
+                enqueueStackNote(wavetableEvents, stackIndex, note, velocity, held ? 0 : durInTicks);
                 anyTerminalTriggered = true;
                 break;
             case CommandType::DistortionFx:
@@ -766,11 +809,14 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
 
     if (!anyTerminalTriggered && !hasExplicitTerminalRoute)
     {
-        enqueueMachineMidi(midiToSend,
-                           static_cast<unsigned short>(getStackMidiOutputChannel(stackIndex)),
-                           note,
-                           velocity,
-                           durInTicks);
+        if (held)
+            midiToSend.addEvent(MidiMessage::noteOn(getStackMidiOutputChannel(stackIndex), static_cast<int>(note), static_cast<uint8>(velocity)), elapsedSamples);
+        else
+            enqueueMachineMidi(midiToSend,
+                               static_cast<unsigned short>(getStackMidiOutputChannel(stackIndex)),
+                               note,
+                               velocity,
+                               durInTicks);
     }
 }
 
@@ -1011,6 +1057,8 @@ void TrackerMainProcessor::initialiseMachines()
     auxBus2.machine = std::make_unique<AuxReverbMachine>(juce::Reverb::Parameters{ 0.42f, 0.55f, 0.22f, 0.0f, 0.75f, 0.0f });
     auxBus1.gainDb = auxBus2.gainDb = 0.0f;
     auxBus1.gainLinear = auxBus2.gainLinear = 1.0f;
+    auxBus1.pan = auxBus2.pan = 0.0f;
+    auxBus1.panCurrent = auxBus1.panTarget = auxBus2.panCurrent = auxBus2.panTarget = 0.0f;
     auxBus1.muted = auxBus2.muted = false;
     auxBus1.meterLevels.fill(0.0f);
     auxBus2.meterLevels.fill(0.0f);
@@ -1045,6 +1093,7 @@ void TrackerMainProcessor::initialiseMachines()
         stack.muted = false;
         stack.solo = false;
         stack.gainDb = 0.0f;
+        stack.pan = stack.panCurrent = stack.panTarget = stack.panSmoothed = 0.0f;
         stack.meterLevel = 0.0f;
     }
     samplerEventsToSend.clear();
@@ -1408,6 +1457,10 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     seqEditor.setHostAudioFormat(sampleRate, samplesPerBlock);
     stopMasterRecording();
     const double activeSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    preparedSampleRate = activeSampleRate;
+    // A 5 ms one-pole slew removes gain discontinuities from square/S&H LFO
+    // panning while remaining quick enough for ordinary cyclic modulation.
+    panModulationSmoothing = 1.0f - std::exp(-1.0f / static_cast<float>(activeSampleRate * 0.005));
     const double activeBpm = getBPM();
     samplesPerTick = static_cast<unsigned int> (juce::jmax (1, static_cast<int> (std::lround (activeSampleRate * (60.0 / activeBpm) / 8.0))));
     const double secondsPerTick = getSecondsPerTickFromBpm(activeBpm);
@@ -1438,9 +1491,9 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
     for (auto& stack : machineStacks)
     {
-        stack.renderBuffer.setSize(getTotalNumOutputChannels(), preparedBlockSize);
+        stack.renderBuffer.setSize(1, preparedBlockSize);
         stack.renderBuffer.clear();
-        stack.delayTailBuffer.setSize(getTotalNumOutputChannels(), preparedBlockSize);
+        stack.delayTailBuffer.setSize(1, preparedBlockSize);
         stack.delayTailBuffer.clear();
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
@@ -1782,15 +1835,15 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             }
             else
             {
-            if (stack->renderBuffer.getNumChannels() != buffer.getNumChannels()
+            if (stack->renderBuffer.getNumChannels() != 1
                 || stack->renderBuffer.getNumSamples() != buffer.getNumSamples())
             {
-                stack->renderBuffer.setSize(buffer.getNumChannels(), buffer.getNumSamples(), false, false, true);
+                stack->renderBuffer.setSize(1, buffer.getNumSamples(), false, false, true);
             }
-            if (stack->delayTailBuffer.getNumChannels() != buffer.getNumChannels()
+            if (stack->delayTailBuffer.getNumChannels() != 1
                 || stack->delayTailBuffer.getNumSamples() != buffer.getNumSamples())
             {
-                stack->delayTailBuffer.setSize(buffer.getNumChannels(), buffer.getNumSamples(), false, false, true);
+                stack->delayTailBuffer.setSize(1, buffer.getNumSamples(), false, false, true);
             }
 
             auto& stackBuffer = stack->renderBuffer;
@@ -1841,15 +1894,17 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
                     auto* auxBus = getAuxBusForType(type);
                     if (auxBus == nullptr
-                        || auxBus->inputBuffer.getNumChannels() < buffer.getNumChannels()
+                        || auxBus->inputBuffer.getNumChannels() < 2
                         || auxBus->inputBuffer.getNumSamples() != buffer.getNumSamples())
                     {
                         continue;
                     }
 
                     const float sendGainLinear = slot.sendGain.get(slot.sendLevelDb);
-                    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-                        auxBus->inputBuffer.addFrom(channel, 0, stackBuffer, channel, 0, stackBuffer.getNumSamples(), sendGainLinear);
+                    // Stacks are intentionally mono until this final mixer path;
+                    // feed the shared stereo reverb equally before stack panning.
+                    auxBus->inputBuffer.addFrom(0, 0, stackBuffer, 0, 0, stackBuffer.getNumSamples(), sendGainLinear);
+                    auxBus->inputBuffer.addFrom(1, 0, stackBuffer, 0, 0, stackBuffer.getNumSamples(), sendGainLinear);
                     continue;
                 }
 
@@ -1868,8 +1923,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                         effect->processAudioBuffer(delayTailBuffer);
                         if (std::abs(returnGainLinear - 1.0f) > std::numeric_limits<float>::epsilon())
                             delayTailBuffer.applyGain(returnGainLinear);
-                        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-                            stackBuffer.addFrom(channel, 0, delayTailBuffer, channel, 0, delayTailBuffer.getNumSamples());
+                        stackBuffer.addFrom(0, 0, delayTailBuffer, 0, 0, delayTailBuffer.getNumSamples());
                         continue;
                     }
 
@@ -1897,7 +1951,6 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             if (!stack->scopeRing.empty())
             {
                 const int numSamples = stackBuffer.getNumSamples();
-                const int numChannels = stackBuffer.getNumChannels();
                 auto& scopeRing = stack->scopeRing;
                 const std::size_t ringSize = scopeRing.size();
                 // Keep the most recent ringSize samples of this block.
@@ -1907,10 +1960,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 for (int s = 0; s < samplesToWrite; ++s)
                 {
                     const int idx = startInBlock + s;
-                    const float mono = (numChannels > 1)
-                        ? 0.5f * (stackBuffer.getSample(0, idx) + stackBuffer.getSample(1, idx))
-                        : stackBuffer.getSample(0, idx);
-                    scopeRing[stack->scopeHead] = mono;
+                    scopeRing[stack->scopeHead] = stackBuffer.getSample(0, idx);
                     if (++stack->scopeHead == ringSize)
                         stack->scopeHead = 0;
                 }
@@ -1922,8 +1972,36 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             const float smoothing = meterTarget > stack->meterLevel ? attack : decay;
             stack->meterLevel += (meterTarget - stack->meterLevel) * smoothing;
             stack->meterLevel = juce::jlimit(0.0f, 1.0f, stack->meterLevel);
-            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-                buffer.addFrom(channel, 0, stackBuffer, channel, 0, stackBuffer.getNumSamples());
+            const auto* panModulation = stack->modulationMatrix != nullptr
+                ? &stack->modulationMatrix->getBlockView() : nullptr;
+            const bool modulatedPan = panModulation != nullptr
+                && panModulation->isActive(ModulationDestination::stackPan);
+            if (buffer.getNumChannels() < 2)
+            {
+                buffer.addFrom(0, 0, stackBuffer, 0, 0, stackBuffer.getNumSamples());
+            }
+            else if (!modulatedPan && stack->panRampSamples == 0
+                     && std::abs(stack->panSmoothed - stack->panCurrent) < 0.00001f)
+            {
+                const auto gains = equalPowerPan(stack->panSmoothed);
+                buffer.addFrom(0, 0, stackBuffer, 0, 0, stackBuffer.getNumSamples(), gains.left);
+                buffer.addFrom(1, 0, stackBuffer, 0, 0, stackBuffer.getNumSamples(), gains.right);
+            }
+            else
+            {
+                const auto* samples = stackBuffer.getReadPointer(0);
+                auto* left = buffer.getWritePointer(0);
+                auto* right = buffer.getWritePointer(1);
+                for (int sample = 0; sample < stackBuffer.getNumSamples(); ++sample)
+                {
+                    const float targetPan = MixerState::clampPan(advancePan(stack->panCurrent, stack->panTarget, stack->panRampSamples)
+                        + (modulatedPan ? panModulation->get(ModulationDestination::stackPan, sample) : 0.0f));
+                    stack->panSmoothed += (targetPan - stack->panSmoothed) * panModulationSmoothing;
+                    const auto gains = equalPowerPan(stack->panSmoothed);
+                    left[sample] += samples[sample] * gains.left;
+                    right[sample] += samples[sample] * gains.right;
+                }
+            }
             }
         }
 
@@ -1942,6 +2020,29 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         auxBus.machine->processAudioBuffer(auxBus.inputBuffer);
         if (!auxBus.muted && std::abs(auxBus.gainLinear - 1.0f) > std::numeric_limits<float>::epsilon())
             auxBus.inputBuffer.applyGain(auxBus.gainLinear);
+
+        // AUX returns remain stereo: pan is a balance, not a mono collapse.
+        if (!auxBus.muted && auxBus.inputBuffer.getNumChannels() >= 2)
+        {
+            if (auxBus.panRampSamples == 0)
+            {
+                const float leftGain = auxBus.panCurrent > 0.0f ? 1.0f - auxBus.panCurrent : 1.0f;
+                const float rightGain = auxBus.panCurrent < 0.0f ? 1.0f + auxBus.panCurrent : 1.0f;
+                auxBus.inputBuffer.applyGain(0, 0, auxBus.inputBuffer.getNumSamples(), leftGain);
+                auxBus.inputBuffer.applyGain(1, 0, auxBus.inputBuffer.getNumSamples(), rightGain);
+            }
+            else
+            {
+                auto* left = auxBus.inputBuffer.getWritePointer(0);
+                auto* right = auxBus.inputBuffer.getWritePointer(1);
+                for (int sample = 0; sample < auxBus.inputBuffer.getNumSamples(); ++sample)
+                {
+                    const float pan = advancePan(auxBus.panCurrent, auxBus.panTarget, auxBus.panRampSamples);
+                    left[sample] *= pan > 0.0f ? 1.0f - pan : 1.0f;
+                    right[sample] *= pan < 0.0f ? 1.0f + pan : 1.0f;
+                }
+            }
+        }
 
         for (std::size_t channel = 0; channel < auxBus.meterLevels.size(); ++channel)
         {
@@ -2549,6 +2650,7 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         stackObj->setProperty("slots", slots);
         stackObj->setProperty("midiOutputChannel", stack.midiOutputChannel);
         stackObj->setProperty("gainDb", stack.gainDb);
+        stackObj->setProperty("pan", stack.pan);
         stackObj->setProperty("muted", stack.muted);
         stackObj->setProperty("solo", stack.solo);
 
@@ -2562,8 +2664,10 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     auxObj->setProperty("aux1", encodeMachineState(auxBus1.machine.get()));
     auxObj->setProperty("aux2", encodeMachineState(auxBus2.machine.get()));
     auxObj->setProperty("aux1GainDb", auxBus1.gainDb);
+    auxObj->setProperty("aux1Pan", auxBus1.pan);
     auxObj->setProperty("aux1Muted", auxBus1.muted);
     auxObj->setProperty("aux2GainDb", auxBus2.gainDb);
+    auxObj->setProperty("aux2Pan", auxBus2.pan);
     auxObj->setProperty("aux2Muted", auxBus2.muted);
     root->setProperty("sharedAuxBuses", auxObj.get());
 
@@ -2868,6 +2972,7 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
                 static_cast<int>(stackArray[static_cast<int>(i)].getProperty("midiOutputChannel", stack.midiOutputChannel)));
             stack.gainDb = juce::jlimit(-48.0f, 6.0f,
                                         static_cast<float>(stackArray[static_cast<int>(i)].getProperty("gainDb", stack.gainDb)));
+            setStackPan(i, static_cast<float>(stackArray[static_cast<int>(i)].getProperty("pan", 0.0f)));
             stack.meterLevel = 0.0f;
 
             for (const auto& [key, machine] : stackMachineStateEntries(stack))
@@ -2883,8 +2988,10 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         decodeMachineState(sharedAuxVar.getProperty("aux1", juce::var()), auxBus1.machine.get());
         decodeMachineState(sharedAuxVar.getProperty("aux2", juce::var()), auxBus2.machine.get());
         setAuxReturnGainDb(0, static_cast<float>(sharedAuxVar.getProperty("aux1GainDb", 0.0f)));
+        setAuxReturnPan(0, static_cast<float>(sharedAuxVar.getProperty("aux1Pan", 0.0f)));
         setAuxReturnMuted(0, static_cast<bool>(sharedAuxVar.getProperty("aux1Muted", false)));
         setAuxReturnGainDb(1, static_cast<float>(sharedAuxVar.getProperty("aux2GainDb", 0.0f)));
+        setAuxReturnPan(1, static_cast<float>(sharedAuxVar.getProperty("aux2Pan", 0.0f)));
         setAuxReturnMuted(1, static_cast<bool>(sharedAuxVar.getProperty("aux2Muted", false)));
     }
 
@@ -3339,6 +3446,23 @@ void TrackerMainProcessor::setAuxReturnGainDb(std::size_t auxIndex, float gainDb
     }
 }
 
+float TrackerMainProcessor::getAuxReturnPan(std::size_t auxIndex) const
+{
+    if (const auto* auxBus = getAuxBus(auxIndex))
+        return auxBus->pan;
+    return 0.0f;
+}
+
+void TrackerMainProcessor::setAuxReturnPan(std::size_t auxIndex, float pan)
+{
+    if (auto* auxBus = getAuxBus(auxIndex))
+    {
+        auxBus->pan = MixerState::clampPan(pan);
+        auxBus->panTarget = auxBus->pan;
+        auxBus->panRampSamples = juce::jmax(1, static_cast<int>(std::lround(preparedSampleRate * 0.01)));
+    }
+}
+
 bool TrackerMainProcessor::isAuxReturnMuted(std::size_t auxIndex) const
 {
     if (const auto* auxBus = getAuxBus(auxIndex))
@@ -3430,6 +3554,23 @@ void TrackerMainProcessor::setStackGainDb(std::size_t stackIndex, float gainDb)
 {
     if (auto* stack = getMachineStack(stackIndex))
         stack->gainDb = juce::jlimit(-48.0f, 6.0f, gainDb);
+}
+
+float TrackerMainProcessor::getStackPan(std::size_t stackIndex) const
+{
+    if (const auto* stack = getMachineStack(stackIndex))
+        return stack->pan;
+    return 0.0f;
+}
+
+void TrackerMainProcessor::setStackPan(std::size_t stackIndex, float pan)
+{
+    if (auto* stack = getMachineStack(stackIndex))
+    {
+        stack->pan = MixerState::clampPan(pan);
+        stack->panTarget = stack->pan;
+        stack->panRampSamples = juce::jmax(1, static_cast<int>(std::lround(preparedSampleRate * 0.01)));
+    }
 }
 
 bool TrackerMainProcessor::isStackMuted(std::size_t stackIndex) const
@@ -3700,6 +3841,50 @@ void TrackerMainProcessor::sendMessageToMachine(CommandType machineType, unsigne
                        note,
                        velocity,
                        durInTicks);
+}
+void TrackerMainProcessor::beginHeldNote(CommandType machineType, unsigned short machineId,
+                                         unsigned short note, unsigned short velocity)
+{
+    if (machineTraits(machineType).isStackRoutable)
+    {
+        dispatchNoteThroughStack(static_cast<std::size_t>(machineId), note, velocity, 0, 0, true);
+        return;
+    }
+    midiToSend.addEvent(MidiMessage::noteOn(getStackMidiOutputChannel(static_cast<std::size_t>(machineId)), static_cast<int>(note), static_cast<uint8>(velocity)), elapsedSamples);
+}
+
+void TrackerMainProcessor::endHeldNote(CommandType machineType, unsigned short machineId,
+                                       unsigned short note)
+{
+    if (!machineTraits(machineType).isStackRoutable)
+    {
+        midiToSend.addEvent(MidiMessage::noteOff(getStackMidiOutputChannel(static_cast<std::size_t>(machineId)), note), elapsedSamples);
+        return;
+    }
+
+    const auto stackIndex = static_cast<std::size_t>(machineId);
+    auto* stack = getMachineStack(stackIndex);
+    if (stack == nullptr)
+        return;
+
+    bool hasExplicitTerminalRoute = false;
+    for (const auto& slot : stack->slots)
+    {
+        if (slot.type == CommandType::MidiNote || slot.type == CommandType::Sampler || slot.type == CommandType::WavetableSynth)
+            hasExplicitTerminalRoute = true;
+        if (!slot.enabled)
+            continue;
+        if (slot.type == CommandType::MidiNote)
+            midiToSend.addEvent(MidiMessage::noteOff(getStackMidiOutputChannel(stackIndex), note), elapsedSamples);
+        else if (slot.type == CommandType::Sampler)
+            samplerEventsToSend.push_back({ stackIndex, MidiMessage::noteOff(1, note), elapsedSamples });
+        else if (slot.type == CommandType::WavetableSynth)
+            enqueueStackNote(wavetableEvents, stackIndex, note, 0, 0, true);
+        else if (slot.type == CommandType::FilterFx)
+            enqueueStackNote(filterEvents, stackIndex, note, 0, 0, true);
+    }
+    if (!hasExplicitTerminalRoute)
+        midiToSend.addEvent(MidiMessage::noteOff(getStackMidiOutputChannel(stackIndex), note), elapsedSamples);
 }
 void TrackerMainProcessor::toggleAuxSendForStack(unsigned short machineId, bool isAux1)
 {

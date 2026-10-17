@@ -36,8 +36,48 @@ int main()
     cells[4][1].onInsert(75.0);
     cells = matrix.getUIBoxes({});
     require(cells[4][1].text == "75", "numeric insertion changes route depth");
+    require(matrix.clearCell(1, 4), "Backspace-style clear accepts a matrix route cell");
+    cells = matrix.getUIBoxes({});
+    require(cells[4][1].text == "0", "Backspace-style clear resets a matrix send to zero");
+    cells[4][1].onInsert(75.0);
     require(matrix.navigateRight(), "right navigation scrolls the destination window");
     require(matrix.navigateLeft(), "left navigation scrolls the destination window back");
+
+    // Coarse zero is the deliberately slow range: Fine 1 must make a
+    // roughly 0.01 Hz LFO rather than leaving the oscillator stopped.
+    ModulationMatrixMachine slowLfo;
+    slowLfo.setInstalledDestinations(1u);
+    slowLfo.prepareToPlay(48000.0, 48000);
+    auto slowCells = slowLfo.getUIBoxes({});
+    slowCells[3][1].onInsert(1.0);   // LFO1 FINE, with CRS still zero.
+    slowCells[4][1].onInsert(100.0); // LFO1 -> W F1.
+    slowLfo.processModulationBlock(48000, true, false, nullptr, 0, {});
+    const auto& slowView = slowLfo.getBlockView();
+    const float oneSecondValue = slowView.get(ModulationDestination::waveFrequency, 47999);
+    require(oneSecondValue > 0.05f && oneSecondValue < 0.08f,
+            "CRS 0 / FINE 1 produces an approximately 0.01 Hz LFO");
+
+    // PAN is a bipolar final-stack destination: a full-depth LFO route must
+    // retain the source's complete -1..+1 excursion for left-to-right panning.
+    while (matrix.navigateRight()) {}
+    cells = matrix.getUIBoxes({});
+    require(cells[7][0].text == "PAN", "PAN is the final always-visible matrix destination");
+    cells[7][2].onInsert(100.0); // LFO2 -> PAN
+    cells[2][2].onInsert(127.0);
+    matrix.processModulationBlock(256, true, false, nullptr, 0, {});
+    const auto& panView = matrix.getBlockView();
+    float panLow = 1.0f, panHigh = -1.0f;
+    for (int sample = 0; sample < panView.numSamples; ++sample)
+    {
+        const float value = panView.get(ModulationDestination::stackPan, sample);
+        panLow = std::min(panLow, value);
+        panHigh = std::max(panHigh, value);
+    }
+    require(panLow < -0.5f && panHigh > 0.5f,
+            "full-depth LFO PAN routing preserves bipolar left-to-right movement");
+    while (matrix.navigateLeft()) {}
+    cells = matrix.getUIBoxes({});
+    cells[4][1].onInsert(0.0); // isolate the following NOTE pulse assertion
 
     // NOTE occupies the former CLK4 row and is a one-sample impulse, even for a chord.
     cells = matrix.getUIBoxes({});

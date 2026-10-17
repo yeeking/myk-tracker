@@ -880,7 +880,7 @@ void StandalonePluginHolder::adjustAudioInput(int direction)
 
 void StandalonePluginHolder::adjustAudioSampleRate(int direction)
 {
-    static constexpr std::array<double, 3> rates { 44100.0, 48000.0, 96000.0 };
+    static constexpr std::array<double, 4> rates { 44100.0, 48000.0, 88200.0, 96000.0 };
     int index = -1;
     for (int i = 0; i < static_cast<int>(rates.size()); ++i)
         if (std::abs(rates[static_cast<std::size_t>(i)] - pendingAudioSetup.sampleRate) < 1.0) index = i;

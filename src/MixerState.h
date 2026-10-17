@@ -7,6 +7,15 @@ namespace MixerState
 {
 constexpr float minimumMasterGainDb = -48.0f;
 constexpr float maximumMasterGainDb = 6.0f;
+constexpr float minimumPan = -1.0f;
+constexpr float maximumPan = 1.0f;
+
+inline float clampPan(float pan)
+{
+    if (!std::isfinite(pan))
+        return 0.0f;
+    return std::clamp(pan, minimumPan, maximumPan);
+}
 
 inline float clampMasterGainDb(float gainDb)
 {

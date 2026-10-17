@@ -149,6 +149,10 @@ public:
     static void assignMachineUtils(MachineUtilsAbs* _machineUtils);
     static void sendAllNotesOff();
     static void sendQueuedMIDI(long tick);
+    static void beginHeldNote(CommandType machineType, unsigned short machineId,
+                              unsigned short note, unsigned short velocity);
+    static void endHeldNote(CommandType machineType, unsigned short machineId,
+                            unsigned short note);
     static std::string describeStepNote(const SequenceReadOnly* sequenceContext, double noteValue);
 
     static Command& getCommand(double commandInd);

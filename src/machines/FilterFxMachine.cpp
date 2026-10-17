@@ -169,6 +169,18 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
             const int on = note.sampleOffset;
             if (on < 0 || on >= numSamples)
                 continue;
+            if (note.isNoteOff)
+            {
+                planEvents.push_back({ on, false });
+                continue;
+            }
+            // A zero duration is the held computer-keyboard gate. Its
+            // matching explicit note-off supplies the release event.
+            if (note.durationTicks == 0)
+            {
+                planEvents.push_back({ on, true });
+                continue;
+            }
             const int durSamples = static_cast<int>(std::lround(
                 snap.sampleRate * snap.secondsPerTick
                 * static_cast<double>(juce::jmax(1, static_cast<int>(note.durationTicks)))));

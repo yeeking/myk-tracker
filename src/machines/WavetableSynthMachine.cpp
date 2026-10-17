@@ -3,6 +3,7 @@
 #include "MachineStateCodec.h"
 
 #include <cmath>
+#include <utility>
 
 namespace
 {
@@ -10,7 +11,7 @@ constexpr double kStateVersion = 1.0;
 constexpr float kMaxAttackSeconds = 2.0f;
 constexpr float kMaxDecaySeconds = 2.0f;
 constexpr float kMaxReleaseSeconds = 3.0f;
-constexpr float kMinCyclerRate = 0.1f;
+constexpr float kMinCyclerRate = 0.0f;
 constexpr float kMaxCyclerRate = 10.0f;
 /** Minimum attack+decay time used in AD mode so an empty envelope cannot
     produce an infinite cycler speed. */
@@ -116,32 +117,12 @@ void WavetableSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce:
             && (*blockNotes)[static_cast<std::size_t>(nextScheduledNote)].sampleOffset <= sample)
         {
             const MachineScheduledNote& event = (*blockNotes)[static_cast<std::size_t>(nextScheduledNote)];
-            auto& voice = allocateVoice();
-            voice.midiNote = static_cast<int>(event.note);
-            voice.velocity = juce::jlimit(0.0f, 1.0f, static_cast<float>(event.velocity) / 127.0f);
-            voice.phase = 0.0;
-            // Main oscillator pitch: note frequency scaled by the main octave
-            // offset and cached detune multiplier (both unity by default).
-            voice.phaseDelta = juce::MidiMessage::getMidiNoteInHertz(static_cast<int>(event.note))
-                * std::ldexp(1.0, mainOctaveOffset)
-                * mainDetuneMultiplier
-                / currentSampleRate;
-            // The sub rides the same voice, so its allocation, stealing and
-            // release are governed by the same round-robin pool; its base
-            // pitch is the main oscillator's offset+detuned pitch, further
-            // scaled by the sub octave offset and detune.
-            voice.subPhase = 0.0;
-            voice.subPhaseDelta = voice.phaseDelta * std::ldexp(1.0, subOctaveOffset)
-                * subDetuneMultiplier;
-            voice.ageSamples = 0;
-            voice.noteDurationSamples = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate
-                * currentSecondsPerTick
-                * static_cast<double>(juce::jmax(1, static_cast<int>(event.durationTicks))))));
-            voice.samplesUntilRelease = voice.noteDurationSamples;
-            voice.releaseStarted = false;
-            voice.active = true;
-            voice.envelope.reset();
-            voice.envelope.noteOn();
+            if (event.isNoteOff)
+                releaseHeldNote(event.note);
+            else if (voiceCount == 1)
+                triggerMonoVoice(voices.front(), event);
+            else
+                triggerPolyVoice(allocateVoice(), event);
             ++nextScheduledNote;
         }
 
@@ -348,6 +329,27 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[4][5].text = "BEND";
     boxes[5][5] = makeValueCell(&envelopeBend, 0.05f, kMinEnvelopeBend, kMaxEnvelopeBend, 2);
 
+    boxes[4][6].isDisabled = false;
+    boxes[4][6].kind = UIBox::Kind::TrackerCell;
+    boxes[4][6].text = "VOIC";
+    boxes[5][6].isDisabled = false;
+    boxes[5][6].kind = UIBox::Kind::TrackerCell;
+    boxes[5][6].text = std::to_string(voiceCount);
+    boxes[5][6].onAdjust = [this](int direction)
+    {
+        const std::lock_guard<std::mutex> guard(stateMutex);
+        setVoiceCountLocked(voiceCount + direction);
+    };
+    boxes[5][6].onInsert = [this](double value)
+    {
+        const std::lock_guard<std::mutex> guard(stateMutex);
+        if (std::isfinite(value))
+            setVoiceCountLocked(static_cast<int>(std::lround(value)));
+    };
+    boxes[5][6].hasValueScale = true;
+    boxes[5][6].valueNorm = static_cast<float>(voiceCount - 1)
+        / static_cast<float>(kMaxVoiceCount - 1);
+
     // Sub-oscillator block (columns 2-3): header, step count, mix level,
     // octave offset, detune, then one row per sub wave step. The control
     // rows mirror the main oscillator's LEV/OCT/DET and the wave step rows
@@ -516,6 +518,12 @@ WavetableSynthMachine::UiPreviewState WavetableSynthMachine::getUiPreviewState()
     return state;
 }
 
+int WavetableSynthMachine::getVoiceCount() const
+{
+    const std::lock_guard<std::mutex> lock(stateMutex);
+    return voiceCount;
+}
+
 bool WavetableSynthMachine::handleIncomingNote(unsigned short note,
                                                unsigned short velocity,
                                                unsigned short durationTicks,
@@ -550,16 +558,22 @@ void WavetableSynthMachine::allNotesOff()
         voice.envelope.reset();
         voice.midiNote = -1;
         voice.velocity = 0.0f;
+        voice.targetVelocity = 0.0f;
+        voice.velocityRampStep = 0.0f;
+        voice.velocityRampSamplesRemaining = 0;
         voice.phase = 0.0;
         voice.phaseDelta = 0.0;
         voice.subPhase = 0.0;
         voice.subPhaseDelta = 0.0;
         voice.ageSamples = 0;
+        voice.triggerOrder = 0;
         voice.noteDurationSamples = 0;
         voice.samplesUntilRelease = 0;
         voice.releaseStarted = false;
         voice.active = false;
     }
+    nextVoiceIndex = 0;
+    nextVoiceTriggerOrder = 0;
 }
 
 void WavetableSynthMachine::getStateInformation(juce::MemoryBlock& destData)
@@ -573,6 +587,7 @@ void WavetableSynthMachine::getStateInformation(juce::MemoryBlock& destData)
     root->setProperty("sustain", sustainLevel);
     root->setProperty("release", releaseSeconds);
     root->setProperty("bend", envelopeBend);
+    root->setProperty("voiceCount", voiceCount);
     root->setProperty("waveStepCount", waveStepCount);
     root->setProperty("cyclerMode", static_cast<int>(cyclerMode));
     root->setProperty("cyclerRate", cyclerRate);
@@ -613,6 +628,7 @@ void WavetableSynthMachine::setStateInformation(const void* data, int sizeInByte
     envelopeBend = getFloatProperty(parsed, "bend", envelopeBend, kMinEnvelopeBend, kMaxEnvelopeBend);
     if (!std::isfinite(envelopeBend))
         envelopeBend = 0.0f;
+    setVoiceCountLocked(getIntProperty(parsed, "voiceCount", kDefaultVoiceCount, 1, kMaxVoiceCount));
     waveStepCount = getIntProperty(parsed, "waveStepCount", waveStepCount, 1, kMaxWaveSteps);
     // Only the two known mode values are accepted; anything else falls back to
     // CPS so corrupted or foreign state cannot pick an invalid cycler clock.
@@ -739,18 +755,136 @@ void WavetableSynthMachine::updateVoiceEnvelopeParameters()
 
 WavetableSynthMachine::Voice& WavetableSynthMachine::allocateVoice()
 {
-    for (int attempt = 0; attempt < kVoiceCount; ++attempt)
+    for (int attempt = 0; attempt < voiceCount; ++attempt)
     {
         auto& voice = voices[static_cast<std::size_t>(nextVoiceIndex)];
-        nextVoiceIndex = (nextVoiceIndex + 1) % kVoiceCount;
+        nextVoiceIndex = (nextVoiceIndex + 1) % voiceCount;
         if (!voice.active)
             return voice;
     }
 
     auto& stolenVoice = voices[static_cast<std::size_t>(nextVoiceIndex)];
-    nextVoiceIndex = (nextVoiceIndex + 1) % kVoiceCount;
+    nextVoiceIndex = (nextVoiceIndex + 1) % voiceCount;
     stolenVoice.envelope.reset();
     return stolenVoice;
+}
+
+void WavetableSynthMachine::setVoiceCountLocked(int newVoiceCount)
+{
+    const int clampedCount = juce::jlimit(1, kMaxVoiceCount, newVoiceCount);
+    if (clampedCount == voiceCount)
+        return;
+
+    if (clampedCount == 1 && voiceCount > 1)
+    {
+        // Promote the most recently triggered active voice into the persistent
+        // mono slot, preserving its oscillator and envelope state exactly.
+        int newestVoice = -1;
+        for (int index = 0; index < kMaxVoiceCount; ++index)
+        {
+            const auto& candidate = voices[static_cast<std::size_t>(index)];
+            if (candidate.active
+                && (newestVoice < 0
+                    || candidate.triggerOrder > voices[static_cast<std::size_t>(newestVoice)].triggerOrder))
+                newestVoice = index;
+        }
+        if (newestVoice > 0)
+            std::swap(voices.front(), voices[static_cast<std::size_t>(newestVoice)]);
+    }
+
+    if (clampedCount < voiceCount)
+    {
+        // Stop allocating the surplus slots immediately, but let their normal
+        // release tails finish so a live polyphony edit cannot click.
+        for (int index = clampedCount; index < kMaxVoiceCount; ++index)
+        {
+            auto& voice = voices[static_cast<std::size_t>(index)];
+            if (voice.active && !voice.releaseStarted)
+            {
+                voice.envelope.noteOff();
+                voice.releaseStarted = true;
+            }
+        }
+    }
+
+    voiceCount = clampedCount;
+    nextVoiceIndex %= voiceCount;
+}
+
+void WavetableSynthMachine::configureVoiceForNote(Voice& voice, const MachineScheduledNote& event)
+{
+    voice.midiNote = static_cast<int>(event.note);
+    // Main oscillator pitch: note frequency scaled by the main octave offset
+    // and cached detune multiplier (both unity by default).
+    voice.phaseDelta = juce::MidiMessage::getMidiNoteInHertz(static_cast<int>(event.note))
+        * std::ldexp(1.0, mainOctaveOffset)
+        * mainDetuneMultiplier
+        / currentSampleRate;
+    voice.subPhaseDelta = voice.phaseDelta * std::ldexp(1.0, subOctaveOffset)
+        * subDetuneMultiplier;
+    voice.ageSamples = 0;
+    voice.triggerOrder = ++nextVoiceTriggerOrder;
+    // A zero duration is reserved for computer-keyboard audition: its release
+    // is delivered as an explicit note-off when the physical key is lifted.
+    voice.noteDurationSamples = event.durationTicks == 0
+        ? std::numeric_limits<int>::max()
+        : juce::jmax(1, static_cast<int>(std::lround(currentSampleRate
+            * currentSecondsPerTick
+            * static_cast<double>(event.durationTicks))));
+    voice.samplesUntilRelease = voice.noteDurationSamples;
+    voice.releaseStarted = false;
+    voice.active = true;
+}
+
+void WavetableSynthMachine::triggerPolyVoice(Voice& voice, const MachineScheduledNote& event)
+{
+    configureVoiceForNote(voice, event);
+    voice.velocity = juce::jlimit(0.0f, 1.0f, static_cast<float>(event.velocity) / 127.0f);
+    voice.targetVelocity = voice.velocity;
+    voice.velocityRampStep = 0.0f;
+    voice.velocityRampSamplesRemaining = 0;
+    voice.phase = 0.0;
+    voice.subPhase = 0.0;
+    voice.envelope.reset();
+    voice.envelope.noteOn();
+}
+
+void WavetableSynthMachine::releaseHeldNote(unsigned short note)
+{
+    for (auto& voice : voices)
+    {
+        if (voice.active && voice.midiNote == static_cast<int>(note) && !voice.releaseStarted)
+        {
+            voice.envelope.noteOff();
+            voice.releaseStarted = true;
+        }
+    }
+}
+
+void WavetableSynthMachine::triggerMonoVoice(Voice& voice, const MachineScheduledNote& event)
+{
+    const bool wasActive = voice.active;
+    const float nextVelocity = juce::jlimit(0.0f, 1.0f, static_cast<float>(event.velocity) / 127.0f);
+    configureVoiceForNote(voice, event);
+
+    if (!wasActive)
+    {
+        voice.velocity = nextVelocity;
+        voice.targetVelocity = nextVelocity;
+        voice.velocityRampStep = 0.0f;
+        voice.velocityRampSamplesRemaining = 0;
+        voice.phase = 0.0;
+        voice.subPhase = 0.0;
+        voice.envelope.reset();
+        voice.envelope.noteOn();
+        return;
+    }
+
+    voice.targetVelocity = nextVelocity;
+    voice.velocityRampSamplesRemaining = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate * 0.002)));
+    voice.velocityRampStep = (voice.targetVelocity - voice.velocity)
+        / static_cast<float>(voice.velocityRampSamplesRemaining);
+    voice.envelope.retriggerFromCurrent();
 }
 
 float WavetableSynthMachine::sampleVoice(Voice& voice, float mainPitch, float subPitch, float mainPosition, float subPosition) const
@@ -758,9 +892,15 @@ float WavetableSynthMachine::sampleVoice(Voice& voice, float mainPitch, float su
     // All voices read the same shared cycler phase, so polyphonic notes stay
     // on the same waveform step and crossfade together. The cycle wraps from
     // the last step back to the first; released notes keep cycling.
+    const auto wrappedMorphPhase = [](double phase) noexcept
+    {
+        // LFO position routes are bipolar. Wrap after summing them with the
+        // shared cycler so negative routes cannot form a negative array index.
+        return std::isfinite(phase) ? phase - std::floor(phase) : 0.0;
+    };
     const int stepCount = juce::jmax(1, waveStepCount);
-    const double stepPosition = (cyclerPhase + mainPosition) * static_cast<double>(stepCount);
-    const int baseStep = static_cast<int>(std::floor(stepPosition)) % stepCount;
+    const double stepPosition = wrappedMorphPhase(cyclerPhase + mainPosition) * static_cast<double>(stepCount);
+    const int baseStep = static_cast<int>(std::floor(stepPosition));
     const int nextStep = (baseStep + 1) % stepCount;
     const float morph = static_cast<float>(stepPosition - std::floor(stepPosition));
 
@@ -779,8 +919,8 @@ float WavetableSynthMachine::sampleVoice(Voice& voice, float mainPitch, float su
         // The sub shares the cycler phase, normalised over its own step
         // count, so it tracks the main oscillator's morph position.
         const int subStepCount = juce::jmax(1, subWaveStepCount);
-        const double subStepPosition = (cyclerPhase + subPosition) * static_cast<double>(subStepCount);
-        const int subBaseStep = static_cast<int>(std::floor(subStepPosition)) % subStepCount;
+        const double subStepPosition = wrappedMorphPhase(cyclerPhase + subPosition) * static_cast<double>(subStepCount);
+        const int subBaseStep = static_cast<int>(std::floor(subStepPosition));
         const int subNextStep = (subBaseStep + 1) % subStepCount;
         const float subMorph = static_cast<float>(subStepPosition - std::floor(subStepPosition));
 
@@ -790,6 +930,14 @@ float WavetableSynthMachine::sampleVoice(Voice& voice, float mainPitch, float su
 
         voice.subPhase += voice.subPhaseDelta * subPitch;
         voice.subPhase -= std::floor(voice.subPhase);
+    }
+
+    if (voice.velocityRampSamplesRemaining > 0)
+    {
+        voice.velocity += voice.velocityRampStep;
+        --voice.velocityRampSamplesRemaining;
+        if (voice.velocityRampSamplesRemaining == 0)
+            voice.velocity = voice.targetVelocity;
     }
 
     return mixedSample * envelopeSample * voice.velocity;

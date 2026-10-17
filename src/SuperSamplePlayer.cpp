@@ -176,6 +176,7 @@ void SuperSamplePlayer::renderToBuffer (juce::AudioBuffer<float>& buffer, int st
         const int nextSourceIndex = juce::jmin (sourceIndex + 1, totalSourceSamples - 1);
         const float fractionalPart = static_cast<float> (readPosition - static_cast<double> (sourceIndex));
         float firstOutputSample = 0.0f;
+        float monoRendered = 0.0f;
 
         for (int sourceChannel = 0; sourceChannel < numSourceChans; ++sourceChannel)
         {
@@ -187,12 +188,19 @@ void SuperSamplePlayer::renderToBuffer (juce::AudioBuffer<float>& buffer, int st
             if (sourceChannel == 0)
                 firstOutputSample = rendered;
 
+            monoRendered += rendered;
+
             for (int outputChannel = 0; outputChannel < numOutputChans; ++outputChannel)
             {
+                if (numOutputChans == 1)
+                    continue;
                 if (juce::jmin (outputChannel, numSourceChans - 1) == sourceChannel)
                     buffer.addSample (outputChannel, startSample + sampleOffset, rendered);
             }
         }
+
+        if (numOutputChans == 1 && numSourceChans > 0)
+            buffer.addSample(0, startSample + sampleOffset, monoRendered / static_cast<float>(numSourceChans));
 
         pushVuSample (firstOutputSample);
         fractionalPlaybackPosition += playbackRatio;

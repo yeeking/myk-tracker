@@ -1356,13 +1356,13 @@ void TrackerMainUI::prepareMixerView()
     samplerViewActive = false;
     customMachineColumnWidthsActive = false;
     samplerColumnWidths.clear();
-    constexpr std::size_t rows = 11;
+    constexpr std::size_t rows = 12;
     const auto stackCount = audioProcessor.getMachineStackCount();
     std::vector<bool> muted(stackCount), solo(stackCount);
-    std::vector<float> meters(stackCount), gains(stackCount);
+    std::vector<float> meters(stackCount), gains(stackCount), stackPans(stackCount);
     std::array<float, 2> masterMeters { 0.0f, 0.0f };
     std::array<std::array<float, 2>, 2> auxMeters {};
-    std::array<float, 2> auxGains {};
+    std::array<float, 2> auxGains {}, auxPans {};
     std::array<bool, 2> auxMuted {};
     float masterGain = 0.0f;
     bool masterMuted = false;
@@ -1379,6 +1379,7 @@ void TrackerMainUI::prepareMixerView()
             auxMeters[aux][0] = audioProcessor.getAuxReturnMeterLevel(aux, 0);
             auxMeters[aux][1] = audioProcessor.getAuxReturnMeterLevel(aux, 1);
             auxGains[aux] = audioProcessor.getAuxReturnGainDb(aux);
+            auxPans[aux] = audioProcessor.getAuxReturnPan(aux);
             auxMuted[aux] = audioProcessor.isAuxReturnMuted(aux);
         }
         for (std::size_t stack = 0; stack < stackCount; ++stack)
@@ -1387,6 +1388,7 @@ void TrackerMainUI::prepareMixerView()
             solo[stack] = audioProcessor.isStackSolo(stack);
             meters[stack] = audioProcessor.getStackMeterLevel(stack);
             gains[stack] = audioProcessor.getStackGainDb(stack);
+            stackPans[stack] = audioProcessor.getStackPan(stack);
         }
     });
     std::vector<std::vector<UIBox>> boxes(stackCount + 3, std::vector<UIBox>(rows));
@@ -1414,6 +1416,11 @@ void TrackerMainUI::prepareMixerView()
         cell.useCustomFillColour = true;
         cell.customFillArgb = palette.gridEmpty.brighter(0.45f).getARGB();
     };
+    const auto formatPan = [](float pan)
+    {
+        const int value = static_cast<int>(std::lround(std::abs(juce::jlimit(-1.0f, 1.0f, pan)) * 100.0f));
+        return value == 0 ? std::string("PAN:C") : std::string("PAN:") + (pan < 0.0f ? "L" : "R") + std::to_string(value);
+    };
     const auto fillMeterCell = [](UIBox& cell, juce::Colour colour)
     {
         cell.isHighlighted = true;
@@ -1430,7 +1437,7 @@ void TrackerMainUI::prepareMixerView()
     }
     for (int band = 0; band < 8; ++band)
     {
-        auto& cell = boxes[0][3 + static_cast<std::size_t>(7 - band)];
+        auto& cell = boxes[0][4 + static_cast<std::size_t>(7 - band)];
         if (band < std::max(masterLit[0], masterLit[1]))
             fillMeterCell(cell, juce::Colours::limegreen);
         if (band == masterHandle) brightenFaderCell(cell);
@@ -1446,6 +1453,7 @@ void TrackerMainUI::prepareMixerView()
         column[0].text = "AUX:" + std::to_string(aux + 1);
         column[1].text = "GAIN:" + formatSignedGain(auxGains[aux]);
         column[2].text = auxMuted[aux] ? "MUTE:ON" : "MUTE:OFF";
+        column[3].text = formatPan(auxPans[aux]);
         const std::array<int, 2> lit {
             juce::jlimit(0, 8, static_cast<int>(std::ceil(auxMeters[aux][0] * 8.0f))),
             juce::jlimit(0, 8, static_cast<int>(std::ceil(auxMeters[aux][1] * 8.0f)))
@@ -1458,7 +1466,7 @@ void TrackerMainUI::prepareMixerView()
         }
         for (int band = 0; band < 8; ++band)
         {
-            auto& cell = column[3 + static_cast<std::size_t>(7 - band)];
+            auto& cell = column[4 + static_cast<std::size_t>(7 - band)];
             if (band < std::max(lit[0], lit[1]))
                 fillMeterCell(cell, juce::Colours::deepskyblue);
             if (band == handle) brightenFaderCell(cell);
@@ -1470,6 +1478,7 @@ void TrackerMainUI::prepareMixerView()
         column[0].text = "STK:" + std::to_string(stack);
         column[1].text = muted[stack] ? "MUTE:ON" : "MUTE:OFF";
         column[2].text = solo[stack] ? "SOLO:ON" : "SOLO:OFF";
+        column[3].text = formatPan(stackPans[stack]);
         const float meter = meters[stack];
         const float gain = gains[stack];
         const int lit = juce::jlimit(0, 8, static_cast<int>(std::ceil(meter * 8.0f)));
@@ -1482,7 +1491,7 @@ void TrackerMainUI::prepareMixerView()
         }
         for (int band = 0; band < 8; ++band)
         {
-            auto& cell = column[3 + static_cast<std::size_t>(7 - band)];
+            auto& cell = column[4 + static_cast<std::size_t>(7 - band)];
             if (band < lit) cell.isHighlighted = true;
             if (band == handle) brightenFaderCell(cell);
         }
@@ -1582,8 +1591,7 @@ void TrackerMainUI::prepareSongView()
 void TrackerMainUI::prepareAudioConfigView()
 {
     samplerViewActive = false;
-    customMachineColumnWidthsActive = false;
-    samplerColumnWidths.clear();
+    customMachineColumnWidthsActive = true;
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;
@@ -1593,6 +1601,10 @@ void TrackerMainUI::prepareAudioConfigView()
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
     auto boxes = seqEditor->getAudioConfigCells();
+    samplerColumnWidths.assign(boxes.size(), 1.0f);
+    for (std::size_t col = 0; col < boxes.size(); ++col)
+        for (const auto& cell : boxes[col])
+            samplerColumnWidths[col] = std::max(samplerColumnWidths[col], cell.width);
     updateCellStates(boxes, rowsInUI - 1, 4);
     overlayState.text = "AUDIO CONFIG";
     overlayState.color = palette.textPrimary;
@@ -2448,22 +2460,22 @@ void TrackerMainUI::rebuildStateDialogBoxes()
     else
     {
         UIBox path = action(stateFileBrowser.getDirectory().getFullPathName(), [this] { closeStateDialog(); });
-        path.width = 6.0f;
+        path.width = 3.0f;
         pushRow(std::move(path), action("CANCEL", [this] { closeStateDialog(); }));
         if (stateDialogMode == StateDialogMode::saveBrowser)
         {
             UIBox name = action("NAME: " + stateSaveName + (stateFilenameEditing ? "_" : ""), [this] { stateFilenameEditing = !stateFilenameEditing; });
-            name.width = 6.0f;
+            name.width = 3.0f;
             pushRow(std::move(name), action("SAVE", [this] { saveStateToSelectedFile(); }));
         }
         else
         {
             UIBox find = action(stateFileBrowser.getSearchQuery().isEmpty() ? "FIND: _" : "FIND: " + stateFileBrowser.getSearchQuery(), [] {});
-            find.width = 6.0f;
+            find.width = 3.0f;
             pushRow(std::move(find));
         }
         UIBox up = action("../", [this] { stateFileBrowser.browseUp(); stateDialogRow = 2; });
-        up.width = 6.0f;
+        up.width = 3.0f;
         pushRow(std::move(up));
         const auto preferredFocusName = stateFileBrowser.consumePreferredFocusName();
         for (const auto& entry : stateFileBrowser.getEntries(isTrackerStateFile))
@@ -2480,7 +2492,7 @@ void TrackerMainUI::rebuildStateDialogBoxes()
                     stateDialogColumn = 0;
                 }
             });
-            name.width = 6.0f;
+            name.width = 3.0f;
             UIBox right;
             if (!entry.isDirectory && stateDialogMode == StateDialogMode::loadBrowser)
                 right = action("LOAD", [this, entry] { loadSelectedStateFile(entry.file); });
@@ -2500,8 +2512,6 @@ void TrackerMainUI::rebuildStateDialogBoxes()
 void TrackerMainUI::prepareStateDialogView()
 {
     samplerViewActive = false;
-    customMachineColumnWidthsActive = false;
-    samplerColumnWidths.clear();
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;
@@ -2511,6 +2521,17 @@ void TrackerMainUI::prepareStateDialogView()
     uiComponent.setStyle(style);
     uiComponent.setCellSize(cellWidth, cellHeight);
     rebuildStateDialogBoxes();
+    const bool browserVisible = stateDialogMode == StateDialogMode::saveBrowser
+        || stateDialogMode == StateDialogMode::loadBrowser;
+    customMachineColumnWidthsActive = browserVisible;
+    samplerColumnWidths.clear();
+    if (browserVisible)
+    {
+        samplerColumnWidths.assign(stateDialogBoxes.size(), 1.0f);
+        for (std::size_t col = 0; col < stateDialogBoxes.size(); ++col)
+            for (const auto& cell : stateDialogBoxes[col])
+                samplerColumnWidths[col] = std::max(samplerColumnWidths[col], cell.width);
+    }
     for (std::size_t col = 0; col < stateDialogBoxes.size(); ++col)
         for (std::size_t row = 0; row < stateDialogBoxes[col].size(); ++row)
             stateDialogBoxes[col][row].isSelected = col == stateDialogColumn && row == stateDialogRow;
@@ -2585,7 +2606,24 @@ bool TrackerMainUI::handleStateDialogKey(const juce::KeyPress& key)
 
 bool TrackerMainUI::keyStateChanged(bool isKeyDown, juce::Component* originatingComponent)
 {
-  juce::ignoreUnused(isKeyDown);
   juce::ignoreUnused(originatingComponent);
-  return false; 
+  if (isKeyDown)
+    return false;
+
+  // JUCE reports the global state change but not the released key. Poll only
+  // our small musical-key set and let the editor release any audition keys
+  // that are no longer down. This is also robust when focus is lost mid-note.
+  static constexpr const char* auditionKeys = "z s x d c v g b h n j m q w e r t y u i o p";
+  juce::String stillHeld;
+  for (const char* key = auditionKeys; *key != '\0'; ++key)
+    if (*key != ' ' && juce::KeyPress::isKeyCurrentlyDown(*key))
+      stillHeld += juce::String::charToString(*key);
+
+  auto arguments = juce::var(new juce::DynamicObject());
+  arguments.getDynamicObject()->setProperty("action", "release_audition_keys");
+  arguments.getDynamicObject()->setProperty("keys", stillHeld);
+  TrackerControlService::Command command;
+  command.kind = TrackerControlService::CommandKind::uiAction;
+  command.arguments = arguments;
+  return audioProcessor.getControlService().execute(command).ok;
 }

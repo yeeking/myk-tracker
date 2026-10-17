@@ -49,6 +49,7 @@ public:
     void reset()
     {
         currentLevel = 0.0f;
+        attackStartLevel = 0.0f;
         phaseTime = 0.0f;
         releaseStartLevel = 0.0f;
         phase = Phase::None;
@@ -57,6 +58,20 @@ public:
     void noteOn()
     {
         currentLevel = 0.0f;
+        attackStartLevel = 0.0f;
+        phaseTime = 0.0f;
+        releaseStartLevel = 0.0f;
+        phase = Phase::Attack;
+    }
+
+    /** Restarts attack without stepping the current envelope level.
+
+        This is useful for a monophonic legato/retrigger path: the new attack
+        rises from wherever the previous note or release had reached instead
+        of first forcing the signal back to zero. */
+    void retriggerFromCurrent()
+    {
+        attackStartLevel = currentLevel;
         phaseTime = 0.0f;
         releaseStartLevel = 0.0f;
         phase = Phase::Attack;
@@ -94,7 +109,8 @@ public:
                 phase = Phase::Decay;
                 return currentLevel;
             }
-            currentLevel = shape(phaseTime / attackSeconds);
+            const float shaped = shape(phaseTime / attackSeconds);
+            currentLevel = attackStartLevel + ((1.0f - attackStartLevel) * shaped);
         }
         else if (phase == Phase::Decay)
         {
@@ -260,6 +276,7 @@ private:
     float releaseSeconds = 0.0f;
     float cachedBend = 0.0f;
     float currentLevel = 0.0f;
+    float attackStartLevel = 0.0f;
     float phaseTime = 0.0f;
     float releaseStartLevel = 0.0f;
     Phase phase = Phase::None;

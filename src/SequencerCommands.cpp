@@ -306,3 +306,15 @@ void CommandProcessor::sendQueuedMIDI(long tick)
 {
     CommandData::machineUtils->sendQueuedMessages(tick);
 }
+void CommandProcessor::beginHeldNote(CommandType machineType, unsigned short machineId,
+                                     unsigned short note, unsigned short velocity)
+{
+    if (CommandData::machineUtils != nullptr)
+        CommandData::machineUtils->beginHeldNote(machineType, machineId, note, velocity);
+}
+void CommandProcessor::endHeldNote(CommandType machineType, unsigned short machineId,
+                                   unsigned short note)
+{
+    if (CommandData::machineUtils != nullptr)
+        CommandData::machineUtils->endHeldNote(machineType, machineId, note);
+}

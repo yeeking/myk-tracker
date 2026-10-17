@@ -33,6 +33,7 @@ public:
     void setStateInformation(const void*, int) override;
     bool navigateLeft() override;
     bool navigateRight() override;
+    bool clearCell(int row, int col) override;
 
     void setInstalledDestinations(unsigned int mask) noexcept { installedDestinationMask.store(mask, std::memory_order_release); }
     void resetClockDividers() noexcept;

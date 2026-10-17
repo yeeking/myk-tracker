@@ -20,7 +20,10 @@ enum class ModulationDestination : std::size_t
     filterCutoff, filterResonance, filterAttack,
     /** LFO-rate targets; trigger sources reset phase when routed here. */
     lfo1Frequency, lfo2Frequency, lfo3Frequency, lfo4Frequency,
-    samplerPosition, count
+    samplerPosition,
+    /** Final mixer pan for this stack. */
+    stackPan,
+    count
 };
 
 constexpr std::size_t kModulationSourceCount = static_cast<std::size_t>(ModulationSource::count);
@@ -35,6 +38,11 @@ struct ModulationBlockView
     {
         const auto index = static_cast<std::size_t>(destination);
         return sample >= 0 && sample < numSamples && values[index] != nullptr ? values[index][sample] : 0.0f;
+    }
+
+    bool isActive(ModulationDestination destination) const noexcept
+    {
+        return values[static_cast<std::size_t>(destination)] != nullptr;
     }
 };
 

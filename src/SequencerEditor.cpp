@@ -893,7 +893,7 @@ void SequencerEditor::moveCursorDown()
   case SequencerEditorPage::step: moveCursorDownOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorDownOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorDownOnMachinePage(); break;
-  case SequencerEditorPage::mixer: mixerRow = std::min<std::size_t>(10, mixerRow + 1); break;
+  case SequencerEditorPage::mixer: mixerRow = std::min<std::size_t>(11, mixerRow + 1); break;
   case SequencerEditorPage::audioConfig: moveAudioConfigCursor(1, 0); break;
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorDownOnResetConfirmationPage(); break;
@@ -985,11 +985,14 @@ void SequencerEditor::incrementAtCursor()
       const auto aux = getSelectedMixerAux();
       if (isMixerMasterSelected() && (mixerRow == 1 || mixerRow >= 3))
         machineHost->setMasterGainDb(machineHost->getMasterGainDb() + 1.0f);
-      else if (aux && (mixerRow == 1 || mixerRow >= 3))
+      else if (aux && mixerRow == 3)
+        machineHost->setAuxReturnPan(*aux, machineHost->getAuxReturnPan(*aux) + 0.05f);
+      else if (aux && (mixerRow == 1 || mixerRow >= 4))
         machineHost->setAuxReturnGainDb(*aux, machineHost->getAuxReturnGainDb(*aux) + 1.0f);
       else if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, true);
       else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, true);
-      else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) + 1.0f);
+      else if (stack && mixerRow == 3) machineHost->setStackPan(*stack, machineHost->getStackPan(*stack) + 0.05f);
+      else if (stack && mixerRow >= 4) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) + 1.0f);
     }
     break;
   case SequencerEditorPage::audioConfig:
@@ -1030,11 +1033,14 @@ void SequencerEditor::decrementAtCursor()
       const auto aux = getSelectedMixerAux();
       if (isMixerMasterSelected() && (mixerRow == 1 || mixerRow >= 3))
         machineHost->setMasterGainDb(machineHost->getMasterGainDb() - 1.0f);
-      else if (aux && (mixerRow == 1 || mixerRow >= 3))
+      else if (aux && mixerRow == 3)
+        machineHost->setAuxReturnPan(*aux, machineHost->getAuxReturnPan(*aux) - 0.05f);
+      else if (aux && (mixerRow == 1 || mixerRow >= 4))
         machineHost->setAuxReturnGainDb(*aux, machineHost->getAuxReturnGainDb(*aux) - 1.0f);
       else if (stack && mixerRow == 1) machineHost->setStackMuted(*stack, false);
       else if (stack && mixerRow == 2) machineHost->setStackSolo(*stack, false);
-      else if (stack && mixerRow >= 3) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) - 1.0f);
+      else if (stack && mixerRow == 3) machineHost->setStackPan(*stack, machineHost->getStackPan(*stack) - 0.05f);
+      else if (stack && mixerRow >= 4) machineHost->setStackGainDb(*stack, machineHost->getStackGainDb(*stack) - 1.0f);
     }
     break;
   case SequencerEditorPage::audioConfig:
@@ -1759,19 +1765,19 @@ void SequencerEditor::incrementOnSequenceConfigPage()
     {
       auto* sequence = sequencer->getSequence(currentSequence);
       const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
-      // TPS resynchronises the read head itself, but does not change routing or
-      // invalidate already-scheduled note-offs.  Do not silence the stack for
-      // that timing-only edit: active voices should be allowed to release.
-      const bool structural = currentSeqParam == Sequence::sendConfig || currentSeqParam == Sequence::headCountConfig
-          || currentSeqParam == Sequence::modeConfig
-          || currentSeqParam == Sequence::rhythmConfig;
-      if (structural && machineHost != nullptr) machineHost->silenceStack(oldStack);
+      // Read-head edits resynchronise at the next beat but must not kill
+      // already playing voices. Only an actual routing change needs cleanup.
+      const bool routingChange = currentSeqParam == Sequence::sendConfig;
       sequencer->incrementSeqParam(currentSequence, currentSeqParam, currentConfigHead);
       currentConfigHead = std::min(currentConfigHead, sequencer->getSequence(currentSequence)->getReadHeadCount() - 1);
-      if (structural && machineHost != nullptr)
+      if (routingChange && machineHost != nullptr)
       {
         const auto newStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
-        if (newStack != oldStack) machineHost->silenceStack(newStack);
+        if (newStack != oldStack)
+        {
+          machineHost->silenceStack(oldStack);
+          machineHost->silenceStack(newStack);
+        }
       }
     }
     return;
@@ -1818,18 +1824,17 @@ void SequencerEditor::decrementOnSequenceConfigPage()
     {
       auto* sequence = sequencer->getSequence(currentSequence);
       const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
-      // See incrementOnSequenceConfigPage: a TPS change resets read-head phase
-      // without being a reason to stop the stack's currently playing voices.
-      const bool structural = currentSeqParam == Sequence::sendConfig || currentSeqParam == Sequence::headCountConfig
-          || currentSeqParam == Sequence::modeConfig
-          || currentSeqParam == Sequence::rhythmConfig;
-      if (structural && machineHost != nullptr) machineHost->silenceStack(oldStack);
+      const bool routingChange = currentSeqParam == Sequence::sendConfig;
       sequencer->decrementSeqParam(currentSequence, currentSeqParam, currentConfigHead);
       currentConfigHead = std::min(currentConfigHead, sequencer->getSequence(currentSequence)->getReadHeadCount() - 1);
-      if (structural && machineHost != nullptr)
+      if (routingChange && machineHost != nullptr)
       {
         const auto newStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
-        if (newStack != oldStack) machineHost->silenceStack(newStack);
+        if (newStack != oldStack)
+        {
+          machineHost->silenceStack(oldStack);
+          machineHost->silenceStack(newStack);
+        }
       }
     }
     return;
@@ -1909,7 +1914,79 @@ std::optional<double> SequencerEditor::lookupKeyboardMidiNote(char key) const
   return it->second;
 }
 
-void SequencerEditor::previewEnteredNote(double midiNote)
+void SequencerEditor::beginKeyboardAudition(char physicalKey,
+                                            const std::vector<std::vector<double>>& rows,
+                                            const SequenceReadOnly& context)
+{
+  // Key repeats arrive as fresh keyPressed events on most desktop systems.
+  // The physical-key entry is retained until key-up, so they cannot retrigger
+  // either a single note or an auditioned chord.
+  if (heldKeyboardNotes.find(physicalKey) != heldKeyboardNotes.end())
+    return;
+
+  std::vector<HeldKeyboardNote> held;
+  held.reserve(rows.size());
+  for (const auto& row : rows)
+  {
+    if (!isPlayableNoteRow(row))
+      continue;
+    const auto note = static_cast<unsigned short>(juce::jlimit(0, 127,
+        static_cast<int>(std::lround(row[Step::noteInd])) + context.noteTransposeSemitones));
+    const auto velocity = static_cast<unsigned short>(juce::jlimit(0, 127,
+        static_cast<int>(std::lround(row[Step::velInd]))));
+    const auto type = static_cast<CommandType>(static_cast<std::size_t>(row[Step::cmdInd]));
+    CommandProcessor::beginHeldNote(type, static_cast<unsigned short>(context.machineId), note, velocity);
+    held.push_back({ type, static_cast<unsigned short>(context.machineId), note });
+  }
+  if (!held.empty())
+    heldKeyboardNotes.emplace(physicalKey, std::move(held));
+}
+
+void SequencerEditor::releaseKeyboardAuditionKey(char key)
+{
+  const auto found = heldKeyboardNotes.find(key);
+  if (found == heldKeyboardNotes.end())
+    return;
+  const auto released = found->second;
+  heldKeyboardNotes.erase(found);
+  for (const auto& note : released)
+  {
+    bool alsoHeld = false;
+    for (const auto& [otherKey, notes] : heldKeyboardNotes)
+      for (const auto& other : notes)
+        if (other.machineType == note.machineType && other.machineId == note.machineId && other.note == note.note)
+          alsoHeld = true;
+    if (!alsoHeld)
+      CommandProcessor::endHeldNote(note.machineType, note.machineId, note.note);
+  }
+}
+
+void SequencerEditor::releaseKeyboardAuditionsExcept(const std::string& stillHeldKeys)
+{
+  std::vector<HeldKeyboardNote> released;
+  for (auto it = heldKeyboardNotes.begin(); it != heldKeyboardNotes.end();)
+  {
+    if (stillHeldKeys.find(it->first) != std::string::npos)
+    {
+      ++it;
+      continue;
+    }
+    released.insert(released.end(), it->second.begin(), it->second.end());
+    it = heldKeyboardNotes.erase(it);
+  }
+  for (const auto& note : released)
+  {
+    bool alsoHeld = false;
+    for (const auto& [otherKey, notes] : heldKeyboardNotes)
+      for (const auto& other : notes)
+        if (other.machineType == note.machineType && other.machineId == note.machineId && other.note == note.note)
+          alsoHeld = true;
+    if (!alsoHeld)
+      CommandProcessor::endHeldNote(note.machineType, note.machineId, note.note);
+  }
+}
+
+void SequencerEditor::previewEnteredNote(double midiNote, char physicalKey)
 {
   if (isSequencerPlaying(sequencer))
     return;
@@ -1944,7 +2021,7 @@ void SequencerEditor::previewEnteredNote(double midiNote)
     }
 
     data[safeRow][Step::noteInd] = midiNote;
-    CommandProcessor::executeCommand(data[safeRow][Step::cmdInd], &data[safeRow], &context);
+    beginKeyboardAudition(physicalKey, { data[safeRow] }, context);
     lastAuditionedMidiNote = midiNote;
   }
 }
@@ -2000,7 +2077,7 @@ void SequencerEditor::gotoMixerPage()
   setEditMode(SequencerEditorMode::mixer);
   if (machineHost != nullptr)
     mixerColumn = std::min(mixerColumn, machineHost->getMachineStackCount() + 2);
-  mixerRow = std::min<std::size_t>(10, mixerRow);
+  mixerRow = std::min<std::size_t>(11, mixerRow);
 }
 
 void SequencerEditor::gotoAudioConfigPage()
@@ -2053,6 +2130,10 @@ void SequencerEditor::rebuildAudioConfigCells()
   auto* rateValue = set(1, 3, formatRate(snapshot.pendingSampleRate));
   auto* buffer = set(0, 4, "BUFFER");
   auto* bufferValue = set(1, 4, snapshot.pendingBufferSize > 0 ? std::to_string(snapshot.pendingBufferSize) : "-");
+  // Device names can be long (particularly ALSA/Pulse names), so dedicate a
+  // three-cell-wide value column to them rather than truncating their text.
+  outputValue->width = 3.0f;
+  inputValue->width = 3.0f;
   juce::ignoreUnused(output, input, rate, buffer);
   for (auto* cell : { outputValue, inputValue, rateValue, bufferValue }) cell->isDisabled = !editable;
   if (audioConfigurationHost != nullptr)
@@ -2100,9 +2181,11 @@ void SequencerEditor::rebuildAudioConfigCells()
   set(2, 8, "BACKEND");
   set(3, 8, snapshot.deviceType.empty() ? "HOST" : snapshot.deviceType);
   set(0, 9, "ACTIVE OUT");
-  set(1, 9, snapshot.activeOutput.empty() ? "-" : snapshot.activeOutput);
+  auto* activeOutput = set(1, 9, snapshot.activeOutput.empty() ? "-" : snapshot.activeOutput);
   set(2, 9, "ACTIVE IN");
-  set(3, 9, snapshot.activeInput.empty() ? "NONE" : snapshot.activeInput);
+  auto* activeInput = set(3, 9, snapshot.activeInput.empty() ? "NONE" : snapshot.activeInput);
+  activeOutput->width = 3.0f;
+  activeInput->width = 3.0f;
   set(0, 10, "ACTIVE RATE");
   set(1, 10, formatRate(snapshot.activeSampleRate));
   set(2, 10, "ACTIVE BUF");
@@ -2265,6 +2348,7 @@ bool SequencerEditor::deleteCurrentSequence()
 
 void SequencerEditor::togglePlayback()
 {
+  releaseKeyboardAuditionsExcept({});
   if (songHost != nullptr)
   {
     songHost->toggleSongPlayback();
@@ -2285,6 +2369,7 @@ void SequencerEditor::togglePlayback()
 
 void SequencerEditor::rewindTransport()
 {
+  releaseKeyboardAuditionsExcept({});
   if (songHost != nullptr)
   {
     songHost->rewindSongTransport();
@@ -2452,7 +2537,11 @@ bool SequencerEditor::handleChordKey(char key)
   for (const auto& shortcut : kChordShortcuts)
   {
     if (shortcut.key == key)
-      return applyChordToCurrentStep(shortcut.intervals);
+    {
+      if (!isSequencerPlaying(sequencer) && heldKeyboardNotes.find(key) != heldKeyboardNotes.end())
+        return true;
+      return applyChordToCurrentStep(key, shortcut.intervals);
+    }
   }
 
   return false;
@@ -2507,7 +2596,9 @@ bool SequencerEditor::handleNoteKey(char key)
   if (page == SequencerEditorPage::machine && isCurrentSamplerRangeCell())
     return machineInsertCurrentCell(note);
 
-  previewEnteredNote(note);
+  if (!isSequencerPlaying(sequencer) && heldKeyboardNotes.find(key) != heldKeyboardNotes.end())
+    return true;
+  previewEnteredNote(note, key);
 
   if (page == SequencerEditorPage::sequence || page == SequencerEditorPage::step)
     enterStepData(midiNote.value(), Step::noteInd);
@@ -2553,7 +2644,7 @@ bool SequencerEditor::isCurrentSamplerRangeCell() const
   return machineCells[machineCursorCol][machineCursorRow].onInsert != nullptr;
 }
 
-bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
+bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals)
 {
   if (sequencer == nullptr || intervals.empty())
     return false;
@@ -2604,10 +2695,7 @@ bool SequencerEditor::applyChordToCurrentStep(const std::vector<int>& intervals)
     if (Sequence* sequence = sequencer->getSequence(currentSequence))
     {
       auto context = sequence->getReadOnlyContext();
-      for (auto& row : chordRows)
-      {
-        CommandProcessor::executeCommand(row[Step::cmdInd], &row, &context);
-      }
+      beginKeyboardAudition(physicalKey, chordRows, context);
     }
   }
 
