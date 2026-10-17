@@ -79,6 +79,8 @@ enum class CommandType : std::size_t {
     ToggleAux1 = 12,
     ToggleAux2 = 13,
     FilterCutoff = 14,
+    /** Fixed per-stack modulation block; never a serial slot or step command. */
+    ModulationMatrix = 15,
 };
 
 /** Shared behaviour table for machine types so the processor, editor, UI and
@@ -117,6 +119,7 @@ constexpr MachineTypeTraits machineTraits(CommandType type) {
         case CommandType::ToggleAux1: return { "TAUX1", "toggle aux [1] send", false, true, false, -1, true };
         case CommandType::ToggleAux2: return { "TAUX2", "toggle aux [2] send", false, true, false, -1, true };
         case CommandType::FilterCutoff: return { "COFF", "filter cutoff", false, true, false, -1, true };
+        case CommandType::ModulationMatrix: return { "MOD", "modulation matrix", false, false, false, -1 };
     }
     return {};
 }

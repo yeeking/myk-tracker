@@ -64,7 +64,7 @@ public:
     /** Updates the player for the current output sample rate. */
     void prepareToPlay (double sampleRate, int samplesPerBlock);
     /** Adds the next segment of playback into the destination buffer. */
-    void renderToBuffer (juce::AudioBuffer<float>& buffer, int startSample, int numSamples) noexcept;
+    void renderToBuffer (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const float* positionModulation = nullptr) noexcept;
 
     /** Replaces the loaded sample buffer and metadata. */
     bool setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name, double newSourceSampleRate);

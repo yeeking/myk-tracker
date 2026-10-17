@@ -282,6 +282,8 @@ juce::var TrackerControlService::makeMachineCellsNow()
         if (const auto* stack = processor.getMachineStack(stackIndex); stack != nullptr && *selectedSlot < stack->slots.size())
             slotId = stack->slots[*selectedSlot].id;
     }
+    else if (editor.getFocusedMachineDetailType() == CommandType::ModulationMatrix)
+        slotId = "mod-matrix";
     return serialiseMachineCells(stackIndex, slotId, editor.getMachineCells());
 }
 
@@ -291,6 +293,16 @@ juce::var TrackerControlService::makeMachineControlsNow()
     for (std::size_t stackIndex = 0; stackIndex < processor.machineStacks.size(); ++stackIndex)
     {
         auto& stack = processor.machineStacks[stackIndex];
+        if (stack.modulationMatrix != nullptr)
+        {
+            MachineUiContext context;
+            auto item = makeObject();
+            auto* object = item.getDynamicObject();
+            object->setProperty("stackId", static_cast<int>(stackIndex));
+            object->setProperty("slotId", "mod-matrix");
+            object->setProperty("controls", serialiseMachineCells(stackIndex, "mod-matrix", stack.modulationMatrix->getUIBoxes(context)));
+            controls.add(item);
+        }
         for (const auto& slot : stack.slots)
         {
             auto* machine = processor.getMachineForStackType(stack, slot.type);
@@ -327,6 +339,8 @@ juce::var TrackerControlService::makeUiNow()
 
 juce::var TrackerControlService::makeUiForPageNow()
 {
+    if (processor.seqEditor.getEditMode() == SequencerEditorMode::machineConfig)
+        processor.seqEditor.refreshMachineStateForCurrentSequence();
     auto ui = processor.getUiStateForCurrentPage();
     if (sequenceSelection.active && ui.getDynamicObject() != nullptr)
     {
@@ -349,7 +363,6 @@ juce::var TrackerControlService::makeViewNow(bool includeSerializedMachineCells,
         object->setProperty("machineCells", makeMachineCellsNow());
     object->setProperty("contentRevision", static_cast<juce::int64>(contentRevision));
     object->setProperty("viewRevision", static_cast<juce::int64>(viewRevision));
-    processor.sendCurrentCellValueOverOscIfChanged();
     return view;
 }
 
@@ -389,13 +402,17 @@ juce::var TrackerControlService::makeStateNow()
 TrackerControlService::Result TrackerControlService::getStateNow(const juce::String& scope, bool includeSerializedMachineCells, bool pageOnly)
 {
     synchroniseAsyncCompletions();
-    return processor.withAudioThreadExclusive([&]() -> Result
+    auto result = processor.withAudioThreadExclusive([&]() -> Result
     {
         if (scope == "view") return success(makeViewNow(includeSerializedMachineCells, pageOnly));
         if (scope == "machine_controls") return success(makeMachineControlsNow());
         if (scope == "capabilities") return success(capabilities());
         return success(makeStateNow());
     });
+    // Network transmission must never hold the audio callback's mutex.
+    if (scope == "view")
+        processor.sendCurrentCellValueOverOscIfChanged(!pageOnly);
+    return result;
 }
 
 TrackerControlService::Result TrackerControlService::readResourceNow(const juce::String& uri)
@@ -797,8 +814,8 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 const int length = intArg(args, "length", static_cast<int>(sequence->getLength()));
                 if (length < 1 || length > 128) return fail("invalid_argument", "length must be between 1 and 128");
                 const int stackId = intArg(args, "machineStackId", static_cast<int>(sequence->getMachineId()));
-                if (stackId < 0 || stackId >= 16) return fail("invalid_argument", "machineStackId must be between 0 and 15");
-                const auto oldStackId = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+                if (stackId < 0 || stackId >= 8) return fail("invalid_argument", "machineStackId must be between 0 and 7");
+                const auto oldStackId = static_cast<std::size_t>(juce::jlimit(0, 7, static_cast<int>(sequence->getMachineId())));
 
                 const bool structuralChange = hasArg(args, "headCount") || hasArg(args, "ticksPerStep")
                     || hasArg(args, "mode") || hasArg(args, "rhythm") || hasArg(args, "machineStackId")
@@ -913,8 +930,9 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     {
                         return slot.id == requestedSlot.toStdString();
                     });
-                    if (slotIt == stack.slots.end()) return fail("not_found", "Machine slot does not exist in stack");
-                    auto* machine = processor.getMachineForStackType(stack, slotIt->type);
+                    if (slotIt == stack.slots.end() && requestedSlot != "mod-matrix") return fail("not_found", "Machine slot does not exist in stack");
+                    auto* machine = requestedSlot == "mod-matrix" ? static_cast<MachineInterface*>(stack.modulationMatrix.get())
+                        : processor.getMachineForStackType(stack, slotIt->type);
                     if (machine == nullptr) return fail("unsupported", "The addressed stack slot has no direct machine controls");
 
                     MachineUiContext context;

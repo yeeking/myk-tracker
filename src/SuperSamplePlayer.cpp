@@ -152,7 +152,7 @@ void SuperSamplePlayer::prepareToPlay (double sampleRate, int samplesPerBlock)
     resetPlaybackState (false);
 }
 
-void SuperSamplePlayer::renderToBuffer (juce::AudioBuffer<float>& buffer, int startSample, int numSamples) noexcept
+void SuperSamplePlayer::renderToBuffer (juce::AudioBuffer<float>& buffer, int startSample, int numSamples, const float* positionModulation) noexcept
 {
     if (! state.isPlaying || sampleBuffer.getNumSamples() == 0 || numSamples <= 0)
         return;
@@ -170,9 +170,11 @@ void SuperSamplePlayer::renderToBuffer (juce::AudioBuffer<float>& buffer, int st
             break;
         }
 
-        const int sourceIndex = juce::jlimit (0, totalSourceSamples - 1, static_cast<int> (fractionalPlaybackPosition));
+        const double readPosition = juce::jlimit(0.0, static_cast<double>(totalSourceSamples - 1), fractionalPlaybackPosition
+            + (positionModulation != nullptr ? static_cast<double>(positionModulation[startSample + sampleOffset]) * totalSourceSamples : 0.0));
+        const int sourceIndex = juce::jlimit (0, totalSourceSamples - 1, static_cast<int> (readPosition));
         const int nextSourceIndex = juce::jmin (sourceIndex + 1, totalSourceSamples - 1);
-        const float fractionalPart = static_cast<float> (fractionalPlaybackPosition - static_cast<double> (sourceIndex));
+        const float fractionalPart = static_cast<float> (readPosition - static_cast<double> (sourceIndex));
         float firstOutputSample = 0.0f;
 
         for (int sourceChannel = 0; sourceChannel < numSourceChans; ++sourceChannel)

@@ -50,11 +50,6 @@ bool isAudioEffectType(CommandType type)
     return machineTraits(type).isAudioEffect;
 }
 
-float gainDbToLinear(float gainDb)
-{
-    return std::pow(10.0f, gainDb / 20.0f);
-}
-
 float measureBufferRms(const juce::AudioBuffer<float>& buffer)
 {
     if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0)
@@ -140,15 +135,16 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
     outstandingNoteOffs++;
 }
 
-std::array<std::pair<const char*, MachineInterface*>, 6> TrackerMainProcessor::stackMachineStateEntries(MachineStack& stack)
+std::array<std::pair<const char*, MachineInterface*>, 7> TrackerMainProcessor::stackMachineStateEntries(MachineStack& stack)
 {
-    std::array<std::pair<const char*, MachineInterface*>, 6> entries;
+    std::array<std::pair<const char*, MachineInterface*>, 7> entries;
     entries[0] = { "sampler", stack.sampler.get() };
     entries[1] = { "wavetableSynth", stack.wavetableSynth.get() };
     entries[2] = { "distortionFx", stack.distortionFx.get() };
     entries[3] = { "delayFx", stack.delayFx.get() };
     entries[4] = { "channelStripFx", stack.channelStripFx.get() };
     entries[5] = { "filterFx", stack.filterFx.get() };
+    entries[6] = { "modulationMatrix", stack.modulationMatrix.get() };
     return entries;
 }
 
@@ -218,6 +214,15 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
     stack.samplerProcessingActive = samplerActive;
     stack.wavetableProcessingActive = wavetableActive;
     stack.filterProcessingActive = filterActive;
+    unsigned int destinations = 0;
+    for (const auto& slot : stack.slots)
+    {
+        if (slot.type == CommandType::WavetableSynth) destinations |= 1u;
+        if (slot.type == CommandType::FilterFx) destinations |= 2u;
+        if (slot.type == CommandType::Sampler) destinations |= 4u;
+    }
+    if (stack.modulationMatrix != nullptr)
+        stack.modulationMatrix->setInstalledDestinations(destinations);
 }
 
 void TrackerMainProcessor::refreshAllStackProcessingStates()
@@ -301,9 +306,11 @@ TrackerMainProcessor::SequenceSetMachineEnableState TrackerMainProcessor::captur
 {
     SequenceSetMachineEnableState state;
     state.stacks.resize(machineStacks.size());
+    state.modulationEnabled.resize(machineStacks.size(), false);
     for (std::size_t stackIndex = 0; stackIndex < machineStacks.size(); ++stackIndex)
     {
         const auto& stack = machineStacks[stackIndex];
+        state.modulationEnabled[stackIndex] = stack.modulationEnabled;
         auto& storedSlots = state.stacks[stackIndex];
         storedSlots.reserve(stack.slots.size());
         for (const auto& slot : stack.slots)
@@ -324,11 +331,15 @@ void TrackerMainProcessor::captureMachineEnableStateForSequenceSet(std::size_t s
 void TrackerMainProcessor::normaliseMachineEnableState(SequenceSetMachineEnableState& state) const
 {
     auto previous = std::move(state.stacks);
+    auto previousModulation = std::move(state.modulationEnabled);
     state.stacks.clear();
     state.stacks.resize(machineStacks.size());
+    state.modulationEnabled.resize(machineStacks.size(), false);
     for (std::size_t stackIndex = 0; stackIndex < machineStacks.size(); ++stackIndex)
     {
         const auto& stack = machineStacks[stackIndex];
+        state.modulationEnabled[stackIndex] = stackIndex < previousModulation.size()
+            ? previousModulation[stackIndex] : false;
         const std::vector<SequenceSetMachineEnableState::Slot>* previousSlots =
             stackIndex < previous.size() ? &previous[stackIndex] : nullptr;
         auto& normalisedSlots = state.stacks[stackIndex];
@@ -367,6 +378,8 @@ void TrackerMainProcessor::applyMachineEnableStateForSequenceSet(std::size_t set
     for (std::size_t stackIndex = 0; stackIndex < machineStacks.size(); ++stackIndex)
     {
         auto& stack = machineStacks[stackIndex];
+        stack.modulationEnabled = stackIndex < state.modulationEnabled.size()
+            ? state.modulationEnabled[stackIndex] : false;
         if (stackIndex < state.stacks.size())
         {
             const auto& savedSlots = state.stacks[stackIndex];
@@ -670,11 +683,20 @@ void TrackerMainProcessor::distributeNoteEvents(NoteEventQueue& queue,
     // the machines walk these with a cursor, so keep them sorted by sample offset
     for (auto& stack : machineStacks)
     {
-        std::stable_sort((stack.*blockNotesMember).begin(), (stack.*blockNotesMember).end(),
-                         [](const MachineScheduledNote& a, const MachineScheduledNote& b)
-                         {
-                             return a.sampleOffset < b.sampleOffset;
-                         });
+        auto& notes = stack.*blockNotesMember;
+        // Stable insertion sort needs no scratch allocation and is linear
+        // for the normally already ordered event stream.
+        for (std::size_t i = 1; i < notes.size(); ++i)
+        {
+            const auto note = notes[i];
+            std::size_t position = i;
+            while (position > 0 && note.sampleOffset < notes[position - 1].sampleOffset)
+            {
+                notes[position] = notes[position - 1];
+                --position;
+            }
+            notes[position] = note;
+        }
     }
 }
 
@@ -687,6 +709,10 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
     auto* stack = getMachineStack(stackIndex);
     if (stack == nullptr || !isStackAudible(stackIndex))
         return;
+
+    // The modulation block observes every note which reaches this stack,
+    // independent of the terminal selected by the serial chain.
+    enqueueStackNote(modulationEvents, stackIndex, note, velocity, durInTicks);
 
     bool anyTerminalTriggered = false;
     bool hasExplicitTerminalRoute = false;
@@ -796,6 +822,8 @@ bool TrackerMainProcessor::emitQuarterBeatTickIfNeeded()
         if (auto* playbackSequencer = getPlaybackSequencerInternal())
             playbackSequencer->resetForTransportStart();
         notifyClockReset();
+        for (auto& stack : machineStacks)
+            if (stack.modulationMatrix != nullptr) stack.modulationMatrix->resetClockDividers();
         pendingTransportQuarterBeatReset = false;
         if (pendingTransportStartOnQuarterBeat)
         {
@@ -831,6 +859,8 @@ void TrackerMainProcessor::emitClockedMachineEvent(std::size_t stackIndex, Comma
 void TrackerMainProcessor::processPlaybackTickBoundary()
 {
     advanceClockTick();
+    if (modulationClockTickCount < modulationClockTicks.size())
+        modulationClockTicks[modulationClockTickCount++] = { currentTickSampleOffset, getCurrentTick() };
     const bool isQuarterNoteBoundary = emitQuarterBeatTickIfNeeded();
 
     if (auto* playbackSequencer = getPlaybackSequencerInternal())
@@ -996,6 +1026,8 @@ void TrackerMainProcessor::initialiseMachines()
         stack.delayFx = std::make_unique<DelayFxMachine>();
         stack.channelStripFx = std::make_unique<ChannelStripMachine>();
         stack.filterFx = std::make_unique<FilterFxMachine>();
+        stack.modulationMatrix = std::make_unique<ModulationMatrixMachine>();
+        stack.modulationEnabled = false;
         // A fresh tracker should be immediately audible.  MIDI output remains
         // available as a stack type, but every new/reset stack starts with an
         // enabled internal synth instead of a silent external-MIDI route.
@@ -1003,6 +1035,7 @@ void TrackerMainProcessor::initialiseMachines()
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
         stack.filterBlockNotes.clear();
+        stack.modulationBlockNotes.clear();
         stack.midiOutputChannel = 1;
         stack.audioProcessingActive = false;
         stack.samplerProcessingActive = false;
@@ -1017,6 +1050,7 @@ void TrackerMainProcessor::initialiseMachines()
     scratchFutureSamplerEvents.clear();
     wavetableEvents.clear();
     filterEvents.clear();
+    modulationEvents.clear();
 
     const double secondsPerTick = getSecondsPerTickFromBpm(getBPM());
     for (auto& stack : machineStacks)
@@ -1108,7 +1142,7 @@ void TrackerMainProcessor::oscBundleReceived(const juce::OSCBundle& bundle)
     }
 }
 
-juce::String TrackerMainProcessor::getCurrentCellOscPayload()
+juce::String TrackerMainProcessor::getCurrentCellOscPayload(bool refreshMachineCells)
 {
     const auto mode = seqEditor.getEditMode();
     auto* viewedSequencer = getViewedSequencerInternal();
@@ -1164,7 +1198,8 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
         }
         case SequencerEditorMode::machineConfig:
         {
-            seqEditor.refreshMachineStateForCurrentSequence();
+            if (refreshMachineCells)
+                seqEditor.refreshMachineStateForCurrentSequence();
             const auto& cells = seqEditor.getMachineCells();
             for (const auto& column : cells)
             {
@@ -1204,12 +1239,15 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload()
     return {};
 }
 
-void TrackerMainProcessor::sendCurrentCellValueOverOscIfChanged()
+void TrackerMainProcessor::sendCurrentCellValueOverOscIfChanged(bool refreshMachineCells)
 {
     if (!oscSenderReady)
         return;
 
-    const auto payload = getCurrentCellOscPayload().trim();
+    const auto payload = withAudioThreadExclusive([&]()
+    {
+        return getCurrentCellOscPayload(refreshMachineCells).trim();
+    });
     if (payload.isEmpty() || payload == lastSentCellOscPayload)
         return;
 
@@ -1362,6 +1400,18 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     samplesPerTick = static_cast<unsigned int> (juce::jmax (1, static_cast<int> (std::lround (activeSampleRate * (60.0 / activeBpm) / 8.0))));
     const double secondsPerTick = getSecondsPerTickFromBpm(activeBpm);
     const int preparedBlockSize = juce::jmax(1, samplesPerBlock);
+    // Reserve ordinary dense performance workloads before audio starts. These
+    // queues remain growable so unusually large sessions never lose notes.
+    constexpr std::size_t eventCapacity = 4096;
+    for (auto* queue : { &wavetableEvents, &filterEvents, &modulationEvents })
+    {
+        queue->pending.reserve(eventCapacity);
+        queue->scratch.reserve(eventCapacity);
+    }
+    samplerEventsToSend.reserve(eventCapacity);
+    scratchFutureSamplerEvents.reserve(eventCapacity);
+    midiToSend.ensureSize(65536);
+    futureMidi.ensureSize(65536);
     auxBus1.inputBuffer.setSize(2, preparedBlockSize);
     auxBus2.inputBuffer.setSize(2, preparedBlockSize);
     auxBus1.inputBuffer.clear();
@@ -1384,6 +1434,11 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         stack.wavetableBlockNotes.clear();
         stack.filterBlockNotes.clear();
         // Fixed-size scope ring for the UI oscilloscope; independent of the block
+        stack.samplerMidiBuffer.ensureSize(16384);
+        stack.wavetableBlockNotes.reserve(1024);
+        stack.filterBlockNotes.reserve(1024);
+        stack.modulationBlockNotes.reserve(1024);
+        // Scope history remains active regardless of the visible page.
         // size so it is allocated once and reused across sample-rate changes.
         if (stack.scopeRing.empty())
         {
@@ -1486,6 +1541,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     emptyMidiBuffer.clear();
 
     const int blockSizeSamples = buffer.getNumSamples();
+    modulationClockTickCount = 0;
     int blockStartSample = elapsedSamples;
     int blockEndSample = (elapsedSamples + blockSizeSamples) % maxHorizon;
     bool usingHostClock = false;
@@ -1520,7 +1576,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 usingHostClock = true;
                 if (playbackSequencer != nullptr)
                     playbackSequencer->play();
-                setBPM(posInfo.bpm);
+                if (posInfo.bpm != getBPM())
+                    setBPM(posInfo.bpm);
 
                 const double ticksPerQuarter = 8.0;
                 const double samplesPerTickDouble = getSampleRate() * (60.0 / posInfo.bpm) / ticksPerQuarter;
@@ -1549,6 +1606,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 {
                     const int tickSampleOffset = static_cast<int>(offset);
                     elapsedSamples = (blockStartSample + tickSampleOffset) % maxHorizon;
+                    currentTickSampleOffset = tickSampleOffset;
                     processPlaybackTickBoundary();
                 }
                 elapsedSamples = blockEndSample;
@@ -1580,6 +1638,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
             samplesAdvanced += samplesUntilNextTick;
             elapsedSamples = (elapsedSamples + samplesUntilNextTick) % maxHorizon;
+            currentTickSampleOffset = samplesAdvanced;
             processPlaybackTickBoundary();
         }
         elapsedSamples = blockEndSample;
@@ -1646,6 +1705,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
         stack.filterBlockNotes.clear();
+        stack.modulationBlockNotes.clear();
     }
 
     for (const auto& event : samplerEventsToSend)
@@ -1684,6 +1744,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     // now distribute the sequencer notes that retrigger filter cutoff sweeps
     distributeNoteEvents(filterEvents, blockStartSample, blockEndSample, &MachineStack::filterBlockNotes);
+    distributeNoteEvents(modulationEvents, blockStartSample, blockEndSample, &MachineStack::modulationBlockNotes);
 
     if (auxBus1.inputBuffer.getNumChannels() != 2 || auxBus1.inputBuffer.getNumSamples() != buffer.getNumSamples())
         auxBus1.inputBuffer.setSize(2, buffer.getNumSamples(), false, false, true);
@@ -1716,6 +1777,16 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             auto& stackBuffer = stack->renderBuffer;
             stackBuffer.clear();
 
+            if (stack->modulationMatrix != nullptr)
+            {
+                stack->modulationMatrix->processModulationBlock(buffer.getNumSamples(), stack->modulationEnabled,
+                    sequencerPlaying, modulationClockTicks.data(), modulationClockTickCount, stack->modulationBlockNotes);
+                const auto* modulation = &stack->modulationMatrix->getBlockView();
+                stack->sampler->setModulationBlock(modulation);
+                stack->wavetableSynth->setModulationBlock(modulation);
+                stack->filterFx->setModulationBlock(modulation);
+            }
+
             if (stack->samplerProcessingActive && stack->sampler != nullptr)
                 stack->sampler->processBlock(stackBuffer, stack->samplerMidiBuffer);
             if (stack->wavetableProcessingActive && stack->wavetableSynth != nullptr)
@@ -1728,7 +1799,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             if (stack->filterProcessingActive && stack->filterFx != nullptr)
                 stack->filterFx->scheduleBlockNotes(stack->filterBlockNotes);
 
-            for (const auto& slot : stack->slots)
+            for (auto& slot : stack->slots)
             {
                 const auto type = slot.type;
                 if (!isAudioEffectType(type))
@@ -1749,13 +1820,13 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                         continue;
                     }
 
-                    const float sendGainLinear = gainDbToLinear(slot.sendLevelDb);
+                    const float sendGainLinear = slot.sendGain.get(slot.sendLevelDb);
                     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
                         auxBus->inputBuffer.addFrom(channel, 0, stackBuffer, channel, 0, stackBuffer.getNumSamples(), sendGainLinear);
                     continue;
                 }
 
-                const float returnGainLinear = gainDbToLinear(slot.returnLevelDb);
+                const float returnGainLinear = slot.returnGain.get(slot.returnLevelDb);
                 if (auto* effect = getAudioEffectForStackType(*stack, type))
                 {
                     if (!slotEnabled && type == CommandType::DelayFx)
@@ -1773,7 +1844,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                     if (!slotEnabled)
                         continue;
 
-                    const float sendGainLinear = gainDbToLinear(slot.sendLevelDb);
+                    const float sendGainLinear = slot.sendGain.get(slot.sendLevelDb);
                     if (sendGainLinear != 1.0f)
                         stackBuffer.applyGain(sendGainLinear);
 
@@ -1784,7 +1855,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 }
             }
 
-            const float stackGainLinear = gainDbToLinear(stack->gainDb);
+            const float stackGainLinear = stack->gain.get(stack->gainDb);
             stackBuffer.applyGain(stackGainLinear);
 
             // Record the final per-stack mono output for the UI oscilloscope.
@@ -1807,7 +1878,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                         ? 0.5f * (stackBuffer.getSample(0, idx) + stackBuffer.getSample(1, idx))
                         : stackBuffer.getSample(0, idx);
                     scopeRing[stack->scopeHead] = mono;
-                    stack->scopeHead = (stack->scopeHead + 1) % ringSize;
+                    if (++stack->scopeHead == ringSize)
+                        stack->scopeHead = 0;
                 }
             }
 
@@ -2372,6 +2444,9 @@ juce::var TrackerMainProcessor::serializeSequencerState()
             stacks.add(slots);
         }
         setObj->setProperty("stacks", stacks);
+        juce::Array<juce::var> modulation;
+        for (bool enabled : state.modulationEnabled) modulation.add(enabled);
+        setObj->setProperty("modulationEnabled", modulation);
         machineEnableStateSets.add(setObj.get());
     }
     root->setProperty("sequenceSetMachineEnableStates", machineEnableStateSets);
@@ -2531,6 +2606,10 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
             if (!setVar.isObject())
                 continue;
             const auto stacksVar = setVar.getProperty("stacks", juce::var());
+            const auto modulationVar = setVar.getProperty("modulationEnabled", juce::var());
+            if (modulationVar.isArray())
+                for (const auto& enabled : *modulationVar.getArray())
+                    sequenceSetMachineEnableStates[setIndex].modulationEnabled.push_back(static_cast<bool>(enabled));
             if (!stacksVar.isArray())
                 continue;
             auto& restoredState = sequenceSetMachineEnableStates[setIndex];
@@ -3032,6 +3111,7 @@ std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
         case CommandType::DelayFx:
         case CommandType::ChannelStripFx:
         case CommandType::FilterFx:
+        case CommandType::ModulationMatrix:
             return machineStacks.size();
         case CommandType::AuxSend1Fx:
         case CommandType::AuxSend2Fx:
@@ -3397,6 +3477,21 @@ void TrackerMainProcessor::toggleMachineEnabledInStack(std::size_t stackIndex, s
     }
 }
 
+bool TrackerMainProcessor::isModulationEnabledInStack(std::size_t stackIndex) const
+{
+    if (const auto* stack = getMachineStack(stackIndex)) return stack->modulationEnabled;
+    return false;
+}
+
+void TrackerMainProcessor::toggleModulationEnabledInStack(std::size_t stackIndex)
+{
+    if (auto* stack = getMachineStack(stackIndex))
+    {
+        stack->modulationEnabled = !stack->modulationEnabled;
+        captureMachineEnableStateForSequenceSet(getMachineEnableStateEditingSetIndex());
+    }
+}
+
 float TrackerMainProcessor::getMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex) const
 {
     if (const auto* slot = getMachineSlot(stackIndex, slotIndex))
@@ -3612,6 +3707,7 @@ MachineInterface* TrackerMainProcessor::getMachineForStackType(MachineStack& sta
         case CommandType::DelayFx: return stack.delayFx.get();
         case CommandType::ChannelStripFx: return stack.channelStripFx.get();
         case CommandType::FilterFx: return stack.filterFx.get();
+        case CommandType::ModulationMatrix: return stack.modulationMatrix.get();
         case CommandType::AuxSend1Fx: return auxBus1.machine.get();
         case CommandType::AuxSend2Fx: return auxBus2.machine.get();
         default: return nullptr;

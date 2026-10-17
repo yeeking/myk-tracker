@@ -170,6 +170,7 @@ void SuperSamplerProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
 {
     currentOutputSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     currentBlockSize = samplesPerBlock > 0 ? samplesPerBlock : currentBlockSize;
+    pendingNoteOns.reserve(1024);
 
     const std::lock_guard<std::mutex> lock (playerMutex);
     for (auto& player : players)
@@ -756,13 +757,7 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
             pendingNoteOns.push_back ({ pos, msg.getNoteNumber(), msg.getVelocity() });
         }
     }
-    // MidiBuffer is already sorted by sample position; the stable sort is
-    // defensive and preserves within-sample event order.
-    std::stable_sort (pendingNoteOns.begin(), pendingNoteOns.end(),
-                      [](const NoteOnEvent& a, const NoteOnEvent& b)
-                      {
-                          return a.samplePosition < b.samplePosition;
-                      });
+    // MidiBuffer iteration already preserves sample and equal-sample ordering.
     const std::lock_guard<std::mutex> lock (playerMutex);
 
     for (auto& player : players)
@@ -775,7 +770,8 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
         if (length <= 0)
             return;
         for (auto& player : players)
-            player->renderToBuffer (buffer, startSample, length);
+            player->renderToBuffer (buffer, startSample, length,
+                modulationBlock != nullptr ? modulationBlock->values[static_cast<std::size_t>(ModulationDestination::samplerPosition)] : nullptr);
         if (previewPlayer != nullptr)
             previewPlayer->renderToBuffer (buffer, startSample, length);
     };

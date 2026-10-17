@@ -58,6 +58,7 @@ public:
     void setSecondsPerTick(double secondsPerTick) override;
     /** Silences all active voices immediately. */
     void allNotesOff() override;
+    void setModulationBlock(const ModulationBlockView* block) override { modulationBlock = block; }
     /** Serialises the synth state. */
     void getStateInformation(juce::MemoryBlock& destData) override;
     /** Restores the synth state. */
@@ -219,6 +220,7 @@ private:
         processor immediately before processBlock and read only there. Points at
         processor-owned per-stack storage, stable until the next block. */
     const std::vector<MachineScheduledNote>* scheduledBlockNotes = nullptr;
+    const ModulationBlockView* modulationBlock = nullptr;
 
     /** ADSR attack time in seconds. */
     float attackSeconds = 0.05f;
@@ -246,7 +248,7 @@ private:
     /** Allocates the next voice, stealing if needed. */
     Voice& allocateVoice();
     /** Samples one voice and advances its lifecycle. */
-    float sampleVoice(Voice& voice) const;
+    float sampleVoice(Voice& voice, float mainPitch, float subPitch, float mainPosition, float subPosition) const;
     /** Samples one named waveform at the given phase. */
     float sampleWaveform(Waveform waveform, double phase) const;
     /** Returns the short display name for a waveform. */

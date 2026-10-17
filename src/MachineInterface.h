@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "UIBox.h"
+#include "ModulationTypes.h"
 
 namespace juce
 {
@@ -100,6 +101,10 @@ public:
     virtual void onCursorMoved(int row, int col) { (void)row; (void)col; }
     /** Lets the machine consume left-navigation when needed. */
     virtual bool navigateLeft() { return false; }
+    /** Lets a wide machine editor consume right-navigation when needed. */
+    virtual bool navigateRight() { return false; }
+    /** Gives an instrument the current stack modulation signals. Audio-thread only. */
+    virtual void setModulationBlock(const ModulationBlockView* block) { (void)block; }
     /** Passes printable text input to the machine. */
     virtual bool handleTextInput(char character) { (void)character; return false; }
     /** Passes backspace text input to the machine. */

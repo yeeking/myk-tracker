@@ -11,6 +11,7 @@
 #include "TrackerMainUI.h"
 #include "SequencerCommands.h"
 #include "machines/CurvedAdsr.h"
+#include "machines/ModulationMatrixMachine.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -366,6 +367,8 @@ void TrackerMainUI::resized()
 
 void TrackerMainUI::timerCallback ()
 {
+    if (!isShowing())
+        return;
     ++framesDrawn;
 
     if (waitingForPaint) {return;}// already waiting for a repaint
@@ -761,7 +764,7 @@ void TrackerMainUI::prepareSeqConfigView()
         currentSeqParam = seqEditor->getCurrentSeqParam();
         sequenceSetIndex = audioProcessor.getViewedSequenceSetIndex();
         auto* sequencer = audioProcessor.getSequencer();
-        grid = sequencer->getSequenceConfigsAsGridOfStrings(seqEditor->getCurrentConfigHead());
+        grid = gridFromSnapshot(currentView.state.getProperty("ui", {}).getProperty("sequenceConfigs", {}));
         triggerCounts.resize(grid.size());
         for (std::size_t col = 0; col < grid.size(); ++col)
             triggerCounts[col] = sequencer->getSequence(col)->getTriggerEventCount();
@@ -856,7 +859,6 @@ void TrackerMainUI::prepareMachineConfigView()
             machineId = static_cast<int>(sequence->getMachineId());
         }
         scopeStackIndex = seqEditor->getActiveMachineIndex(CommandType::Sampler);
-        seqEditor->refreshMachineStateForCurrentSequence();
         machineBoxes = seqEditor->getMachineCells();
         detailType = seqEditor->getFocusedMachineDetailType();
         for (const auto& column : machineBoxes)
@@ -1043,6 +1045,60 @@ void TrackerMainUI::prepareMachineConfigView()
         }
 
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [wavetable synth]";
+        overlayState.color = palette.textPrimary;
+        overlayState.glowColor = palette.gridPlayhead;
+        overlayState.glowStrength = 0.25f;
+        return;
+    }
+    if (detailType.has_value() && detailType.value() == CommandType::ModulationMatrix)
+    {
+        TrackerUIComponent::Style style;
+        style.background = palette.background;
+        style.lightColor = palette.lightColor;
+        style.defaultGlowColor = palette.gridPlayhead;
+        style.ambientStrength = palette.ambientStrength;
+        style.lightDirection = palette.lightDirection;
+        uiComponent.setStyle(style);
+        uiComponent.setCellSize(cellWidth, cellHeight);
+        const std::size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
+        const std::size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
+        updateCellStates(machineBoxes, rows, cols);
+
+        if (auto* matrix = dynamic_cast<ModulationMatrixMachine*>(
+                audioProcessor.getMachine(CommandType::ModulationMatrix, static_cast<std::size_t>(machineId))))
+        {
+            const auto preview = matrix->getUiPreviewState();
+            auto& cache = modulationPreviewCaches[machineId];
+            if (!cache.valid || cache.waveforms != preview.waveforms)
+            {
+                cache.valid = true;
+                cache.waveforms = preview.waveforms;
+                ++cache.revision;
+                cache.traces.clear();
+                constexpr int samples = 32;
+                for (int lfo = 0; lfo < 4; ++lfo)
+                {
+                    TrackerUIComponent::Trace trace;
+                    trace.colStart = 1.0f;
+                    trace.colEnd = 2.0f;
+                    trace.rowTop = static_cast<float>(lfo + 1);
+                    trace.rowBottom = static_cast<float>(lfo + 2);
+                    trace.samples.resize(samples);
+                    for (int sample = 0; sample < samples; ++sample)
+                        trace.samples[static_cast<std::size_t>(sample)] = matrix->sampleWaveformForUi(
+                            preview.waveforms[static_cast<std::size_t>(lfo)],
+                            static_cast<float>(sample) / static_cast<float>(samples - 1));
+                    trace.color = juce::Colour(0xff29e0ff);
+                    trace.z = 1.15f;
+                    trace.lineWidth = 2.0f;
+                    trace.cacheId = "modulation/" + std::to_string(machineId) + "/lfo/" + std::to_string(lfo);
+                    trace.cacheRevision = cache.revision;
+                    cache.traces.push_back(std::move(trace));
+                }
+            }
+            currentTraces.insert(currentTraces.end(), cache.traces.begin(), cache.traces.end());
+        }
+        overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [modulation matrix]";
         overlayState.color = palette.textPrimary;
         overlayState.glowColor = palette.gridPlayhead;
         overlayState.glowStrength = 0.25f;
@@ -1723,7 +1779,8 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
                 : palette.glowDecayScalar;
             const float baseGlow = samplerViewActive
                 ? box.glow
-                : (box.isHighlighted ? 1.0f : std::max(0.0f, previousGlow * glowDecayScalar));
+                : std::max(box.glow, box.isHighlighted ? 1.0f
+                    : std::max(0.0f, previousGlow * glowDecayScalar));
 
             // Flash the cell when its normalised parameter value changed
             // since the last frame so adjustments are visible at a glance.

@@ -177,8 +177,16 @@ private:
         std::vector<float> samples;
         std::uint64_t revision = 0;
     };
+    struct ModulationPreviewCache
+    {
+        bool valid = false;
+        std::array<int, 4> waveforms {};
+        std::vector<TrackerUIComponent::Trace> traces;
+        std::uint64_t revision = 0;
+    };
     std::unordered_map<int, WavetablePreviewCache> wavetablePreviewCaches;
     std::unordered_map<int, EnvelopePreviewCache> filterEnvelopePreviewCaches;
+    std::unordered_map<int, ModulationPreviewCache> modulationPreviewCaches;
     struct ScopeCalibration
     {
         float scale = 1.0f;
@@ -207,7 +215,7 @@ private:
     bool stateDialogErrorFromSave = false;
     bool stateFilenameEditing = false;
 
-    bool waitingForPaint;
+    std::atomic<bool> waitingForPaint { false };
     juce::CriticalSection screenshotLock;
     std::shared_ptr<TrackerMainProcessor::UiScreenshotRequest> pendingScreenshot;
     // This reference is provided as a quick way for your editor to

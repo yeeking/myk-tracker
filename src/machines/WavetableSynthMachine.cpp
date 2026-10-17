@@ -1,4 +1,5 @@
 #include "WavetableSynthMachine.h"
+#include "ModulationMatrixMachine.h"
 #include "MachineStateCodec.h"
 
 #include <cmath>
@@ -146,6 +147,12 @@ void WavetableSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce:
 
         float outputSample = 0.0f;
 
+        // The matrix belongs to the stack: every voice uses these same values.
+        const float mainPitch = ModulationMatrixMachine::pitchRatio(modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::waveFrequency, sample) : 0.0f, 2.0f);
+        const float subPitch = ModulationMatrixMachine::pitchRatio(modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::waveSubFrequency, sample) : 0.0f, 2.0f);
+        const float mainPosition = modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::wavePosition, sample) : 0.0f;
+        const float subPosition = modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::waveSubPosition, sample) : 0.0f;
+
         for (auto& voice : voices)
         {
             if (!voice.active)
@@ -157,7 +164,7 @@ void WavetableSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce:
                 voice.releaseStarted = true;
             }
 
-            outputSample += sampleVoice(voice);
+            outputSample += sampleVoice(voice, mainPitch, subPitch, mainPosition, subPosition);
 
             ++voice.ageSamples;
             if (!voice.releaseStarted)
@@ -746,13 +753,13 @@ WavetableSynthMachine::Voice& WavetableSynthMachine::allocateVoice()
     return stolenVoice;
 }
 
-float WavetableSynthMachine::sampleVoice(Voice& voice) const
+float WavetableSynthMachine::sampleVoice(Voice& voice, float mainPitch, float subPitch, float mainPosition, float subPosition) const
 {
     // All voices read the same shared cycler phase, so polyphonic notes stay
     // on the same waveform step and crossfade together. The cycle wraps from
     // the last step back to the first; released notes keep cycling.
     const int stepCount = juce::jmax(1, waveStepCount);
-    const double stepPosition = cyclerPhase * static_cast<double>(stepCount);
+    const double stepPosition = (cyclerPhase + mainPosition) * static_cast<double>(stepCount);
     const int baseStep = static_cast<int>(std::floor(stepPosition)) % stepCount;
     const int nextStep = (baseStep + 1) % stepCount;
     const float morph = static_cast<float>(stepPosition - std::floor(stepPosition));
@@ -764,7 +771,7 @@ float WavetableSynthMachine::sampleVoice(Voice& voice) const
     float mixedSample = juce::jmap(morph, sampleA, sampleB) * mainLevel;
     const float envelopeSample = voice.envelope.getNextSample();
 
-    voice.phase += voice.phaseDelta;
+    voice.phase += voice.phaseDelta * mainPitch;
     voice.phase -= std::floor(voice.phase);
 
     if (subLevel > 0.0f)
@@ -772,7 +779,7 @@ float WavetableSynthMachine::sampleVoice(Voice& voice) const
         // The sub shares the cycler phase, normalised over its own step
         // count, so it tracks the main oscillator's morph position.
         const int subStepCount = juce::jmax(1, subWaveStepCount);
-        const double subStepPosition = cyclerPhase * static_cast<double>(subStepCount);
+        const double subStepPosition = (cyclerPhase + subPosition) * static_cast<double>(subStepCount);
         const int subBaseStep = static_cast<int>(std::floor(subStepPosition)) % subStepCount;
         const int subNextStep = (subBaseStep + 1) % subStepCount;
         const float subMorph = static_cast<float>(subStepPosition - std::floor(subStepPosition));
@@ -781,7 +788,7 @@ float WavetableSynthMachine::sampleVoice(Voice& voice) const
         const float subSampleB = sampleWaveform(subWaveSteps[static_cast<std::size_t>(subNextStep)], voice.subPhase);
         mixedSample += juce::jmap(subMorph, subSampleA, subSampleB) * subLevel;
 
-        voice.subPhase += voice.subPhaseDelta;
+        voice.subPhase += voice.subPhaseDelta * subPitch;
         voice.subPhase -= std::floor(voice.subPhase);
     }
 

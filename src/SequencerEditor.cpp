@@ -11,7 +11,7 @@
 
 namespace
 {
-constexpr int kMachineStackCount = 16;
+constexpr int kMachineStackCount = 8;
 constexpr std::size_t kSeqConfigBaseRows = Sequence::configCount;
 
 bool isSequencerPlaying(SequencerAbs *sequencer)
@@ -1458,7 +1458,18 @@ void SequencerEditor::moveCursorRightOnMachinePage()
   if (!isMachineUiForCurrentSequence())
     return;
 
+  const auto before = machineCursorCol;
   moveMachineCursor(0, 1);
+  if (machineStackDetailMode && machineCursorCol == before)
+  {
+    const auto selectedType = getSelectedStackMachineType();
+    if (selectedType.has_value())
+      if (auto* machine = getActiveMachine(*selectedType); machine != nullptr && machine->navigateRight())
+      {
+        refreshMachineStateForCurrentSequence();
+        rebuildMachineCells();
+      }
+  }
 }
 
 void SequencerEditor::moveCursorRightOnResetConfirmationPage()
@@ -1703,7 +1714,7 @@ void SequencerEditor::incrementOnSequenceConfigPage()
     else
     {
       auto* sequence = sequencer->getSequence(currentSequence);
-      const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+      const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
       // TPS resynchronises the read head itself, but does not change routing or
       // invalidate already-scheduled note-offs.  Do not silence the stack for
       // that timing-only edit: active voices should be allowed to release.
@@ -1715,7 +1726,7 @@ void SequencerEditor::incrementOnSequenceConfigPage()
       currentConfigHead = std::min(currentConfigHead, sequencer->getSequence(currentSequence)->getReadHeadCount() - 1);
       if (structural && machineHost != nullptr)
       {
-        const auto newStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+        const auto newStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
         if (newStack != oldStack) machineHost->silenceStack(newStack);
       }
     }
@@ -1760,7 +1771,7 @@ void SequencerEditor::decrementOnSequenceConfigPage()
     else
     {
       auto* sequence = sequencer->getSequence(currentSequence);
-      const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+      const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
       // See incrementOnSequenceConfigPage: a TPS change resets read-head phase
       // without being a reason to stop the stack's currently playing voices.
       const bool structural = currentSeqParam == Sequence::sendConfig || currentSeqParam == Sequence::headCountConfig
@@ -1771,7 +1782,7 @@ void SequencerEditor::decrementOnSequenceConfigPage()
       currentConfigHead = std::min(currentConfigHead, sequencer->getSequence(currentSequence)->getReadHeadCount() - 1);
       if (structural && machineHost != nullptr)
       {
-        const auto newStack = static_cast<std::size_t>(juce::jlimit(0, 15, static_cast<int>(sequence->getMachineId())));
+        const auto newStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
         if (newStack != oldStack) machineHost->silenceStack(newStack);
       }
     }
@@ -2529,6 +2540,21 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
   if (machineHost == nullptr)
     return boxes;
 
+  UIBox modCell;
+  modCell.kind = UIBox::Kind::TrackerCell;
+  modCell.text = "MOD";
+  boxes[0].push_back(std::move(modCell));
+  UIBox modEnabled;
+  modEnabled.kind = UIBox::Kind::TrackerCell;
+  modEnabled.text = machineHost->isModulationEnabledInStack(stackIndex) ? "ON" : "OFF";
+  modEnabled.onActivate = [this, stackIndex]() { if (machineHost != nullptr) machineHost->toggleModulationEnabledInStack(stackIndex); };
+  boxes[1].push_back(std::move(modEnabled));
+  for (std::size_t col = 2; col < boxes.size(); ++col)
+  {
+    UIBox blank; blank.kind = UIBox::Kind::None; blank.isDisabled = true;
+    boxes[col].push_back(std::move(blank));
+  }
+
   auto stackTypes = machineHost->getMachineStackTypes(stackIndex);
   if (stackTypes.empty())
     stackTypes.push_back(CommandType::MidiNote);
@@ -2671,6 +2697,8 @@ std::optional<CommandType> SequencerEditor::getSelectedStackMachineType() const
 {
   if (machineHost == nullptr)
     return std::nullopt;
+  if (machineSelectedStackSlot == kModulationMatrixStackEntry)
+    return CommandType::ModulationMatrix;
   const auto stackTypes = machineHost->getMachineStackTypes(getActiveMachineIndex(CommandType::Sampler));
   if (machineSelectedStackSlot >= stackTypes.size())
     return std::nullopt;
@@ -2781,10 +2809,10 @@ void SequencerEditor::machineRemoveEntry()
     return;
   if (!machineStackDetailMode)
   {
-    if (machineCursorRow == 0)
+    if (machineCursorRow <= 1)
       return;
     if (machineHost != nullptr)
-      machineHost->removeMachineFromStack(getActiveMachineIndex(CommandType::Sampler), machineCursorRow - 1);
+      machineHost->removeMachineFromStack(getActiveMachineIndex(CommandType::Sampler), machineCursorRow - 2);
     return;
   }
   const auto selectedType = getSelectedStackMachineType();
@@ -2987,11 +3015,15 @@ bool SequencerEditor::enterSelectedMachineDetail()
   if (stackTypes.empty())
     return false;
 
-  const std::size_t slotIndex = machineCursorRow == 0 ? 0 : machineCursorRow - 1;
-  if (slotIndex >= stackTypes.size())
-    return false;
-
-  machineSelectedStackSlot = slotIndex;
+  if (machineCursorRow == 1)
+    machineSelectedStackSlot = kModulationMatrixStackEntry;
+  else
+  {
+    const std::size_t slotIndex = machineCursorRow == 0 ? 0 : machineCursorRow - 2;
+    if (slotIndex >= stackTypes.size())
+      return false;
+    machineSelectedStackSlot = slotIndex;
+  }
   machineStackDetailMode = true;
   machineCursorRow = 0;
   machineCursorCol = 0;
@@ -3023,8 +3055,13 @@ bool SequencerEditor::enterMachineDetailFromAnywhere()
   if (stackTypes.empty())
     return false;
 
-  const std::size_t slotIndex = machineCursorRow == 0 ? 0 : machineCursorRow - 1;
-  machineSelectedStackSlot = std::min(slotIndex, stackTypes.size() - 1);
+  if (machineCursorRow == 1)
+    machineSelectedStackSlot = kModulationMatrixStackEntry;
+  else
+  {
+    const std::size_t slotIndex = machineCursorRow == 0 ? 0 : machineCursorRow - 2;
+    machineSelectedStackSlot = std::min(slotIndex, stackTypes.size() - 1);
+  }
   machineStackDetailMode = true;
   machineCursorRow = 0;
   machineCursorCol = 0;
@@ -3049,6 +3086,8 @@ std::optional<CommandType> SequencerEditor::getFocusedMachineDetailType() const
 std::optional<std::size_t> SequencerEditor::getFocusedMachineDetailSlot() const
 {
   if (!machineStackDetailMode)
+    return std::nullopt;
+  if (machineSelectedStackSlot == kModulationMatrixStackEntry)
     return std::nullopt;
   return machineSelectedStackSlot;
 }
@@ -3075,7 +3114,8 @@ bool SequencerEditor::cycleMachineDetailNext()
   const auto stackTypes = machineHost->getMachineStackTypes(getActiveMachineIndex(CommandType::Sampler));
   if (stackTypes.empty())
     return false;
-  machineSelectedStackSlot = (machineSelectedStackSlot + 1) % stackTypes.size();
+  machineSelectedStackSlot = machineSelectedStackSlot == kModulationMatrixStackEntry ? 0 :
+      (machineSelectedStackSlot + 1 >= stackTypes.size() ? kModulationMatrixStackEntry : machineSelectedStackSlot + 1);
   refreshMachineStateForCurrentSequence();
   return true;
 }
@@ -3168,7 +3208,9 @@ void SequencerEditor::moveMachineCursor(int deltaRow, int deltaCol)
   if (deltaRow != 0)
   {
     // Step through rows in the requested direction, skipping cells the
-    // cursor is not allowed to rest on.
+    // cursor is not allowed to rest on. If the target row has no usable cell
+    // in this column (for example MOD's ON/OFF column above the ADD row), use
+    // the closest usable cell on that row instead.
     const std::size_t colRows = machineCursorCol < machineCells.size()
         ? machineCells[machineCursorCol].size()
         : 0;
@@ -3179,6 +3221,28 @@ void SequencerEditor::moveMachineCursor(int deltaRow, int deltaCol)
       if (isMachineCellLandable(machineCells[machineCursorCol][static_cast<std::size_t>(row)]))
       {
         nextRow = static_cast<std::size_t>(row);
+        break;
+      }
+
+      std::size_t nearestColumn = machineCursorCol;
+      bool foundOnRow = false;
+      for (std::size_t column = 0; column < machineCells.size(); ++column)
+      {
+        if (static_cast<std::size_t>(row) >= machineCells[column].size()
+            || !isMachineCellLandable(machineCells[column][static_cast<std::size_t>(row)]))
+          continue;
+        if (!foundOnRow
+            || (column > machineCursorCol ? column - machineCursorCol : machineCursorCol - column)
+                < (nearestColumn > machineCursorCol ? nearestColumn - machineCursorCol : machineCursorCol - nearestColumn))
+        {
+          nearestColumn = column;
+          foundOnRow = true;
+        }
+      }
+      if (foundOnRow)
+      {
+        nextRow = static_cast<std::size_t>(row);
+        nextCol = nearestColumn;
         break;
       }
     }

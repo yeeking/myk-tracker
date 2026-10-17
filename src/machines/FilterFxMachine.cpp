@@ -1,4 +1,5 @@
 #include "FilterFxMachine.h"
+#include "ModulationMatrixMachine.h"
 #include "MachineStateCodec.h"
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,10 @@ void FilterFxMachine::prepareDsp(double sampleRate, int samplesPerBlock)
     spec.numChannels = 2;
     filter.prepare(spec);
     secondFilter.prepare(spec);
+    secondFilter.setResonance(kFlatResonance);
+    appliedCutoff = appliedSecondCutoff = appliedResonance = -1.0f;
+    planEvents.reserve(1024);
+    carryReleases.reserve(1024);
     envelope.setSampleRate(currentSampleRate);
 }
 
@@ -177,7 +182,9 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
     }
     // At equal sample positions process releases before attacks so adjacent
     // notes retrigger the envelope instead of merging into one ramp.
-    std::stable_sort(planEvents.begin(), planEvents.end(),
+    // Events with equal time and kind are interchangeable; std::sort needs no
+    // temporary allocation, unlike stable_sort.
+    std::sort(planEvents.begin(), planEvents.end(),
         [](const PlanEvent& a, const PlanEvent& b)
         {
             if (a.sample != b.sample)
@@ -197,18 +204,14 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
     // Log-space sweep: COFF is the top of the sweep, AMT sets how far the low
     // end falls (AMT=0 leaves the cutoff static at COFF, AMT=1 reaches 20 Hz).
     const double maxFreq = 0.45 * snap.sampleRate;
-    const double top = juce::jlimit(static_cast<double>(kMinCutoffHz), maxFreq, static_cast<double>(snap.cutoffHz));
-    const double lowEnd = static_cast<double>(kMinCutoffHz)
-        * std::pow(top / static_cast<double>(kMinCutoffHz), 1.0 - static_cast<double>(snap.amount));
-    const double sweepRatio = top / lowEnd;
+    const double maxTopOctaves = std::log2(maxFreq / kMinCutoffHz);
+    const double baseTopOctaves = std::log2(juce::jmax(1.0, static_cast<double>(snap.cutoffHz) / kMinCutoffHz));
 
     const auto filterType = filterTypeForMode(snap.mode);
     const bool useSecondStage = is24DbMode(snap.mode);
     filter.setType(filterType);
     secondFilter.setType(filterType);
-    filter.setResonance(toFilterResonance(snap.resonance));
     // Keep the extra stage neutral so RES has a comparable peak in both slopes.
-    secondFilter.setResonance(kFlatResonance);
     if (useSecondStage != secondStageActive)
     {
         secondFilter.reset();
@@ -226,7 +229,10 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
                 // Retrigger from the bottom of the sweep with the current
                 // envelope parameters (reset before noteOn, per CurvedAdsr).
                 envelope.reset();
-                envelope.setParameters(params);
+                auto attackParams = params;
+                const float attackMod = modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::filterAttack, sample) : 0.0f;
+                attackParams.attack = juce::jlimit(0.0f, 2.0f, attackParams.attack + attackMod * 2.0f);
+                envelope.setParameters(attackParams);
                 envelope.noteOn();
             }
             else if (--activeNotes == 0)
@@ -236,14 +242,38 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
             ++cursor;
         }
 
+        const float cutoffMod = modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::filterCutoff, sample) : 0.0f;
+        const double topOctaves = juce::jlimit(0.0, maxTopOctaves, baseTopOctaves + static_cast<double>(cutoffMod) * 4.0);
+        if (topOctaves != cachedTopOctaves || snap.amount != cachedAmount)
+        {
+            const double top = kMinCutoffHz * std::exp2(topOctaves);
+            cachedLowEnd = kMinCutoffHz * std::pow(top / kMinCutoffHz, 1.0 - snap.amount);
+            cachedSweepRatio = top / cachedLowEnd;
+            cachedTopOctaves = topOctaves;
+            cachedAmount = snap.amount;
+        }
+        const float resonanceMod = modulationBlock != nullptr ? modulationBlock->get(ModulationDestination::filterResonance, sample) : 0.0f;
+        const float resonanceControl = juce::jlimit(0.0f, 1.0f, snap.resonance + resonanceMod);
+        if (resonanceControl != appliedResonance)
+        {
+            filter.setResonance(toFilterResonance(resonanceControl));
+            appliedResonance = resonanceControl;
+        }
         const double env = static_cast<double>(envelope.getNextSample());
         const double t = snap.positivePolarity ? env : 1.0 - env;
-        const double freq = lowEnd * std::pow(sweepRatio, t);
+        const double freq = cachedLowEnd * std::pow(cachedSweepRatio, t);
 
         const float cutoff = static_cast<float>(juce::jlimit(static_cast<double>(kMinCutoffHz), maxFreq, freq));
-        filter.setCutoffFrequency(cutoff);
-        if (useSecondStage)
+        if (cutoff != appliedCutoff)
+        {
+            filter.setCutoffFrequency(cutoff);
+            appliedCutoff = cutoff;
+        }
+        if (useSecondStage && cutoff != appliedSecondCutoff)
+        {
             secondFilter.setCutoffFrequency(cutoff);
+            appliedSecondCutoff = cutoff;
+        }
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
         {
             const float stageOne = filter.processSample(channel, buffer.getSample(channel, sample));

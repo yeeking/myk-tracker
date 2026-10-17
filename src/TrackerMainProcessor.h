@@ -32,6 +32,7 @@
 #include "machines/ChannelStripMachine.h"
 #include "machines/AuxReverbMachine.h"
 #include "machines/FilterFxMachine.h"
+#include "machines/ModulationMatrixMachine.h"
 
 class TrackerControlService;
 
@@ -128,6 +129,8 @@ public:
     void moveMachineInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
     bool isMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
     void toggleMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) override;
+    bool isModulationEnabledInStack(std::size_t stackIndex) const override;
+    void toggleModulationEnabledInStack(std::size_t stackIndex) override;
     float getMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
     void adjustMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) override;
     bool machineHasReturnLevelInStack(std::size_t stackIndex, std::size_t slotIndex) const override;
@@ -172,7 +175,7 @@ public:
     void adjustSongRowBeatCount(std::size_t row, int direction) override;
     void toggleSongPlayback() override;
     void rewindSongTransport() override;
-    void sendCurrentCellValueOverOscIfChanged();
+    void sendCurrentCellValueOverOscIfChanged(bool refreshMachineCells = true);
     void recreateSequencersAndMachines();
     struct PendingZoomCommand
     {
@@ -244,6 +247,7 @@ private:
         };
 
         std::vector<std::vector<Slot>> stacks;
+        std::vector<bool> modulationEnabled;
     };
     std::vector<std::unique_ptr<Sequencer>> sequenceSets;
     std::vector<SequenceSetMachineEnableState> sequenceSetMachineEnableStates;
@@ -297,6 +301,20 @@ private:
     };
     struct MachineStack
     {
+        struct GainCache
+        {
+            float db = 0.0f;
+            float linear = 1.0f;
+            float get(float nextDb)
+            {
+                if (nextDb != db)
+                {
+                    db = nextDb;
+                    linear = std::pow(10.0f, db / 20.0f);
+                }
+                return linear;
+            }
+        };
         struct SlotState
         {
             /** Persisted identity; grid coordinates are deliberately not an API. */
@@ -305,6 +323,8 @@ private:
             bool enabled = true;
             float sendLevelDb = 0.0f;
             float returnLevelDb = 0.0f;
+            GainCache sendGain;
+            GainCache returnGain;
         };
 
         std::unique_ptr<SuperSamplerProcessor> sampler;
@@ -313,6 +333,8 @@ private:
         std::unique_ptr<DelayFxMachine> delayFx;
         std::unique_ptr<ChannelStripMachine> channelStripFx;
         std::unique_ptr<FilterFxMachine> filterFx;
+        std::unique_ptr<ModulationMatrixMachine> modulationMatrix;
+        bool modulationEnabled = false;
         std::vector<SlotState> slots;
         juce::AudioBuffer<float> renderBuffer;
         juce::AudioBuffer<float> delayTailBuffer;
@@ -321,6 +343,7 @@ private:
         std::vector<MachineScheduledNote> wavetableBlockNotes;
         /** Filter-sweep notes distributed into the current block, sorted by sample offset. */
         std::vector<MachineScheduledNote> filterBlockNotes;
+        std::vector<MachineScheduledNote> modulationBlockNotes;
         bool audioProcessingActive = false;
         bool samplerProcessingActive = false;
         bool wavetableProcessingActive = false;
@@ -329,6 +352,7 @@ private:
         bool solo = false;
         int midiOutputChannel = 1;
         float gainDb = 0.0f;
+        GainCache gain;
         float meterLevel = 0.0f;
         /** Audio-thread ring buffer of the stack's final mono output (L+R)/2 for the
             UI oscilloscope. Allocated in prepareToPlay; the UI reads it via
@@ -347,6 +371,7 @@ private:
             f(*delayFx);
             f(*channelStripFx);
             f(*filterFx);
+            f(*modulationMatrix);
         }
     };
     struct SharedAuxBus
@@ -363,6 +388,11 @@ private:
     std::vector<ScheduledSamplerEvent> scratchFutureSamplerEvents;
     NoteEventQueue wavetableEvents;
     NoteEventQueue filterEvents;
+    NoteEventQueue modulationEvents;
+    static constexpr std::size_t kMaxModulationClockTicks = 256;
+    std::array<ModulationClockTick, kMaxModulationClockTicks> modulationClockTicks {};
+    std::size_t modulationClockTickCount = 0;
+    int currentTickSampleOffset = 0;
     std::vector<MachineStack> machineStacks;
     SharedAuxBus auxBus1;
     SharedAuxBus auxBus2;
@@ -445,7 +475,7 @@ private:
     void applyMachineEnableStateForSequenceSet(std::size_t setIndex);
     std::size_t getMachineEnableStateEditingSetIndex() const;
     bool isSongPlaybackRunning() const;
-    static constexpr std::size_t kMachineStackCount = 16;
+    static constexpr std::size_t kMachineStackCount = 8;
     MachineStack* getMachineStack(std::size_t stackIndex);
     const MachineStack* getMachineStack(std::size_t stackIndex) const;
     MachineStack::SlotState* getMachineSlot(std::size_t stackIndex, std::size_t slotIndex);
@@ -459,7 +489,7 @@ private:
     static MachineStack::SlotState makeDefaultSlotState(CommandType type);
     /** (property key, machine) pairs for state save/restore. The persisted names
         are part of the plugin state format; do not rename. */
-    static std::array<std::pair<const char*, MachineInterface*>, 6> stackMachineStateEntries(MachineStack& stack);
+    static std::array<std::pair<const char*, MachineInterface*>, 7> stackMachineStateEntries(MachineStack& stack);
     static bool isAuxSendType(CommandType type);
     static bool slotSupportsReturnLevel(CommandType type);
     static bool slotAllowsDuplicate(CommandType type);
@@ -470,7 +500,7 @@ private:
     const AudioEffectMachine* getAudioEffectForStackType(const MachineStack& stack, CommandType type) const;
     void oscMessageReceived(const juce::OSCMessage& message) override;
     void oscBundleReceived(const juce::OSCBundle& bundle) override;
-    juce::String getCurrentCellOscPayload();
+    juce::String getCurrentCellOscPayload(bool refreshMachineCells = true);
     static juce::String formatOscMessage(const juce::OSCMessage& message);
     void handleIncomingOscControlMessage(const juce::OSCMessage& message);
     void queueZoomCommand(float delta, float normalizedX, float normalizedY);

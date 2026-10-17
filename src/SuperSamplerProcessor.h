@@ -126,6 +126,7 @@ public:
     bool handleTextBackspace() override;
     /** Returns true while the sampler browser owns keyboard input. */
     bool wantsExclusiveKeyboardInput() const override;
+    void setModulationBlock(const ModulationBlockView* block) override { modulationBlock = block; }
     /** Requests a preferred cursor row after browser navigation changes. */
     int consumePreferredCursorRow(const std::vector<std::vector<UIBox>>& cells) override;
 
@@ -233,6 +234,7 @@ private:
     /** Note-on events for the current block; audio-thread only, cleared each
         block so its capacity is reused without realtime allocation. */
     std::vector<NoteOnEvent> pendingNoteOns;
+    const ModulationBlockView* modulationBlock = nullptr;
     /** Next player id to allocate. */
     int nextId { 1 };
     /** Audio format manager used for sample decoding. */

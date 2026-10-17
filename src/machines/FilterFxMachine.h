@@ -28,6 +28,7 @@ public:
     void setSecondsPerTick(double secondsPerTick) override;
     /** Resets the filter state and envelope when transport or notes are stopped. */
     void allNotesOff() override;
+    void setModulationBlock(const ModulationBlockView* block) override { modulationBlock = block; }
     /** Serialises the filter settings. */
     void getStateInformation(juce::MemoryBlock& destData) override;
     /** Restores the filter settings from serialised state. */
@@ -109,6 +110,13 @@ private:
     juce::dsp::StateVariableTPTFilter<float> secondFilter;
     /** Audio-thread-only flag used to clear the second stage when it enters the path. */
     bool secondStageActive = false;
+    float appliedCutoff = -1.0f;
+    float appliedSecondCutoff = -1.0f;
+    float appliedResonance = -1.0f;
+    double cachedTopOctaves = -1.0;
+    float cachedAmount = -1.0f;
+    double cachedLowEnd = 20.0;
+    double cachedSweepRatio = 1.0;
     /** Cutoff-sweep envelope, audio-thread only, retriggers on each note. */
     CurvedAdsr envelope;
     /** Pointer to the processor-owned per-stack note list for the current block. */
@@ -119,6 +127,7 @@ private:
     std::vector<int> carryReleases;
     /** Number of scheduled notes still sounding. */
     int activeNotes = 0;
+    const ModulationBlockView* modulationBlock = nullptr;
 
     static constexpr float kMinCutoffHz = 20.0f;
     static constexpr float kMaxCutoffHz = 20000.0f;

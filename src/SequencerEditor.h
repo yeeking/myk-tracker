@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,8 @@ public:
   virtual void moveMachineInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
   virtual bool isMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
   virtual void toggleMachineEnabledInStack(std::size_t stackIndex, std::size_t slotIndex) = 0;
+  virtual bool isModulationEnabledInStack(std::size_t) const { return false; }
+  virtual void toggleModulationEnabledInStack(std::size_t) {}
   virtual float getMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
   virtual void adjustMachineSendLevelDbInStack(std::size_t stackIndex, std::size_t slotIndex, int direction) = 0;
   virtual bool machineHasReturnLevelInStack(std::size_t stackIndex, std::size_t slotIndex) const = 0;
@@ -502,6 +505,7 @@ private:
   std::size_t machineEditRow = 0;
   bool machineStackDetailMode = false;
   std::size_t machineSelectedStackSlot = 0;
+  static constexpr std::size_t kModulationMatrixStackEntry = std::numeric_limits<std::size_t>::max();
   bool resetConfirmationYesSelected = true;
   ConfirmationAction pendingConfirmationAction = ConfirmationAction::resetTracker;
 };

@@ -81,6 +81,7 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
     src/machines/ChannelStripMachine.cpp
     src/machines/AuxReverbMachine.cpp
     src/machines/FilterFxMachine.cpp
+    src/machines/ModulationMatrixMachine.cpp
 )
 
 
@@ -158,4 +159,18 @@ if (BUILD_TESTING)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
     add_test(NAME sampler-tuning-tests COMMAND sampler-tuning-tests)
+
+    juce_add_console_app(modulation-matrix-tests PRODUCT_NAME "Modulation Matrix Tests")
+    juce_generate_juce_header(modulation-matrix-tests)
+    target_sources(modulation-matrix-tests PRIVATE
+        tests/ModulationMatrixTests.cpp
+        src/machines/ModulationMatrixMachine.cpp)
+    target_include_directories(modulation-matrix-tests PRIVATE src)
+    target_compile_features(modulation-matrix-tests PRIVATE cxx_std_17)
+    target_compile_definitions(modulation-matrix-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(modulation-matrix-tests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME modulation-matrix-tests COMMAND modulation-matrix-tests)
 endif()
