@@ -68,7 +68,7 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
 
     boxes[0][2].kind = UIBox::Kind::TrackerCell;
     boxes[0][2].text = "MS";
-    boxes[1][2] = buildFloatCell(&delayMs, 5.0f, 1.0f, static_cast<float>(kMaxDelaySeconds * 1000), 0);
+    boxes[1][2] = buildFloatCell(&delayMs, 1.0f, 1.0f, static_cast<float>(kMaxDelaySeconds * 1000), 0);
     boxes[1][2].isDisabled = mode != DelayMode::milliseconds;
 
     boxes[0][3].kind = UIBox::Kind::TrackerCell;
@@ -88,20 +88,55 @@ void DelayFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
     if (delayBuffer.getNumSamples() == 0 || buffer.getNumSamples() == 0)
         return;
 
-    const int delaySamples = getDelaySamples();
     const int delayBufferSamples = delayBuffer.getNumSamples();
-    const int readPositionBase = (writePosition - delaySamples + delayBufferSamples) % delayBufferSamples;
+    const int delaySamples = getDelaySamples();
+    const bool modulateTime = mode == DelayMode::milliseconds
+        && modulationBlock != nullptr
+        && modulationBlock->isActive(ModulationDestination::delayTime);
+
+    if (!modulateTime)
+    {
+        const int readPositionBase = (writePosition - delaySamples + delayBufferSamples) % delayBufferSamples;
+        for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
+        {
+            const int readPosition = (readPositionBase + sampleIndex) % delayBufferSamples;
+            const int writeIndex = (writePosition + sampleIndex) % delayBufferSamples;
+            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            {
+                const int delayChannel = juce::jlimit(0, delayBuffer.getNumChannels() - 1, channel);
+                const float dry = buffer.getSample(channel, sampleIndex);
+                const float delayed = delayBuffer.getSample(delayChannel, readPosition);
+                delayBuffer.setSample(delayChannel, writeIndex, dry + (delayed * feedback));
+                buffer.setSample(channel, sampleIndex, juce::jmap(mix, dry, delayed));
+            }
+        }
+        writePosition = (writePosition + buffer.getNumSamples()) % delayBufferSamples;
+        return;
+    }
 
     for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
     {
-        const int readPosition = (readPositionBase + sampleIndex) % delayBufferSamples;
         const int writeIndex = (writePosition + sampleIndex) % delayBufferSamples;
+        const float modulation = modulationBlock->get(ModulationDestination::delayTime, sampleIndex);
+        // Full-scale modulation is a +/-100% offset from the configured time:
+        // the negative peak reaches the one-sample floor and the positive peak
+        // reaches twice the base time (subject to the prepared four-second buffer).
+        const float currentDelaySamples = juce::jlimit(
+            1.0f, static_cast<float>(delayBufferSamples - 1),
+            static_cast<float>(delaySamples) * (1.0f + modulation));
+        float readPositionFloat = static_cast<float>(writeIndex) - currentDelaySamples;
+        if (readPositionFloat < 0.0f)
+            readPositionFloat += static_cast<float>(delayBufferSamples);
+        const int readPosition = static_cast<int>(std::floor(readPositionFloat));
+        const int nextReadPosition = (readPosition + 1) % delayBufferSamples;
+        const float readFraction = readPositionFloat - static_cast<float>(readPosition);
 
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
         {
             const int delayChannel = juce::jlimit(0, delayBuffer.getNumChannels() - 1, channel);
             const float dry = buffer.getSample(channel, sampleIndex);
-            const float delayed = delayBuffer.getSample(delayChannel, readPosition);
+            const float first = delayBuffer.getSample(delayChannel, readPosition);
+            const float delayed = first + (delayBuffer.getSample(delayChannel, nextReadPosition) - first) * readFraction;
             const float wet = dry + (delayed * feedback);
 
             delayBuffer.setSample(delayChannel, writeIndex, wet);

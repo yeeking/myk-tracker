@@ -898,6 +898,38 @@ int SuperSamplerProcessor::addSamplePlayerForControl (int lowNote, int highNote)
     return id;
 }
 
+std::vector<PortableSampleAsset> SuperSamplerProcessor::exportPortableSamples(int stackId) const
+{
+    std::vector<PortableSampleAsset> result;
+    const std::lock_guard<std::mutex> lock(playerMutex);
+    result.reserve(players.size());
+    for (const auto& player : players)
+    {
+        if (player == nullptr) continue;
+        PortableSampleAsset asset;
+        asset.stackId = stackId;
+        asset.playerId = player->getId();
+        const auto state = player->getState();
+        asset.filePath = state.filePath;
+        asset.fileName = state.fileName;
+        if (player->copyLoadedBuffer(asset.audio, asset.sampleRate))
+            result.push_back(std::move(asset));
+    }
+    return result;
+}
+
+bool SuperSamplerProcessor::restorePortableSample(const PortableSampleAsset& sample)
+{
+    const std::lock_guard<std::mutex> lock(playerMutex);
+    auto* player = getPlayer(sample.playerId);
+    if (player == nullptr || sample.audio.getNumChannels() < 1 || sample.audio.getNumSamples() < 1)
+        return false;
+    juce::AudioBuffer<float> audio;
+    audio.makeCopyOf(sample.audio);
+    player->setFilePathAndStatus(sample.filePath, "loading", sample.fileName);
+    return player->setLoadedBuffer(std::move(audio), sample.fileName, sample.sampleRate);
+}
+
 void SuperSamplerProcessor::loadSampleAsync (int playerId, const juce::File& file, std::function<void (bool, juce::String)> onComplete)
 {
     std::thread ([this, playerId, file, cb = std::move (onComplete)]() mutable

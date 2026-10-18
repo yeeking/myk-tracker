@@ -8,6 +8,7 @@
 */
 
 #include "TrackerMainProcessor.h"
+#include "PortableTrackerState.h"
 #include "TrackerControlService.h"
 #include "TrackerMainUI.h"
 #include "MixerState.h"
@@ -241,6 +242,7 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
         if (slot.type == CommandType::WavetableSynth) destinations |= 1u;
         if (slot.type == CommandType::FilterFx) destinations |= 2u;
         if (slot.type == CommandType::Sampler) destinations |= 4u;
+        if (slot.type == CommandType::DelayFx) destinations |= 8u;
     }
     if (stack.modulationMatrix != nullptr)
         stack.modulationMatrix->setInstalledDestinations(destinations);
@@ -1859,6 +1861,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 stack->sampler->setModulationBlock(modulation);
                 stack->wavetableSynth->setModulationBlock(modulation);
                 stack->filterFx->setModulationBlock(modulation);
+                stack->delayFx->setModulationBlock(modulation);
             }
 
             if (stack->samplerProcessingActive && stack->sampler != nullptr)
@@ -2114,16 +2117,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout TrackerMainProcessor::create
 
 void TrackerMainProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    withAudioThreadExclusive([&]()
-    {
-        const auto stateVar = serializeSequencerState();
-        const auto json = juce::JSON::toString(stateVar);
-        apvts.state.setProperty("json", json, nullptr);
+    withAudioThreadExclusive([&]() { writeTrackerStateUnlocked(destData); });
+}
 
-        juce::MemoryOutputStream stream(destData, true);
-        if (auto xml = apvts.copyState().createXml())
-            xml->writeTo(stream);
-    });
+void TrackerMainProcessor::writeTrackerStateUnlocked(juce::MemoryBlock& destData)
+{
+    const auto stateVar = serializeSequencerState();
+    const auto json = juce::JSON::toString(stateVar);
+    apvts.state.setProperty("json", json, nullptr);
+
+    destData.reset();
+    juce::MemoryOutputStream stream(destData, false);
+    if (auto xml = apvts.copyState().createXml())
+        xml->writeTo(stream);
 }
 
 void TrackerMainProcessor::setStateInformation (const void* data, int sizeInBytes)
@@ -2145,6 +2151,90 @@ void TrackerMainProcessor::setStateInformation (const void* data, int sizeInByte
             restoreSequencerState(parsed);
         }
     });
+}
+
+bool TrackerMainProcessor::canWritePortableState()
+{
+    return withAudioThreadExclusive([&]()
+    {
+        const auto* playbackSequencer = getPlaybackSequencerInternal();
+        return (playbackSequencer == nullptr || !playbackSequencer->isPlaying()) && !isMasterRecording();
+    });
+}
+
+bool TrackerMainProcessor::isPlaybackRunningSafely()
+{
+    return withAudioThreadExclusive([&]()
+    {
+        const auto* playbackSequencer = getPlaybackSequencerInternal();
+        return playbackSequencer != nullptr && playbackSequencer->isPlaying();
+    });
+}
+
+bool TrackerMainProcessor::writePortableStateFile(const juce::File& destination, juce::String& error)
+{
+    juce::MemoryBlock state;
+    std::vector<PortableSampleAsset> samples;
+    return capturePortableState(state, samples, error) && portable_tracker_state::write(destination, state, samples, error);
+}
+
+bool TrackerMainProcessor::capturePortableState(juce::MemoryBlock& state,
+                                                std::vector<PortableSampleAsset>& samples,
+                                                juce::String& error)
+{
+    const bool captured = withAudioThreadExclusive([&]()
+    {
+        const auto* playbackSequencer = getPlaybackSequencerInternal();
+        if ((playbackSequencer != nullptr && playbackSequencer->isPlaying()) || isMasterRecording())
+            return false;
+        writeTrackerStateUnlocked(state);
+        return true;
+    });
+    if (!captured)
+    {
+        error = "STOP PLAYBACK/RECORDING";
+        return false;
+    }
+    if (state.getSize() == 0) { error = "EMPTY TRACKER STATE"; return false; }
+    samples.clear();
+    for (std::size_t stackIndex = 0; stackIndex < machineStacks.size(); ++stackIndex)
+    {
+        auto stackSamples = machineStacks[stackIndex].sampler->exportPortableSamples(static_cast<int>(stackIndex));
+        samples.insert(samples.end(), std::make_move_iterator(stackSamples.begin()), std::make_move_iterator(stackSamples.end()));
+    }
+    return true;
+}
+
+bool TrackerMainProcessor::loadTrackerStateFile(const juce::File& source, juce::String& error)
+{
+    const auto validState = [&error](const juce::MemoryBlock& state)
+    {
+        juce::MemoryInputStream input(state, false);
+        const auto xml = juce::parseXML(input.readEntireStreamAsString());
+        if (xml == nullptr || !juce::ValueTree::fromXml(*xml).isValid())
+        {
+            error = "INVALID TRACKER STATE";
+            return false;
+        }
+        return true;
+    };
+    if (!source.existsAsFile()) { error = "FILE NOT FOUND"; return false; }
+    if (!portable_tracker_state::isPortableFile(source))
+    {
+        juce::MemoryBlock state;
+        if (!source.loadFileAsData(state) || state.getSize() == 0) { error = "COULD NOT LOAD " + source.getFileName(); return false; }
+        if (!validState(state)) return false;
+        setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+        return true;
+    }
+    PortableTrackerDocument document;
+    if (!portable_tracker_state::read(source, document, error)) return false;
+    if (!validState(document.state)) return false;
+    setStateInformation(document.state.getData(), static_cast<int>(document.state.getSize()));
+    for (const auto& sample : document.samples)
+        if (sample.stackId >= 0 && static_cast<std::size_t>(sample.stackId) < machineStacks.size())
+            machineStacks[static_cast<std::size_t>(sample.stackId)].sampler->restorePortableSample(sample);
+    return true;
 }
 
 juce::var TrackerMainProcessor::stringGridToVar(const std::vector<std::vector<std::string>>& grid)
@@ -2240,6 +2330,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     juce::Array<juce::var> sequenceStackAudibleStates;
     juce::Array<juce::var> sequenceMachineIds;
     juce::Array<juce::var> sequenceNoteLengthModes;
+    juce::Array<juce::var> sequenceLengths;
     const bool anyStackSolo = std::any_of(machineStacks.begin(), machineStacks.end(),
                                           [] (const auto& stack) { return stack.solo; });
     if (viewedSequencer != nullptr)
@@ -2250,6 +2341,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
             const bool sequenceSolo = sequence->isSolo();
             sequenceSoloStates.add(sequenceSolo);
             sequenceMachineIds.add(static_cast<int>(sequence->getMachineId()));
+            sequenceLengths.add(static_cast<int>(sequence->getLength()));
             const auto noteLengthMode = sequence->getNoteLengthMode();
             sequenceNoteLengthModes.add(noteLengthMode == SequenceReadOnly::NoteLengthMode::half ? 1
                 : noteLengthMode == SequenceReadOnly::NoteLengthMode::quarter ? 2 : 0);
@@ -2280,6 +2372,7 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("sequenceStackAudibleStates", sequenceStackAudibleStates);
     state->setProperty("sequenceMachineIds", sequenceMachineIds);
     state->setProperty("sequenceNoteLengthModes", sequenceNoteLengthModes);
+    state->setProperty("sequenceLengths", sequenceLengths);
 }
 
 juce::var TrackerMainProcessor::getUiState()
@@ -2294,11 +2387,6 @@ juce::var TrackerMainProcessor::getUiState()
     state->setProperty("stepGrid", stringGridToVar(viewedSequencer->getStepAsGridOfStrings(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
     state->setProperty("sequenceConfigs", stringGridToVar(viewedSequencer->getSequenceConfigsAsGridOfStrings(seqEditor.getCurrentConfigHead())));
     state->setProperty("stepData", numberGridToVar(viewedSequencer->getStepData(seqEditor.getCurrentSequence(), seqEditor.getCurrentStep())));
-
-    juce::Array<juce::var> seqLengths;
-    for (std::size_t col = 0; col < viewedSequencer->howManySequences(); ++col)
-        seqLengths.add(static_cast<int>(viewedSequencer->howManySteps(col)));
-    state->setProperty("sequenceLengths", seqLengths);
 
     Sequence* currentSequence = viewedSequencer->getSequence(seqEditor.getCurrentSequence());
     state->setProperty("machineId", currentSequence->getMachineId());

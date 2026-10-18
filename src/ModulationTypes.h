@@ -23,6 +23,8 @@ enum class ModulationDestination : std::size_t
     samplerPosition,
     /** Final mixer pan for this stack. */
     stackPan,
+    /** Free-running delay time, as a percentage offset from its base milliseconds. */
+    delayTime,
     count
 };
 

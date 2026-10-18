@@ -2,6 +2,7 @@
 
 #include "SuperSamplePlayer.h"
 #include "SuperSamplerProcessor.h"
+#include "PortableTrackerState.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -57,6 +58,70 @@ juce::MemoryBlock serialiseValueTree(const juce::ValueTree& tree)
 
 int main()
 {
+    const auto portableDirectory = juce::File::getSpecialLocation(juce::File::tempDirectory)
+        .getNonexistentChildFile("myk-portable-state-test", "", false);
+    require(portableDirectory.createDirectory().wasOk(), "create portable-state test directory");
+    const auto portableFile = portableDirectory.getChildFile("portable.myktracker");
+    const juce::String portableStateText = "<MYK portable='test'/>";
+    juce::MemoryBlock portableState(portableStateText.toRawUTF8(), portableStateText.getNumBytesAsUTF8());
+    PortableSampleAsset monoAsset;
+    monoAsset.stackId = 0; monoAsset.playerId = 7; monoAsset.filePath = "/gone/mono.wav";
+    monoAsset.fileName = "mono.wav"; monoAsset.sampleRate = 44100.0; monoAsset.audio = makeRamp(257);
+    PortableSampleAsset stereoAsset;
+    stereoAsset.stackId = 3; stereoAsset.playerId = 2; stereoAsset.filePath = "/gone/stereo.wav";
+    stereoAsset.fileName = "stereo.wav"; stereoAsset.sampleRate = 96000.0;
+    stereoAsset.audio.setSize(2, 129);
+    for (int i = 0; i < stereoAsset.audio.getNumSamples(); ++i)
+    {
+        stereoAsset.audio.setSample(0, i, static_cast<float>(i) / 200.0f);
+        stereoAsset.audio.setSample(1, i, -static_cast<float>(i) / 300.0f);
+    }
+    PortableSampleAsset fortyEightAsset = monoAsset;
+    fortyEightAsset.stackId = 4; fortyEightAsset.playerId = 8; fortyEightAsset.sampleRate = 48000.0;
+    PortableSampleAsset eightyEightAsset = monoAsset;
+    eightyEightAsset.stackId = 7; eightyEightAsset.playerId = 3; eightyEightAsset.sampleRate = 88200.0;
+    juce::String portableError;
+    require(portable_tracker_state::write(portableFile, portableState,
+                                          { monoAsset, stereoAsset, fortyEightAsset, eightyEightAsset }, portableError),
+            "portable tracker archive writes");
+    require(portable_tracker_state::isPortableFile(portableFile), "portable tracker archive has ZIP signature");
+    juce::ZipFile portableArchive(portableFile);
+    require(portableArchive.getEntry("state.xml") != nullptr
+                && portableArchive.getEntry("manifest.json") != nullptr
+                && portableArchive.getEntry("audio/stack-0/player-7.flac") != nullptr
+                && portableArchive.getEntry("audio/stack-3/player-2.flac") != nullptr,
+            "portable tracker archive contains state, manifest, and FLAC assets");
+    PortableTrackerDocument portableDocument;
+    require(portable_tracker_state::read(portableFile, portableDocument, portableError), "portable tracker archive reads");
+    require(portableDocument.state == portableState && portableDocument.samples.size() == 4,
+            "portable state and sample manifest round-trip");
+    require(portableDocument.samples[0].audio.getNumChannels() == 1
+                && portableDocument.samples[0].audio.getNumSamples() == 257
+                && std::abs(portableDocument.samples[0].audio.getSample(0, 128) - monoAsset.audio.getSample(0, 128)) < 2.0e-6f,
+            "embedded mono FLAC round-trips within 24-bit precision");
+    require(portableDocument.samples[1].audio.getNumChannels() == 2
+                && std::abs(portableDocument.samples[1].sampleRate - 96000.0) < 0.001
+                && std::abs(portableDocument.samples[1].audio.getSample(1, 64) - stereoAsset.audio.getSample(1, 64)) < 2.0e-6f,
+            "embedded stereo FLAC preserves rate and channels");
+    requireNear(portableDocument.samples[2].sampleRate, 48000.0, 0.001,
+                "embedded 48 kHz FLAC preserves its sample rate");
+    requireNear(portableDocument.samples[3].sampleRate, 88200.0, 0.001,
+                "embedded 88.2 kHz FLAC preserves its sample rate");
+    require(portableDirectory.deleteRecursively(), "remove portable-state test directory");
+
+    SuperSamplerProcessor portableSampler;
+    const int portablePlayerId = portableSampler.addSamplePlayerForControl(24, 84);
+    PortableSampleAsset restoreAsset = stereoAsset;
+    restoreAsset.stackId = 6;
+    restoreAsset.playerId = portablePlayerId;
+    require(portableSampler.restorePortableSample(restoreAsset), "embedded sample restores into its stable player");
+    const auto exportedAssets = portableSampler.exportPortableSamples(6);
+    require(exportedAssets.size() == 1 && exportedAssets[0].playerId == portablePlayerId
+                && exportedAssets[0].filePath == restoreAsset.filePath
+                && exportedAssets[0].fileName == restoreAsset.fileName
+                && exportedAssets[0].audio.getNumChannels() == 2,
+            "portable sampler restore retains path metadata and decoded audio");
+
     SuperSamplePlayer player(1);
     player.prepareToPlay(44100.0, 16);
     require(player.setLoadedBuffer(makeRamp(128), "ramp", 44100.0), "a ramp sample loads");

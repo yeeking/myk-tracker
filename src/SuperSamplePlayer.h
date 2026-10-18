@@ -70,6 +70,8 @@ public:
 
     /** Replaces the loaded sample buffer and metadata. */
     bool setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, const juce::String& name, double newSourceSampleRate);
+    /** Copies the loaded decoded source for a portable state archive. */
+    bool copyLoadedBuffer (juce::AudioBuffer<float>& destination, double& sampleRate) const;
     /** Marks the player as having failed to load a sample. */
     void markError (const juce::String& path, const juce::String& message);
     /** Returns the cached waveform SVG string. */

@@ -562,8 +562,8 @@ class Sequencer : public SequencerAbs {
       /// class data members 
       /** makes reads and writes thread safe */
       std::unique_ptr<std::shared_mutex> rw_mutex;
-      /** if false, ignore ticks. If true, do not ignore ticks */
-      bool playing; 
+      /** Cross-thread transport status. A pointer preserves Sequencer's move semantics. */
+      std::unique_ptr<std::atomic<bool>> playing;
       /** this value is sent to the tick call on our sequences. Allows 'step without triggering' behaviour  */
       bool triggerOnTick;
       /** if this is true, update my display string on next tick  */

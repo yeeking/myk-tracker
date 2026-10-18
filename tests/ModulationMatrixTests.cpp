@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "machines/ModulationMatrixMachine.h"
+#include "machines/DelayFxMachine.h"
 
 namespace
 {
@@ -20,7 +21,7 @@ void require(bool condition, const char* message)
 int main()
 {
     ModulationMatrixMachine matrix;
-    matrix.setInstalledDestinations(1u | 2u | 4u);
+    matrix.setInstalledDestinations(1u | 2u | 4u | 8u);
     matrix.prepareToPlay(48000.0, 64);
     auto cells = matrix.getUIBoxes({});
 
@@ -106,7 +107,8 @@ int main()
     juce::MemoryBlock state;
     matrix.getStateInformation(state);
     ModulationMatrixMachine restored;
-    restored.setInstalledDestinations(1u | 2u | 4u);
+    restored.setInstalledDestinations(1u | 2u | 4u | 8u);
+    restored.prepareToPlay(48000.0, 64);
     restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
     for (int i = 0; i < 4; ++i) restored.navigateRight();
     cells = restored.getUIBoxes({});
@@ -118,5 +120,74 @@ int main()
     restored.setStateInformation(invalidUtf8, static_cast<int>(sizeof(invalidUtf8)));
     cells = restored.getUIBoxes({});
     require(cells[7][5].text == "1", "invalid matrix state leaves existing settings intact");
+
+    while (restored.navigateRight()) {}
+    cells = restored.getUIBoxes({});
+    require(cells[6][0].text == "D TIME" && cells[7][0].text == "PAN",
+            "installed delay exposes D TIME before the always-visible PAN destination");
+    cells[6][1].onInsert(100.0);
+    restored.processModulationBlock(64, true, false, nullptr, 0, {});
+    require(restored.getBlockView().isActive(ModulationDestination::delayTime),
+            "delay-time routes publish an audio-rate modulation buffer");
+
+    // Version 3 used thirteen destinations ending at PAN. Appending D TIME in
+    // version 4 must preserve that old stride and leave the new route empty.
+    auto* legacyRoot = new juce::DynamicObject();
+    legacyRoot->setProperty("version", 3);
+    juce::Array<juce::var> legacyRoutes;
+    for (std::size_t i = 0; i < kModulationSourceCount * 13u; ++i)
+        legacyRoutes.add(i == static_cast<std::size_t>(ModulationDestination::stackPan) ? 37 : 0);
+    legacyRoot->setProperty("routes", legacyRoutes);
+    const auto legacyJson = juce::JSON::toString(juce::var(legacyRoot));
+    ModulationMatrixMachine legacyRestored;
+    legacyRestored.setInstalledDestinations(8u);
+    legacyRestored.setStateInformation(legacyJson.toRawUTF8(), legacyJson.getNumBytesAsUTF8());
+    while (legacyRestored.navigateRight()) {}
+    cells = legacyRestored.getUIBoxes({});
+    require(cells[6][1].text == "0" && cells[7][1].text == "37",
+            "version-three routes preserve PAN and default D TIME to zero");
+
+    DelayFxMachine delayUi;
+    auto delayCells = delayUi.getUIBoxes({});
+    delayCells[1][0].onAdjust(1);
+    delayCells = delayUi.getUIBoxes({});
+    require(delayCells[1][0].text == "MS" && delayCells[1][2].text == "250",
+            "delay can enter free-millisecond mode");
+    delayCells[1][2].onAdjust(1);
+    delayCells = delayUi.getUIBoxes({});
+    require(delayCells[1][2].text == "251", "delay milliseconds adjust in one-ms steps");
+
+    const auto configureDelay = [](DelayFxMachine& delay, int mode)
+    {
+        const auto json = juce::String("{\"version\":1,\"mode\":")
+            + juce::String(mode)
+            + ",\"syncTicks\":1,\"delayMs\":100,\"feedback\":0,\"mix\":1}";
+        delay.prepareToPlay(1000.0, 256);
+        delay.setSecondsPerTick(0.1);
+        delay.setStateInformation(json.toRawUTF8(), json.getNumBytesAsUTF8());
+    };
+    std::array<float, 256> halfTimeModulation {};
+    halfTimeModulation.fill(-0.5f);
+    ModulationBlockView delayModulation;
+    delayModulation.numSamples = static_cast<int>(halfTimeModulation.size());
+    delayModulation.values[static_cast<std::size_t>(ModulationDestination::delayTime)] = halfTimeModulation.data();
+
+    DelayFxMachine freeDelay;
+    configureDelay(freeDelay, 1);
+    freeDelay.setModulationBlock(&delayModulation);
+    juce::AudioBuffer<float> freeBuffer(1, 256);
+    freeBuffer.clear(); freeBuffer.setSample(0, 0, 1.0f);
+    freeDelay.processAudioBuffer(freeBuffer);
+    require(freeBuffer.getSample(0, 50) > 0.99f && std::abs(freeBuffer.getSample(0, 100)) < 0.0001f,
+            "minus-fifty-percent D TIME modulation halves a free-ms delay");
+
+    DelayFxMachine syncedDelay;
+    configureDelay(syncedDelay, 0);
+    syncedDelay.setModulationBlock(&delayModulation);
+    juce::AudioBuffer<float> syncBuffer(1, 256);
+    syncBuffer.clear(); syncBuffer.setSample(0, 0, 1.0f);
+    syncedDelay.processAudioBuffer(syncBuffer);
+    require(syncBuffer.getSample(0, 100) > 0.99f && std::abs(syncBuffer.getSample(0, 50)) < 0.0001f,
+            "D TIME modulation is ignored in tracker-step sync mode");
     return 0;
 }

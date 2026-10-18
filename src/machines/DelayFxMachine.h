@@ -22,6 +22,8 @@ public:
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     /** Applies the delay effect to the stack audio buffer. */
     void processAudioBuffer(juce::AudioBuffer<float>& buffer) override;
+    /** Supplies the current stack modulation signals on the audio thread. */
+    void setModulationBlock(const ModulationBlockView* block) override { modulationBlock = block; }
     /** Updates tick duration for sync-mode delay times. */
     void setSecondsPerTick(double secondsPerTick) override;
     /** Clears buffered delay audio when transport or notes are stopped. */
@@ -69,6 +71,8 @@ private:
     int writePosition = 0;
     /** Last published quarter-beat position within the bar. */
     int currentQuarterBeat = 0;
+    /** Current audio-thread modulation block; only D TIME is consumed. */
+    const ModulationBlockView* modulationBlock = nullptr;
 
     /** Maximum allocated delay time in seconds. */
     static constexpr int kMaxDelaySeconds = 4;

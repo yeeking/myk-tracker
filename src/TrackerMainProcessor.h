@@ -112,6 +112,14 @@ public:
     //==============================================================================
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
+    /** Explicit-file-only portable archive helpers. They never affect host state. */
+    bool writePortableStateFile(const juce::File& destination, juce::String& error);
+    /** Captures immutable state/audio for a portable file. Call from the UI before background encoding. */
+    bool capturePortableState(juce::MemoryBlock& state, std::vector<PortableSampleAsset>& samples, juce::String& error);
+    bool loadTrackerStateFile(const juce::File& source, juce::String& error);
+    bool canWritePortableState();
+    /** Thread-safe transport status for standalone/UI services. */
+    bool isPlaybackRunningSafely();
     /** wipes midiToSend  */
     void clearPendingEvents();
 
@@ -221,6 +229,22 @@ public:
     auto withAudioThreadExclusive(Fn&& fn) -> decltype(fn())
     {
         using ReturnType = decltype(fn());
+        // UI state construction can call a service which needs another safe
+        // processor query. Re-enter on the thread that already owns this
+        // processor's exclusive section instead of attempting to lock the
+        // non-recursive audio mutex again.
+        if (audioExclusiveOwner == this)
+        {
+            if constexpr (std::is_void_v<ReturnType>)
+            {
+                fn();
+                return;
+            }
+            else
+            {
+                return fn();
+            }
+        }
         for (;;)
         {
             while (processing.load(std::memory_order_acquire))
@@ -228,6 +252,16 @@ public:
             std::unique_lock<std::mutex> lock(audioMutex);
             if (!processing.load(std::memory_order_acquire))
             {
+                struct OwnerScope
+                {
+                    explicit OwnerScope(TrackerMainProcessor* processor)
+                        : previous(audioExclusiveOwner)
+                    {
+                        audioExclusiveOwner = processor;
+                    }
+                    ~OwnerScope() { audioExclusiveOwner = previous; }
+                    TrackerMainProcessor* previous;
+                } ownerScope(this);
                 if constexpr (std::is_void_v<ReturnType>)
                 {
                     fn();
@@ -242,6 +276,9 @@ public:
     }
     
 private:
+    inline static thread_local TrackerMainProcessor* audioExclusiveOwner = nullptr;
+    /** Caller must already hold audioMutex through withAudioThreadExclusive. */
+    void writeTrackerStateUnlocked(juce::MemoryBlock& destData);
     static constexpr std::size_t kScopeRingSampleCount = 1024;
     friend class TrackerControlService;
     struct SongRow

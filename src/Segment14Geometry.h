@@ -81,16 +81,27 @@ public:
         out.indices.reserve(s.size() * 15 * 6);
 
         float penX = 0.0f;
+        float penY = 0.0f;
 
         for (char ch : s)
         {
+            // Overlay labels may use several short lines. Keep this in the
+            // shared geometry builder so cached text meshes work identically
+            // for HUD and grid text.
+            if (ch == '\n')
+            {
+                penX = 0.0f;
+                penY -= params.cellH * 1.18f;
+                continue;
+            }
+
             const uint16_t mask = charMap[static_cast<unsigned char>(ch)];
 
             for (int seg = 0; seg < 15; ++seg)
             {
                 if (seg == DP && !params.includeDot) continue;
                 if ((mask & (1u << seg)) == 0) continue;
-                appendSegmentQuad(out, static_cast<Segment>(seg), penX);
+                appendSegmentQuad(out, static_cast<Segment>(seg), penX, penY);
             }
 
             penX += params.advance;
@@ -121,21 +132,21 @@ private:
     std::array<Quad, 15> segmentQuads{};
 
 private:
-    Vec2 transform(Vec2 p, float penX) const
+    Vec2 transform(Vec2 p, float penX, float penY) const
     {
         const float sx = p.x + params.slant * (p.y - params.cellH * 0.5f);
-        return { sx + penX, p.y };
+        return { sx + penX, p.y + penY };
     }
 
-    void appendSegmentQuad(Mesh& m, Segment seg, float penX) const
+    void appendSegmentQuad(Mesh& m, Segment seg, float penX, float penY) const
     {
         const auto& q = segmentQuads[static_cast<std::size_t>(seg)];
         const uint32_t base = static_cast<uint32_t>(m.vertices.size());
 
-        const Vec2 t0 = transform(q.p0, penX);
-        const Vec2 t1 = transform(q.p1, penX);
-        const Vec2 t2 = transform(q.p2, penX);
-        const Vec2 t3 = transform(q.p3, penX);
+        const Vec2 t0 = transform(q.p0, penX, penY);
+        const Vec2 t1 = transform(q.p1, penX, penY);
+        const Vec2 t2 = transform(q.p2, penX, penY);
+        const Vec2 t3 = transform(q.p3, penX, penY);
 
         constexpr float nx=0.0f, ny=0.0f, nz=1.0f;
 
@@ -173,8 +184,12 @@ private:
         charMap['_'] = bits({D});
         charMap['.'] = bits({DP});
         charMap[':'] = bits({DP});     // (single dot; if you want true colon, add a second dot segment later)
-        charMap['/'] = bits({I,K});    // diagonal-ish
-        charMap['\\']= bits({H,J});
+        // The diagonal pairs meet at the centre: I+J is '/', H+K is '\\',
+        // and the pairs on one side form unambiguous angle brackets.
+        charMap['/'] = bits({I,J});
+        charMap['\\']= bits({H,K});
+        charMap['<'] = bits({H,J});
+        charMap['>'] = bits({I,K});
         charMap['@'] = bits({A,B,C,D,E,F,G1,G2,H,I,J,K,L,M,DP});
         charMap[' '] = 0;
 

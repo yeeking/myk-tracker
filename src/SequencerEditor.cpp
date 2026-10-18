@@ -1055,6 +1055,29 @@ void SequencerEditor::decrementAtCursor()
   }
 }
 
+void SequencerEditor::adjustAllStepRowsAtCursor(int direction)
+{
+  if (getCurrentPage() != SequencerEditorPage::step || sequencer == nullptr || direction == 0)
+    return;
+
+  const auto rowCount = sequencer->howManyStepDataRows(currentSequence, currentStep);
+  if (rowCount == 0)
+    return;
+  for (std::size_t row = 0; row < rowCount; ++row)
+  {
+    if (direction > 0)
+      sequencer->incrementStepDataAt(currentSequence, currentStep, row, currentStepCol);
+    else
+      sequencer->decrementStepDataAt(currentSequence, currentStep, row, currentStepCol);
+  }
+
+  // Retain the normal single-cell note-edit behaviour for subsequent keyboard
+  // note entry, using the cursor row after its bulk adjustment.
+  if (currentStepRow < rowCount && currentStepCol == Step::noteInd && !currentStepIsControlCommand())
+    syncOctaveFromMidiNote(sequencer->getStepDataAt(currentSequence, currentStep,
+                                                    currentStepRow, currentStepCol));
+}
+
 SequencerEditorSubMode SequencerEditor::cycleSubModeLeft(SequencerEditorSubMode subMode)
 {
   switch (subMode)
@@ -1279,6 +1302,31 @@ void SequencerEditor::decrementTicksPerStep()
   else
     --tps;
   sequencer->getSequence(currentSequence)->setTicksPerStep(tps);
+}
+
+bool SequencerEditor::setCurrentSequenceTicksPerStep(std::size_t ticksPerStep)
+{
+  if (sequencer == nullptr || currentSequence >= sequencer->howManySequences())
+    return false;
+
+  auto* sequence = sequencer->getSequence(currentSequence);
+  if (sequence == nullptr || sequence->getReadHeadCount() == 0)
+    return false;
+
+  ticksPerStep = juce::jlimit<std::size_t>(1, 8, ticksPerStep);
+  bool changed = false;
+  for (std::size_t head = 0; head < sequence->getReadHeadCount(); ++head)
+  {
+    auto config = sequence->getReadHeadConfig(head);
+    if (config.ticksPerStep == ticksPerStep)
+      continue;
+    config.ticksPerStep = ticksPerStep;
+    sequence->setReadHeadConfig(head, config, false);
+    changed = true;
+  }
+  if (changed)
+    sequence->requestQuarterBeatResyncIfPlaying();
+  return true;
 }
 
 void SequencerEditor::shiftCurrentSequenceStepNote(int semitones)

@@ -63,6 +63,7 @@ target_link_libraries(tracker-hardware-emulator
 target_sources(myk-tracker-plug
     PRIVATE
     src/TrackerMainUI.cpp
+    src/PortableTrackerState.cpp
     src/TrackerFileBrowser.cpp
     src/TrackerMainProcessor.cpp
     src/TrackerControlService.cpp
@@ -164,6 +165,7 @@ if (BUILD_TESTING)
     juce_generate_juce_header(sampler-tuning-tests)
     target_sources(sampler-tuning-tests PRIVATE
         tests/SamplerTuningTests.cpp
+        src/PortableTrackerState.cpp
         src/TrackerFileBrowser.cpp
         src/SuperSamplePlayer.cpp
         src/SuperSamplerProcessor.cpp)
@@ -180,7 +182,8 @@ if (BUILD_TESTING)
     juce_generate_juce_header(modulation-matrix-tests)
     target_sources(modulation-matrix-tests PRIVATE
         tests/ModulationMatrixTests.cpp
-        src/machines/ModulationMatrixMachine.cpp)
+        src/machines/ModulationMatrixMachine.cpp
+        src/machines/DelayFxMachine.cpp)
     target_include_directories(modulation-matrix-tests PRIVATE src)
     target_compile_features(modulation-matrix-tests PRIVATE cxx_std_17)
     target_compile_definitions(modulation-matrix-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)

@@ -38,7 +38,7 @@ std::vector<double> makeExplodedNoteRow(const std::vector<double>& source, doubl
   row[Step::velInd] = velocity <= 0.0 ? 64.0 : std::clamp(velocity, 1.0, 127.0);
 
   const double duration = source.size() > Step::lengthInd ? source[Step::lengthInd] : 0.0;
-  row[Step::lengthInd] = duration <= 0.0 ? 1.0 : std::clamp(duration, 1.0, 8.0);
+  row[Step::lengthInd] = duration <= 0.0 ? 1.0 : std::clamp(duration, 1.0, 16.0);
   return row;
 }
 
@@ -183,13 +183,22 @@ void Step::setData(const std::vector<std::vector<double>> &_data)
 {
   // uni lock as writing data
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  this->data = std::move(_data); // copy it over
+  this->data = _data;
+  // A Step is a rectangular event table.  Old/corrupt states and a few
+  // editor transitions can otherwise leave an empty row which later display
+  // or playback code cannot meaningfully address.
+  if (data.empty())
+    data.emplace_back(Step::maxInd + 1, 0.0);
+  for (auto& row : data)
+    if (row.size() < Step::maxInd + 1)
+      row.resize(Step::maxInd + 1, 0.0);
 }
 
 void Step::resetRow(std::size_t row)
 {
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  assert(row < data.size());
+  if (row >= data.size())
+    return;
   for (std::size_t col = 0; col < data[row].size(); ++col)
   {
     data[row][col] = 0;
@@ -201,8 +210,8 @@ void Step::setDataAt(std::size_t row, std::size_t col, double value)
 {
   // uni lock as writing data
   // std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  assert(row < data.size());
-  assert(col < data[row].size());
+  if (row >= data.size() || col >= data[row].size())
+    return;
 
   // apply data constraints based on current command
   if (col == Step::cmdInd)
@@ -1092,7 +1101,7 @@ void Sequence::resetForTransportStart()
 
 /////////////////////// Sequencer
 
-Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{true}, triggerOnTick{true}, stringUpdateRequested{false}, soloModeActive{std::make_unique<std::atomic<bool>>(false)}
+Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{std::make_unique<std::atomic<bool>>(true)}, triggerOnTick{true}, stringUpdateRequested{false}, soloModeActive{std::make_unique<std::atomic<bool>>(false)}
 {
   for (std::size_t i = 0; i < seqCount; ++i)
   {
@@ -1183,7 +1192,7 @@ void Sequencer::tick(bool isQuarterNoteBoundary)
   // The string grid is a UI/MCP display cache, so it is rebuilt lazily by the
   // reader instead of here - building it on the audio thread allocated per edit
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
-  if (playing)
+  if (playing != nullptr && playing->load(std::memory_order_acquire))
   {
     for (auto& seq : sequences)
     {
@@ -1757,17 +1766,19 @@ void Sequencer::stop()
 {
   for (auto& seq : sequences)
     seq.cancelQuarterBeatResync();
-  playing = false; 
+  if (playing != nullptr)
+    playing->store(false, std::memory_order_release);
 }
 /** start playing */
 void Sequencer::play()
 {
-  playing = true; 
+  if (playing != nullptr)
+    playing->store(true, std::memory_order_release);
 }
 
 bool Sequencer::isPlaying() const
 {
-  return playing; 
+  return playing != nullptr && playing->load(std::memory_order_acquire);
 }
 
 void Sequencer::rewindAtNextZero()

@@ -9,6 +9,25 @@ using namespace juce::gl;
 
 namespace
 {
+std::size_t longestTextLine(const std::string& text)
+{
+    std::size_t longest = 0;
+    std::size_t length = 0;
+    for (const char ch : text)
+    {
+        if (ch == '\n')
+        {
+            longest = std::max(longest, length);
+            length = 0;
+        }
+        else
+        {
+            ++length;
+        }
+    }
+    return std::max(longest, length);
+}
+
 struct Vertex
 {
     float position[3];
@@ -1171,9 +1190,9 @@ void TrackerUIComponent::renderOverlayText(const juce::Matrix3D<float>& projecti
 
     const float baseDistance = 20.0f;
     const float cameraDistance = baseDistance / zoomCopy.zoomLevel;
-    // A compact page name belongs to a fixed right-side HUD strip; modal
-    // overlays retain the conventional left-aligned position for readability.
-    const float estimatedTextWidth = static_cast<float>(overlayCopy.text.size())
+    // The page HUD is a compact, multi-line right-side strip; modal overlays
+    // retain the conventional left-aligned position for readability.
+    const float estimatedTextWidth = static_cast<float>(longestTextLine(overlayCopy.text))
         * textGeomParams.advance * scale;
     const float viewX = overlayCopy.rightStrip
         ? hudHalfWidth - padding - estimatedTextWidth

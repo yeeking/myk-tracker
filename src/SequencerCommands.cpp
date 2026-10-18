@@ -92,7 +92,7 @@ void CommandProcessor::initialiseCommands() {
               // long, short, min, max, step,default
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
+              Parameter("Dur", "D", 0, 16, 1, 1, Step::lengthInd)},
               
             Step::noteInd, // int noteEditGoesToParam;
             Step::velInd, // int numberEditGoesToParam;
@@ -110,7 +110,7 @@ void CommandProcessor::initialiseCommands() {
             "Log", "Log", "Prints step data to the console",
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
+              Parameter("Dur", "D", 0, 16, 1, 1, Step::lengthInd)},
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
@@ -131,7 +131,7 @@ void CommandProcessor::initialiseCommands() {
             "Sampler", "Samp", "Plays a sampler voice",
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd), 
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd), 
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
+              Parameter("Dur", "D", 0, 16, 1, 1, Step::lengthInd)},
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,
@@ -145,7 +145,7 @@ void CommandProcessor::initialiseCommands() {
             "WavetableSynth", "Wave", "Plays the internal wavetable synth",
             { Parameter("Note", "N", 0, 127, 1, 32, Step::noteInd),
               Parameter("Vel", "V", 0, 127, 4, 64, Step::velInd),
-              Parameter("Dur", "D", 0, 8, 1, 1, Step::lengthInd)},
+              Parameter("Dur", "D", 0, 16, 1, 1, Step::lengthInd)},
             Step::noteInd,
             Step::velInd,
             Step::lengthInd,

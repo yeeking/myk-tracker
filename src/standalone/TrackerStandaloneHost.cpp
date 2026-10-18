@@ -955,7 +955,7 @@ AudioConfigurationSnapshot StandalonePluginHolder::getAudioConfigurationSnapshot
         snapshot.bitDepth = device->getCurrentBitDepth();
     }
     if (auto* tracker = dynamic_cast<TrackerMainProcessor*>(processor.get()))
-        snapshot.canApply = !audioConfigApplying && !tracker->getSequencer()->isPlaying() && !tracker->isMasterRecording();
+        snapshot.canApply = !audioConfigApplying && !tracker->isPlaybackRunningSafely() && !tracker->isMasterRecording();
     return snapshot;
 }
 

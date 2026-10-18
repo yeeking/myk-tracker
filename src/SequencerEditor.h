@@ -268,6 +268,8 @@ public:
   void incrementAtCursor();
   /** decrease the value at the current cursor position, e.g. increasing note number */
   void decrementAtCursor();
+  /** Apply the current Step-page bracket adjustment to every row in the step. */
+  void adjustAllStepRowsAtCursor(int direction);
   void gotoSongPage();
   /** enter sequence configuration page */
   void gotoSequenceConfigPage();
@@ -361,6 +363,8 @@ public:
   void decrementChannel();
   void incrementTicksPerStep();
   void decrementTicksPerStep();
+  /** Set every read head on the selected sequence to the same TPS value. */
+  bool setCurrentSequenceTicksPerStep(std::size_t ticksPerStep);
   void shiftCurrentSequenceStepNote(int semitones);
   static void nextSequenceType(SequencerAbs *seqr, unsigned int sequence);
   /** returns the index of the sequence that the editor is currently focused on*/

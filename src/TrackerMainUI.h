@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <chrono>
+#include <future>
 #include <unordered_map>
 #include "TrackerMainProcessor.h"
 #include "TrackerControlService.h"
@@ -101,6 +102,7 @@ private:
     void prepareAudioConfigView();
     void prepareHelpView();
     void prepareResetConfirmationView();
+    std::string makeRightHudText(SequencerEditorMode mode);
     void updateCellStates(const std::vector<std::vector<UIBox>>& boxes,
                           size_t rowsToDisplay,
                           size_t colsToDisplay,
@@ -127,8 +129,11 @@ private:
     void rebuildStateDialogBoxes();
     void activateStateDialogCell();
     void moveStateDialogCursor(int rowDelta, int colDelta);
-    void beginStateBrowser(bool saving);
+    void moveStateBrowserCursorToTopEntry();
+    void beginStateBrowser(bool saving, bool includeAudio = false);
     void saveStateToSelectedFile();
+    void startPortableSave(const juce::File& file);
+    void pollPortableSave();
     void loadSelectedStateFile(const juce::File& file);
     juce::File selectedStateSaveFile(juce::String& error) const;
     juce::File initialStateDirectory() const;
@@ -206,17 +211,22 @@ private:
     bool samplerViewActive = false;
     bool customMachineColumnWidthsActive = false;
     juce::File lastStateDirectory;
-    enum class StateDialogMode { none, savePrompt, loadPrompt, saveBrowser, loadBrowser, overwriteConfirm, error };
+    enum class StateDialogMode { none, savePrompt, loadPrompt, saveBrowser, loadBrowser, overwriteConfirm, savingAudio, error };
     StateDialogMode stateDialogMode = StateDialogMode::none;
     TrackerFileBrowser stateFileBrowser;
     std::vector<std::vector<UIBox>> stateDialogBoxes;
     std::size_t stateDialogColumn = 0;
     std::size_t stateDialogRow = 0;
+    /** Logical selection and viewport for the fixed eight-row browser list. */
+    std::size_t stateFileEntryCursor = 0;
+    std::size_t stateFileListScroll = 0;
     juce::String stateSaveName;
     juce::String stateDialogError;
     juce::File pendingStateFile;
     bool stateDialogErrorFromSave = false;
     bool stateFilenameEditing = false;
+    bool stateSaveIncludesAudio = false;
+    std::future<std::pair<bool, juce::String>> portableSaveFuture;
 
     std::atomic<bool> waitingForPaint { false };
     bool uiBenchmarkEnabled = false;

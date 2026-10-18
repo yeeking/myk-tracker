@@ -79,6 +79,18 @@ std::string compactPageLabel(SequencerEditorMode mode)
     return "MYK";
 }
 
+int indexedSnapshotValue(const juce::var& values, int index, int fallback)
+{
+    if (index < 0 || !values.isArray())
+        return fallback;
+
+    const auto* array = values.getArray();
+    if (array == nullptr || index >= array->size())
+        return fallback;
+
+    return static_cast<int>(array->getReference(index));
+}
+
 std::string formatSignedGain(float gainDb)
 {
     const int roundedGain = static_cast<int>(std::lround(gainDb));
@@ -223,9 +235,86 @@ TrackerMainUI::TrackerMainUI (TrackerMainProcessor& p)
 
 }
 
+std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
+{
+    const auto ui = currentView.state.getProperty("ui", juce::var());
+    const int sequenceIndex = juce::jmax(0, static_cast<int>(ui.getProperty("currentSequence", 0)));
+    const int stepIndex = juce::jmax(0, static_cast<int>(ui.getProperty("currentStep", 0)));
+    // The per-sequence routing list is authoritative for the Sequence cursor.
+    // The generic machineId can briefly belong to a different detail context.
+    const int machineId = juce::jmax(0, indexedSnapshotValue(
+        ui.getProperty("sequenceMachineIds", juce::var()),
+        sequenceIndex,
+        static_cast<int>(ui.getProperty("machineId", 0))));
+    const int sequenceLength = juce::jmax(0, indexedSnapshotValue(
+        ui.getProperty("sequenceLengths", juce::var()), sequenceIndex, 0));
+
+    const auto sequenceAndStep = [&]()
+    {
+        return std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId)
+            + "\n" + std::to_string(stepIndex + 1) + "/" + std::to_string(sequenceLength);
+    };
+
+    switch (mode)
+    {
+        case SequencerEditorMode::selectingSeqAndStep:
+            return "SEQ\n" + sequenceAndStep();
+
+        case SequencerEditorMode::editingStep:
+            return "STEP\n" + std::to_string(sequenceIndex + 1)
+                + "\n" + std::to_string(stepIndex + 1) + "/" + std::to_string(sequenceLength);
+
+        case SequencerEditorMode::configuringSequence:
+            return "CONF\n" + std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId);
+
+        case SequencerEditorMode::machineConfig:
+            break;
+
+        case SequencerEditorMode::arrangingSong:
+        case SequencerEditorMode::mixer:
+        case SequencerEditorMode::audioConfig:
+        case SequencerEditorMode::help:
+        case SequencerEditorMode::resetConfirmation:
+            return compactPageLabel(mode);
+    }
+
+    int selectedMachineId = machineId;
+    std::optional<CommandType> detailType;
+    std::optional<std::size_t> detailSlot;
+    bool detailEnabled = false;
+    audioProcessor.withAudioThreadExclusive([&]()
+    {
+        if (auto* sequencer = audioProcessor.getSequencer())
+            if (auto* sequence = sequencer->getSequence(seqEditor->getCurrentSequence()))
+                selectedMachineId = juce::jmax(0, static_cast<int>(sequence->getMachineId()));
+
+        if (!seqEditor->isEditingMachineDetail())
+            return;
+
+        detailType = seqEditor->getFocusedMachineDetailType();
+        detailSlot = seqEditor->getFocusedMachineDetailSlot();
+        if (!detailType.has_value())
+            return;
+
+        const auto stackIndex = static_cast<std::size_t>(selectedMachineId);
+        detailEnabled = detailType.value() == CommandType::ModulationMatrix
+            ? audioProcessor.isModulationEnabledInStack(stackIndex)
+            : detailSlot.has_value() && audioProcessor.isMachineEnabledInStack(stackIndex, detailSlot.value());
+    });
+
+    if (!detailType.has_value())
+        return "MACH\n" + std::to_string(selectedMachineId);
+
+    return "MACH\n" + std::to_string(selectedMachineId)
+        + "\n" + machineTraits(detailType.value()).shortLabel
+        + "\n" + (detailEnabled ? "ON" : "OFF");
+}
+
 TrackerMainUI::~TrackerMainUI()
 {
   stopTimer();
+  if (portableSaveFuture.valid())
+      portableSaveFuture.wait();
   writeUiBenchmarkReport();
   {
     const juce::ScopedLock lock(screenshotLock);
@@ -370,6 +459,7 @@ void TrackerMainUI::timerCallback ()
     const auto started = uiBenchmarkEnabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
     if (!isShowing())
         return;
+    pollPortableSave();
     ++framesDrawn;
 
     if (waitingForPaint) {return;}// already waiting for a repaint
@@ -463,7 +553,7 @@ void TrackerMainUI::timerCallback ()
   overlayState.rightStrip = stateDialogMode == StateDialogMode::none
       && editMode != SequencerEditorMode::resetConfirmation;
   if (overlayState.rightStrip)
-      overlayState.text = compactPageLabel(editMode);
+      overlayState.text = makeRightHudText(editMode);
 
   overlayState.color = palette.textPrimary;
   overlayState.glowColor = palette.gridPlayhead;
@@ -787,9 +877,21 @@ void TrackerMainUI::prepareSeqConfigView()
         sequenceSetIndex = audioProcessor.getViewedSequenceSetIndex();
         auto* sequencer = audioProcessor.getSequencer();
         grid = gridFromSnapshot(currentView.state.getProperty("ui", {}).getProperty("sequenceConfigs", {}));
+        if (sequencer == nullptr)
+        {
+            grid.clear();
+            triggerCounts.clear();
+            return;
+        }
+        // Host state may have been restored since currentView was captured.
+        // Never index the new sequence set using a stale grid's column count.
+        if (grid.size() != sequencer->howManySequences())
+            grid = sequencer->getSequenceConfigsAsGridOfStrings(seqEditor->getCurrentConfigHead());
         triggerCounts.resize(grid.size());
-        for (std::size_t col = 0; col < grid.size(); ++col)
-            triggerCounts[col] = sequencer->getSequence(col)->getTriggerEventCount();
+        const auto sequenceCount = std::min(grid.size(), sequencer->howManySequences());
+        for (std::size_t col = 0; col < sequenceCount; ++col)
+            if (auto* sequence = sequencer->getSequence(col))
+                triggerCounts[col] = sequence->getTriggerEventCount();
     });
 
     const auto previousTriggerCounts = seqConfigTriggerCounts;
@@ -1636,8 +1738,9 @@ void TrackerMainUI::prepareHelpView()
     const std::vector<std::array<std::string, 6>> helpRows = {
         {"SPACE", "PLAY/STOP", "ARROWS", "MOVE", "ENTER", "ACT/REC"},
         {"BACK", "RESET/EXIT", "TAB", "STEP", "[ ]", "ADJUST"},
+        {"{ }", "STEP ALL", "", "", "", ""},
         {"+/-", "ROWS", "S+C", "CLOCK", "R", "REWIND"},
-        {"0-7", "PAGES", "S+I", "INSERT", "S+K", "DELETE"},
+        {"0-7", "PAGES", "S+1-8", "TPS", "S+I/K", "INS/DEL"},
         {"C+H", "HELP", "S+H", "SHORT", "C+C", "COPY"},
         {"C+V", "PASTE", "C+=", "SHIFT +", "C+-", "SHIFT -"},
         {"S+S", "SOLO", "S+M", "MUTE", "S+E/G", "XPL/IMP"},
@@ -2324,6 +2427,7 @@ void TrackerMainUI::openStateSaveDialog()
     stateDialogError.clear();
     stateDialogErrorFromSave = false;
     pendingStateFile = juce::File();
+    stateSaveIncludesAudio = false;
 }
 
 void TrackerMainUI::openStateLoadDialog()
@@ -2337,6 +2441,8 @@ void TrackerMainUI::openStateLoadDialog()
 
 void TrackerMainUI::closeStateDialog()
 {
+    if (stateDialogMode == StateDialogMode::savingAudio)
+        return;
     stateFileBrowser.close();
     stateDialogMode = StateDialogMode::none;
     stateDialogBoxes.clear();
@@ -2345,12 +2451,15 @@ void TrackerMainUI::closeStateDialog()
     grabKeyboardFocus();
 }
 
-void TrackerMainUI::beginStateBrowser(bool saving)
+void TrackerMainUI::beginStateBrowser(bool saving, bool includeAudio)
 {
     stateFileBrowser.open(initialStateDirectory());
     stateDialogMode = saving ? StateDialogMode::saveBrowser : StateDialogMode::loadBrowser;
     stateDialogColumn = stateDialogRow = 0;
+    stateFileEntryCursor = 0;
+    stateFileListScroll = 0;
     stateFilenameEditing = false;
+    stateSaveIncludesAudio = saving && includeAudio;
     if (saving)
     {
         const auto timestamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
@@ -2391,11 +2500,20 @@ void TrackerMainUI::saveStateToSelectedFile()
         return;
     }
 
-    juce::MemoryBlock state;
-    audioProcessor.getStateInformation(state);
-    if (state.getSize() == 0 || !file.replaceWithData(state.getData(), state.getSize()))
+    if (stateSaveIncludesAudio)
     {
-        stateDialogError = "COULD NOT SAVE " + file.getFileName();
+        startPortableSave(file);
+        return;
+    }
+    const bool saved = [&]()
+        {
+            juce::MemoryBlock state;
+            audioProcessor.getStateInformation(state);
+            return state.getSize() > 0 && file.replaceWithData(state.getData(), state.getSize());
+        }();
+    if (!saved)
+    {
+        stateDialogError = error.isNotEmpty() ? error : "COULD NOT SAVE " + file.getFileName();
         stateDialogErrorFromSave = true;
         stateDialogMode = StateDialogMode::error;
         return;
@@ -2404,17 +2522,61 @@ void TrackerMainUI::saveStateToSelectedFile()
     closeStateDialog();
 }
 
-void TrackerMainUI::loadSelectedStateFile(const juce::File& file)
+void TrackerMainUI::startPortableSave(const juce::File& file)
 {
     juce::MemoryBlock state;
-    if (!file.existsAsFile() || !file.loadFileAsData(state) || state.getSize() == 0)
+    std::vector<PortableSampleAsset> samples;
+    juce::String error;
+    if (!audioProcessor.capturePortableState(state, samples, error))
     {
-        stateDialogError = "COULD NOT LOAD " + file.getFileName();
+        stateDialogError = error.isNotEmpty() ? error : "COULD NOT SAVE " + file.getFileName();
+        stateDialogErrorFromSave = true;
+        stateDialogMode = StateDialogMode::error;
+        return;
+    }
+
+    pendingStateFile = file;
+    stateDialogMode = StateDialogMode::savingAudio;
+    portableSaveFuture = std::async(std::launch::async,
+                                    [file, state = std::move(state), samples = std::move(samples)]() mutable
+    {
+        juce::String writeError;
+        const bool ok = portable_tracker_state::write(file, state, samples, writeError);
+        return std::make_pair(ok, writeError);
+    });
+}
+
+void TrackerMainUI::pollPortableSave()
+{
+    if (stateDialogMode != StateDialogMode::savingAudio || !portableSaveFuture.valid()
+        || portableSaveFuture.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+        return;
+
+    const auto result = portableSaveFuture.get();
+    if (result.first)
+    {
+        lastStateDirectory = pendingStateFile.getParentDirectory();
+        // The saving state intentionally ignores Escape/normal close requests.
+        // Leave it before performing the completion close.
+        stateDialogMode = StateDialogMode::saveBrowser;
+        closeStateDialog();
+        return;
+    }
+    stateDialogError = result.second.isNotEmpty() ? result.second : "COULD NOT WRITE PORTABLE STATE";
+    stateDialogErrorFromSave = true;
+    stateDialogMode = StateDialogMode::error;
+}
+
+void TrackerMainUI::loadSelectedStateFile(const juce::File& file)
+{
+    juce::String error;
+    if (!audioProcessor.loadTrackerStateFile(file, error))
+    {
+        stateDialogError = error.isNotEmpty() ? error : "COULD NOT LOAD " + file.getFileName();
         stateDialogErrorFromSave = false;
         stateDialogMode = StateDialogMode::error;
         return;
     }
-    audioProcessor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
     lastStateDirectory = file.getParentDirectory();
     closeStateDialog();
 }
@@ -2441,25 +2603,39 @@ void TrackerMainUI::rebuildStateDialogBoxes()
     };
 
     if (stateDialogMode == StateDialogMode::savePrompt)
-        pushRow(action("SAVE", [this] { beginStateBrowser(true); }), action("CANCEL", [this] { closeStateDialog(); }));
+    {
+        pushRow(action("WITH AUDIO", [this] { beginStateBrowser(true, true); }), action("STATE ONLY", [this] { beginStateBrowser(true, false); }));
+        pushRow(action("CANCEL", [this] { closeStateDialog(); }));
+    }
     else if (stateDialogMode == StateDialogMode::loadPrompt)
         pushRow(action("LOAD", [this] { beginStateBrowser(false); }), action("CANCEL", [this] { closeStateDialog(); }));
     else if (stateDialogMode == StateDialogMode::overwriteConfirm)
         pushRow(action("REPLACE", [this]
         {
+            juce::String error;
             const auto file = pendingStateFile;
             pendingStateFile = juce::File();
             if (file.existsAsFile())
             {
-                juce::MemoryBlock state;
-                if (audioProcessor.getStateInformation(state), state.getSize() > 0 && file.replaceWithData(state.getData(), state.getSize()))
+                if (stateSaveIncludesAudio)
+                {
+                    startPortableSave(file);
+                    return;
+                }
+                const bool saved = [&]()
+                    {
+                        juce::MemoryBlock state;
+                        audioProcessor.getStateInformation(state);
+                        return state.getSize() > 0 && file.replaceWithData(state.getData(), state.getSize());
+                    }();
+                if (saved)
                 {
                     lastStateDirectory = file.getParentDirectory();
                     closeStateDialog();
                     return;
                 }
             }
-            stateDialogError = "COULD NOT REPLACE FILE";
+            stateDialogError = error.isNotEmpty() ? error : "COULD NOT REPLACE FILE";
             stateDialogErrorFromSave = true;
             stateDialogMode = StateDialogMode::error;
         }), action("CANCEL", [this] { pendingStateFile = juce::File(); stateDialogMode = StateDialogMode::saveBrowser; }));
@@ -2470,6 +2646,13 @@ void TrackerMainUI::rebuildStateDialogBoxes()
             stateDialogError.clear();
             pendingStateFile = juce::File();
         }));
+    else if (stateDialogMode == StateDialogMode::savingAudio)
+    {
+        UIBox working;
+        working.text = "SAVING AUDIO";
+        working.isDisabled = true;
+        pushRow(std::move(working));
+    }
     else
     {
         UIBox path = action(stateFileBrowser.getDirectory().getFullPathName(), [this] { closeStateDialog(); });
@@ -2487,17 +2670,64 @@ void TrackerMainUI::rebuildStateDialogBoxes()
             find.width = 3.0f;
             pushRow(std::move(find));
         }
-        UIBox up = action("../", [this] { stateFileBrowser.browseUp(); stateDialogRow = 2; });
+        UIBox up = action("../", [this]
+        {
+            stateFileBrowser.browseUp();
+            if (stateDialogMode == StateDialogMode::saveBrowser)
+                moveStateBrowserCursorToTopEntry();
+            else
+                stateDialogRow = 2;
+        });
         up.width = 3.0f;
         pushRow(std::move(up));
-        const auto preferredFocusName = stateFileBrowser.consumePreferredFocusName();
-        for (const auto& entry : stateFileBrowser.getEntries(isTrackerStateFile))
+        juce::String preferredFocusName;
+        if (stateDialogMode == StateDialogMode::loadBrowser)
+            preferredFocusName = stateFileBrowser.consumePreferredFocusName();
+        else
+            stateFileBrowser.consumePreferredFocusName();
+        const auto entries = stateFileBrowser.getEntries(isTrackerStateFile);
+        constexpr std::size_t maxVisibleFileEntries = 8;
+        if (entries.empty())
         {
-            const auto entryRow = stateDialogBoxes[0].size();
+            stateFileEntryCursor = 0;
+            stateFileListScroll = 0;
+        }
+        else
+        {
+            stateFileEntryCursor = std::min(stateFileEntryCursor, entries.size() - 1);
+            const auto maxScroll = entries.size() > maxVisibleFileEntries
+                ? entries.size() - maxVisibleFileEntries : 0;
+            stateFileListScroll = std::min(stateFileListScroll, maxScroll);
+            if (stateFileEntryCursor < stateFileListScroll)
+                stateFileListScroll = stateFileEntryCursor;
+            else if (stateFileEntryCursor >= stateFileListScroll + maxVisibleFileEntries)
+                stateFileListScroll = stateFileEntryCursor - maxVisibleFileEntries + 1;
+        }
+
+        if (preferredFocusName.isNotEmpty())
+            for (std::size_t entryIndex = 0; entryIndex < entries.size(); ++entryIndex)
+                if (entries[entryIndex].isDirectory && entries[entryIndex].file.getFileName() == preferredFocusName)
+                {
+                    stateFileEntryCursor = entryIndex;
+                    stateFileListScroll = entryIndex >= maxVisibleFileEntries
+                        ? entryIndex - maxVisibleFileEntries + 1 : 0;
+                    stateDialogRow = 3 + (stateFileEntryCursor - stateFileListScroll);
+                    stateDialogColumn = 0;
+                    break;
+                }
+
+        const auto lastVisibleEntry = std::min(entries.size(), stateFileListScroll + maxVisibleFileEntries);
+        for (std::size_t entryIndex = stateFileListScroll; entryIndex < lastVisibleEntry; ++entryIndex)
+        {
+            const auto& entry = entries[entryIndex];
             UIBox name = action((entry.isDirectory ? "[D] " : "[F] ") + entry.file.getFileName(), [this, entry]
             {
                 if (entry.isDirectory)
+                {
                     stateFileBrowser.browseInto(entry.file);
+                    if (stateDialogMode == StateDialogMode::saveBrowser)
+                        moveStateBrowserCursorToTopEntry();
+                }
                 else if (stateDialogMode == StateDialogMode::saveBrowser)
                 {
                     stateSaveName = entry.file.getFileName();
@@ -2510,12 +2740,10 @@ void TrackerMainUI::rebuildStateDialogBoxes()
             if (!entry.isDirectory && stateDialogMode == StateDialogMode::loadBrowser)
                 right = action("LOAD", [this, entry] { loadSelectedStateFile(entry.file); });
             pushRow(std::move(name), std::move(right));
-            if (entry.isDirectory && entry.file.getFileName() == preferredFocusName)
-            {
-                stateDialogRow = entryRow;
-                stateDialogColumn = 0;
-            }
         }
+
+        if (stateDialogRow >= 3 && !entries.empty())
+            stateDialogRow = 3 + (stateFileEntryCursor - stateFileListScroll);
     }
     const auto rows = stateDialogBoxes[0].size();
     if (rows == 0) stateDialogRow = stateDialogColumn = 0;
@@ -2553,6 +2781,7 @@ void TrackerMainUI::prepareStateDialogView()
         : stateDialogMode == StateDialogMode::loadPrompt ? "LOAD TRACKER STATE"
         : stateDialogMode == StateDialogMode::overwriteConfirm ? "REPLACE EXISTING FILE?"
         : stateDialogMode == StateDialogMode::error ? stateDialogError.toStdString()
+        : stateDialogMode == StateDialogMode::savingAudio ? "SAVING AUDIO"
         : stateDialogMode == StateDialogMode::saveBrowser ? "SAVE TRACKER STATE"
         : "LOAD TRACKER STATE";
     overlayState.color = stateDialogMode == StateDialogMode::error ? palette.textWarning : palette.textPrimary;
@@ -2575,6 +2804,46 @@ void TrackerMainUI::moveStateDialogCursor(int rowDelta, int colDelta)
     rebuildStateDialogBoxes();
     if (stateDialogBoxes.empty() || stateDialogBoxes[0].empty())
         return;
+
+    const bool browser = stateDialogMode == StateDialogMode::saveBrowser
+        || stateDialogMode == StateDialogMode::loadBrowser;
+    if (browser && rowDelta != 0)
+    {
+        const auto entries = stateFileBrowser.getEntries(isTrackerStateFile);
+        if (rowDelta < 0 && stateDialogRow >= 3)
+        {
+            if (stateFileEntryCursor > 0)
+            {
+                --stateFileEntryCursor;
+                if (stateFileEntryCursor < stateFileListScroll)
+                    stateFileListScroll = stateFileEntryCursor;
+                stateDialogRow = 3 + (stateFileEntryCursor - stateFileListScroll);
+            }
+            else
+            {
+                stateDialogRow = 2;
+                stateDialogColumn = 0;
+            }
+            return;
+        }
+        if (rowDelta > 0 && stateDialogRow >= 2 && !entries.empty())
+        {
+            if (stateDialogRow == 2)
+                stateFileEntryCursor = 0;
+            else if (stateFileEntryCursor + 1 < entries.size())
+                ++stateFileEntryCursor;
+            else
+                return;
+
+            constexpr std::size_t maxVisibleFileEntries = 8;
+            if (stateFileEntryCursor >= stateFileListScroll + maxVisibleFileEntries)
+                stateFileListScroll = stateFileEntryCursor - maxVisibleFileEntries + 1;
+            stateDialogRow = 3 + (stateFileEntryCursor - stateFileListScroll);
+            stateDialogColumn = 0;
+            return;
+        }
+    }
+
     const auto rows = stateDialogBoxes[0].size();
     if (rowDelta != 0)
         stateDialogRow = static_cast<std::size_t>(juce::jlimit(0, static_cast<int>(rows) - 1, static_cast<int>(stateDialogRow) + rowDelta));
@@ -2584,6 +2853,17 @@ void TrackerMainUI::moveStateDialogCursor(int rowDelta, int colDelta)
         if (stateDialogRow < stateDialogBoxes[candidate].size() && !stateDialogBoxes[candidate][stateDialogRow].isDisabled)
             stateDialogColumn = candidate;
     }
+}
+
+void TrackerMainUI::moveStateBrowserCursorToTopEntry()
+{
+    // Rows 0-2 are the path, save name/search, and ../ controls. The first
+    // actual directory/file entry is row 3; rebuild clamps this safely when a
+    // folder has no visible entries.
+    stateDialogColumn = 0;
+    stateDialogRow = 3;
+    stateFileEntryCursor = 0;
+    stateFileListScroll = 0;
 }
 
 bool TrackerMainUI::handleStateDialogKey(const juce::KeyPress& key)
@@ -2606,11 +2886,29 @@ bool TrackerMainUI::handleStateDialogKey(const juce::KeyPress& key)
     if (code == juce::KeyPress::leftKey)
     {
         if (stateDialogMode == StateDialogMode::saveBrowser || stateDialogMode == StateDialogMode::loadBrowser)
+        {
             stateFileBrowser.browseUp();
+            if (stateDialogMode == StateDialogMode::saveBrowser)
+                moveStateBrowserCursorToTopEntry();
+        }
         else moveStateDialogCursor(0, -1);
         return true;
     }
-    if (code == juce::KeyPress::rightKey) { moveStateDialogCursor(0, 1); return true; }
+    if (code == juce::KeyPress::rightKey)
+    {
+        if (stateDialogMode == StateDialogMode::saveBrowser)
+        {
+            // SAVE is intentionally fixed above the scrolling list, so it is
+            // always reachable in one movement from any file entry.
+            stateDialogColumn = 1;
+            stateDialogRow = 1;
+        }
+        else
+        {
+            moveStateDialogCursor(0, 1);
+        }
+        return true;
+    }
     if (code == juce::KeyPress::upKey) { moveStateDialogCursor(-1, 0); return true; }
     if (code == juce::KeyPress::downKey) { moveStateDialogCursor(1, 0); return true; }
     if (code == juce::KeyPress::returnKey) { activateStateDialogCell(); return true; }

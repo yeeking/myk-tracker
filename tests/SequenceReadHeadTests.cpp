@@ -583,6 +583,35 @@ int main()
     tpsEditor.incrementAtCursor();
     require(tpsHost.silencedStacks.empty(), "RHY edits do not silence active voices");
 
+    tpsSequencer.stop();
+    tpsSequencer.getSequence(0)->setReadHeadCount(3);
+    for (std::size_t headIndex = 0; headIndex < 3; ++headIndex)
+    {
+        auto config = tpsSequencer.getSequence(0)->getReadHeadConfig(headIndex);
+        config.ticksPerStep = headIndex + 1;
+        tpsSequencer.getSequence(0)->setReadHeadConfig(headIndex, config);
+    }
+    tpsEditor.gotoSequencePage();
+    tpsSequencer.play();
+    require(tpsEditor.setCurrentSequenceTicksPerStep(7),
+            "Sequence-page TPS shortcut action is accepted");
+    for (std::size_t headIndex = 0; headIndex < 3; ++headIndex)
+        require(tpsSequencer.getSequence(0)->getReadHeadConfig(headIndex).ticksPerStep == 7,
+                "Sequence-page TPS shortcut updates every read head");
+    require(tpsSequencer.getSequence(0)->isWaitingForQuarterBeatResync()
+                && tpsHost.silencedStacks.empty(),
+            "Sequence-page TPS shortcut keeps locked resync without silencing voices");
+
+    Sequencer durationSequencer(1, 1);
+    durationSequencer.setStepData(0, 0,
+        {{ static_cast<double>(CommandType::MidiNote), 60.0, 100.0, 15.0 }});
+    durationSequencer.incrementStepDataAt(0, 0, 0, Step::lengthInd);
+    require(durationSequencer.getStepData(0, 0)[0][Step::lengthInd] == 16.0,
+            "note duration can be raised to sixteen ticks");
+    durationSequencer.incrementStepDataAt(0, 0, 0, Step::lengthInd);
+    require(durationSequencer.getStepData(0, 0)[0][Step::lengthInd] == 16.0,
+            "note duration remains clamped at sixteen ticks");
+
     Sequencer navigationSequencer(1, 4);
     SequencerEditor navigationEditor(&navigationSequencer);
     putNote(*navigationSequencer.getSequence(0), 1, 65.0);
@@ -883,6 +912,19 @@ int main()
     require(machines.timedDurations.back() == 0.25
                 && performanceGateSequence.getStepData(0)[0][Step::lengthInd] == 8.0,
             "quarter performance gate preserves the stored duration");
+
+    // Head-count changes rebuild read-head state while the sequence grid may
+    // be refreshed.  Empty legacy rows are normalised before either path sees
+    // them, so this must remain safe through repeated changes.
+    Sequencer headSafetySequencer(1, 2);
+    headSafetySequencer.setStepData(0, 0, {});
+    for (int i = 0; i < 12; ++i)
+    {
+        headSafetySequencer.incrementSeqParam(0, Sequence::headCountConfig);
+        headSafetySequencer.decrementSeqParam(0, Sequence::headCountConfig);
+        const auto& grid = headSafetySequencer.getSequenceAsGridOfStrings();
+        require(!grid.empty() && !grid[0].empty(), "head changes tolerate empty legacy step rows");
+    }
     return 0;
 }
 

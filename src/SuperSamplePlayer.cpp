@@ -243,6 +243,15 @@ bool SuperSamplePlayer::setLoadedBuffer (juce::AudioBuffer<float>&& newBuffer, c
     return true;
 }
 
+bool SuperSamplePlayer::copyLoadedBuffer (juce::AudioBuffer<float>& destination, double& sampleRate) const
+{
+    if (sampleBuffer.getNumChannels() <= 0 || sampleBuffer.getNumSamples() <= 0)
+        return false;
+    destination.makeCopyOf(sampleBuffer);
+    sampleRate = sourceSampleRate;
+    return true;
+}
+
 void SuperSamplePlayer::markError (const juce::String& path, const juce::String& message)
 {
     sampleBuffer.setSize (0, 0);

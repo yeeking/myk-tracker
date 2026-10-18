@@ -9,6 +9,7 @@
 
 #include "MachineInterface.h"
 #include "TrackerFileBrowser.h"
+#include "PortableTrackerState.h"
 
 class SuperSamplePlayer;
 
@@ -102,6 +103,10 @@ public:
     void loadSampleFromControl (int playerId, const juce::File& file, std::function<void (bool, juce::String)> onComplete);
     /** Creates a sampler player with an inclusive MIDI range for control/API use. */
     int addSamplePlayerForControl (int lowNote, int highNote);
+    /** Captures every loaded player for an explicit portable state save. */
+    std::vector<PortableSampleAsset> exportPortableSamples(int stackId) const;
+    /** Restores one embedded sample, retaining its original path metadata. */
+    bool restorePortableSample(const PortableSampleAsset& sample);
 
     /** Builds the machine-editor UI cells for the sampler. */
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;

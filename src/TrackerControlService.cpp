@@ -1117,6 +1117,27 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     const bool shift = boolArg(args, "shift");
                     bool handled = false;
                     const bool machineCapturesKeyboard = editor.machineWantsExclusiveKeyboardInput() && !ctrl;
+                    int shiftedSequenceTps = 0;
+                    if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence)
+                    {
+                        if (keyCode >= '1' && keyCode <= '8')
+                            shiftedSequenceTps = keyCode - '0';
+                        else if (rawText.isNotEmpty())
+                        {
+                            switch (rawText[0])
+                            {
+                                case '!': shiftedSequenceTps = 1; break;
+                                case '"': case '@': shiftedSequenceTps = 2; break;
+                                case 0x00a3: case '#': shiftedSequenceTps = 3; break;
+                                case '$': shiftedSequenceTps = 4; break;
+                                case '%': shiftedSequenceTps = 5; break;
+                                case '^': shiftedSequenceTps = 6; break;
+                                case '&': shiftedSequenceTps = 7; break;
+                                case '*': shiftedSequenceTps = 8; break;
+                                default: break;
+                            }
+                        }
+                    }
                     if (ctrl && (keyCode == 'c' || keyCode == 'C'))
                     {
                         auto* sequencer = processor.getSequencer();
@@ -1255,6 +1276,19 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'g')
                     {
                         editor.implodeCurrentSequence();
+                        contentChanged = true;
+                        handled = true;
+                    }
+                    else if (shiftedSequenceTps != 0)
+                    {
+                        handled = editor.setCurrentSequenceTicksPerStep(
+                            static_cast<std::size_t>(shiftedSequenceTps));
+                        contentChanged = handled;
+                    }
+                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::step
+                             && (key == '{' || key == '}'))
+                    {
+                        editor.adjustAllStepRowsAtCursor(key == '}' ? 1 : -1);
                         contentChanged = true;
                         handled = true;
                     }
