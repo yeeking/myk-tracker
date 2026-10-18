@@ -60,6 +60,7 @@ leaving the sustain level unchanged.
 - `Shift+I` on the Sequence page: insert a blank eight-step control-mode sequence to the right of the current sequence, using the same machine stack.
 - `Shift+K` on the Sequence page: delete the current sequence and shift later sequences left.
 - `Shift+H` on the Sequence page: cycle the selected sequence through normal, half-tick, and quarter-tick performance gates. Green and purple outlines respectively identify the shortened modes; stored step durations are unchanged.
+- `Shift+A` on the Sequence page: toggle global computer-key note/chord entry. It is off by default; when armed, the cursor is yellow and piano/chord keys write to the selected step. When disarmed, those keys audition only while stopped.
 - `Shift+1` through `Shift+8` on the Sequence page: set TPS to 1–8 for every read head on the selected sequence. Changes retain the normal locked quarter-beat resynchronisation.
 - `{` / `}` on the Step page: decrease/increase the selected parameter for every row in the current step, using each row command's normal parameter range and increment. For example, on `D`, it adjusts every note duration together.
 - `Ctrl+H`: toggle the Help page.
@@ -72,17 +73,22 @@ leaving the sustain level unchanged.
 - On the Song page, select a row's `BPM` cell and use `[` / `]` to decrease / increase that sequence set's tempo by 1 BPM.
 - Piano note keys: enter notes using the current octave on Sequence and Step pages; elsewhere they audition without changing tracker data while stopped. While stopped, a held computer key starts one held audition and releases it on key-up; keyboard auto-repeat never retriggers it. The same applies to held chord shortcuts.
 - Control-mode sequence keys: when the current sequence is in `SEQ:CON` mode, `z` enters `TAUX1`, `x` enters `TAUX2`, and `c` enters `COFF` (default `2000` Hz) on the Sequence and Step pages. Piano note keys and Step-page chord shortcuts are suppressed in that mode.
-- Chord shortcut keys on Sequence and Step pages (and audition-only on other non-transient pages). Sequence/Step chord entry uses the focused step's note as its root; audition-only chords use the last piano-key note played while stopped:
-  - `q`: major triad
-  - `w`: minor triad
-  - `e`: dominant 7
-  - `r`: major 7
-  - `t`: minor 7
-  - `y`: diminished 7
-  - `u`: half-diminished
-  - `i`: sus4
-  - `o`: major 9
-  - `p`: minor 9
+- Chord shortcut keys on Sequence and Step pages (and audition-only on other non-transient pages) select a chord family. Release and press the same key again to cycle its six voicings; holding a key never advances due to keyboard auto-repeat. Chords use the last piano-key root, falling back to the first playable note in the focused step. A family/root/step/sequence/page change restarts at variation 1. Negative/drop voicings are octave-folded as a complete chord into MIDI notes `1–127`.
+
+  | Key | Family | Variations |
+  | --- | --- | --- |
+  | `Q` | `MAJ` | major, inversions, open, major 6, add 9 |
+  | `W` | `MIN` | minor, inversions, open, minor 6, minor add 9 |
+  | `E` | `DOM` | dominant 7 inversions, dominant 9, dominant 13 |
+  | `R` | `DIM` | diminished inversions, diminished 7, open diminished, half-diminished |
+  | `T` | `AUG` | augmented inversions, open, augmented 7, augmented major 7 |
+  | `Y` | `SUS` | sus 4, sus 2, inversion/open sus, 7 sus 4, 9 sus 4 |
+  | `U` | `MAJX` | major 7, 9, 6/9, 11, drop-2, open major 9 |
+  | `I` | `MINX` | minor 7, 9, 11, 6/9, drop-2, open minor 9 |
+  | `O` | `ALT` | flat/sharp 5, flat/sharp 9, altered dominant voicings |
+  | `P` | `QRTL` | quartal, extended quartal, lowered/open quartal, quintal |
+
+  The right HUD briefly shows the active family and variation, such as `MAJ 3/6`. In Sequence ARM mode and on the Step page the focused step is replaced; otherwise the chord is auditioned while stopped.
 - `Shift+C`: toggle the internal clock on/off.
 - `Ctrl+C` / `Ctrl+V`: copy and replace a complete sequence's event data and
   playback length while retaining the destination machine stack and timing.

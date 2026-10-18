@@ -254,18 +254,29 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
         return std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId)
             + "\n" + std::to_string(stepIndex + 1) + "/" + std::to_string(sequenceLength);
     };
+    const auto appendChordStatus = [&ui](std::string text)
+    {
+        const auto label = ui.getProperty("chordHudLabel", "").toString().toStdString();
+        const auto variation = static_cast<int>(ui.getProperty("chordHudVariation", 0));
+        const auto count = static_cast<int>(ui.getProperty("chordHudVariationCount", 0));
+        const auto expiry = static_cast<double>(ui.getProperty("chordHudExpiryMs", 0.0));
+        if (!label.empty() && variation >= 0 && count > 0
+            && juce::Time::getMillisecondCounterHiRes() < expiry)
+            text += "\n" + label + " " + std::to_string(variation + 1) + "/" + std::to_string(count);
+        return text;
+    };
 
     switch (mode)
     {
         case SequencerEditorMode::selectingSeqAndStep:
-            return "SEQ\n" + sequenceAndStep();
+            return appendChordStatus("SEQ\n" + sequenceAndStep());
 
         case SequencerEditorMode::editingStep:
-            return "STEP\n" + std::to_string(sequenceIndex + 1)
-                + "\n" + std::to_string(stepIndex + 1) + "/" + std::to_string(sequenceLength);
+            return appendChordStatus("STEP\n" + std::to_string(sequenceIndex + 1)
+                + "\n" + std::to_string(stepIndex + 1) + "/" + std::to_string(sequenceLength));
 
         case SequencerEditorMode::configuringSequence:
-            return "CONF\n" + std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId);
+            return appendChordStatus("CONF\n" + std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId));
 
         case SequencerEditorMode::machineConfig:
             break;
@@ -275,7 +286,7 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
         case SequencerEditorMode::audioConfig:
         case SequencerEditorMode::help:
         case SequencerEditorMode::resetConfirmation:
-            return compactPageLabel(mode);
+            return appendChordStatus(compactPageLabel(mode));
     }
 
     int selectedMachineId = machineId;
@@ -303,11 +314,11 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
     });
 
     if (!detailType.has_value())
-        return "MACH\n" + std::to_string(selectedMachineId);
+        return appendChordStatus("MACH\n" + std::to_string(selectedMachineId));
 
-    return "MACH\n" + std::to_string(selectedMachineId)
+    return appendChordStatus("MACH\n" + std::to_string(selectedMachineId)
         + "\n" + machineTraits(detailType.value()).shortLabel
-        + "\n" + (detailEnabled ? "ON" : "OFF");
+        + "\n" + (detailEnabled ? "ON" : "OFF"));
 }
 
 TrackerMainUI::~TrackerMainUI()
@@ -645,11 +656,11 @@ void TrackerMainUI::prepareSequenceView()
   std::vector<std::vector<std::string>> grid;
   size_t currentSequence = 0;
   size_t currentStep = 0;
-  size_t armedSequence = SequencerAbs::notArmed;
+  bool sequenceEntryArmed = false;
   const auto ui = currentView.state.getProperty("ui", juce::var());
   currentSequence = static_cast<size_t>(static_cast<int>(ui.getProperty("currentSequence", 0)));
   currentStep = static_cast<size_t>(static_cast<int>(ui.getProperty("currentStep", 0)));
-  armedSequence = static_cast<size_t>(static_cast<int>(ui.getProperty("armedSequence", static_cast<int>(SequencerAbs::notArmed))));
+  sequenceEntryArmed = static_cast<bool>(ui.getProperty("sequenceEntryArmed", false));
   grid = gridFromSnapshot(ui.getProperty("sequenceGrid", juce::var()));
   const auto stackAudibleStates = ui.getProperty("sequenceStackAudibleStates", juce::var());
   if (stackAudibleStates.isArray())
@@ -687,7 +698,7 @@ void TrackerMainUI::prepareSequenceView()
                                         currentStep,
                                         playHeads,
                                         true,
-                                        armedSequence);
+                                        sequenceEntryArmed);
   const auto controlModes = ui.getProperty("sequenceControlModes", juce::var());
   if (controlModes.isArray())
   {
@@ -849,7 +860,7 @@ void TrackerMainUI::prepareStepView()
                                           currentStepRow,
                                           playHeads,
                                           true,
-                                          Sequencer::notArmed);
+                                          false);
     updateCellStates(boxes, rowsInUI - 1, 6);
 }
 void TrackerMainUI::prepareSeqConfigView()
@@ -1741,10 +1752,10 @@ void TrackerMainUI::prepareHelpView()
         {"{ }", "STEP ALL", "", "", "", ""},
         {"+/-", "ROWS", "S+C", "CLOCK", "R", "REWIND"},
         {"0-7", "PAGES", "S+1-8", "TPS", "S+I/K", "INS/DEL"},
-        {"C+H", "HELP", "S+H", "SHORT", "C+C", "COPY"},
+        {"C+H", "HELP", "S+A", "ARM", "S+H", "SHORT"},
         {"C+V", "PASTE", "C+=", "SHIFT +", "C+-", "SHIFT -"},
         {"S+S", "SOLO", "S+M", "MUTE", "S+E/G", "XPL/IMP"},
-        {"Z X C", "CONTROL", "Q-P", "CHORDS", ", .", "OCTAVE"}
+        {"Z X C", "CONTROL", "Q-P", "FAM/CYC", ", .", "OCTAVE"}
     };
 
     std::vector<std::vector<UIBox>> boxes(6, std::vector<UIBox>(helpRows.size()));
@@ -1797,10 +1808,10 @@ void TrackerMainUI::prepareResetConfirmationView()
 
 std::vector<std::vector<UIBox>> TrackerMainUI::buildBoxesFromGrid(const std::vector<std::vector<std::string>>& data,
                                                                  size_t cursorCol,
-                                                                 size_t cursorRow,
-                                                                 const std::vector<std::pair<int, int>>& highlightCells,
-                                                                 bool showCursor,
-                                                                 size_t armedSeq) const
+                                                                   size_t cursorRow,
+                                                                   const std::vector<std::pair<int, int>>& highlightCells,
+                                                                   bool showCursor,
+                                                                   bool sequenceEntryArmed) const
 {
     std::vector<std::vector<UIBox>> boxes;
     const size_t cols = data.size();
@@ -1821,7 +1832,7 @@ std::vector<std::vector<UIBox>> TrackerMainUI::buildBoxesFromGrid(const std::vec
             box.text = data[col][row];
             box.hasNote = !box.text.empty() && box.text != "----" && box.text != "-";
             box.isSelected = showCursor && col == cursorCol && row == cursorRow;
-            box.isArmed = (armedSeq != Sequencer::notArmed) && col == armedSeq;
+            box.isSequenceEntryArmedCursor = sequenceEntryArmed && box.isSelected;
             for (const auto& cell : highlightCells)
             {
                 if (static_cast<size_t>(cell.first) == col && static_cast<size_t>(cell.second) == row)
@@ -2023,6 +2034,8 @@ juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
     // Parameter strength is shown by the horizontal fill bar (see
     // updateCellStates), not by the cell fill, so parameter cells keep the
     // normal selected/empty fills.
+    if (cell.isSequenceEntryArmedCursor && !cell.customColoursOverrideSelection)
+        return palette.sequenceEntryArmedCursor;
     if (cell.isSelected && !cell.customColoursOverrideSelection)
         return PaletteDefaults::cursor.fill;
 
@@ -2036,6 +2049,8 @@ juce::Colour TrackerMainUI::getCellColour(const UIBox& cell) const
 
 juce::Colour TrackerMainUI::getTextColour(const UIBox& cell) const
 {
+    if (cell.isSequenceEntryArmedCursor && !cell.customColoursOverrideSelection)
+        return palette.sequenceEntryArmedCursorText;
     if (cell.isSelected && !cell.customColoursOverrideSelection)
         return PaletteDefaults::cursor.text;
     if (cell.useCustomTextColour)

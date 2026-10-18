@@ -6,6 +6,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "UIBox.h"
@@ -291,6 +292,10 @@ public:
   void click();
   void togglePlayback();
   void rewindTransport();
+  /** Toggle the transient global Sequence-page piano/chord entry gate. */
+  void toggleSequenceEntryArmed();
+  void setSequenceEntryArmed(bool armed);
+  bool isSequenceEntryArmed() const;
   void toggleArmCurrentSequence();
   void toggleMuteCurrentSequence();
   void toggleSoloCurrentSequence();
@@ -302,10 +307,18 @@ public:
   bool handleChordKey(char key);
   bool handleControlKey(char key);
   bool handleNoteKey(char key);
+  /** Whether the most recent handled piano/chord/control key changed tracker data. */
+  bool didLastMusicalKeyChangeContent() const;
   /** Releases the held audition(s) started by a physical computer key. */
   void releaseKeyboardAuditionKey(char key);
   /** Releases audition keys which are no longer physically held. */
   void releaseKeyboardAuditionsExcept(const std::string& stillHeldKeys);
+  /** Clears transient chord root, cycling, and HUD state after reset/load. */
+  void resetChordEntryState();
+  std::string getChordHudLabel() const;
+  std::size_t getChordHudVariation() const;
+  std::size_t getChordHudVariationCount() const;
+  double getChordHudExpiryMs() const;
   /** Audition every event in the focused Sequence/Step-page step while stopped. */
   bool triggerCurrentStep();
   bool enterSelectedMachineDetail();
@@ -431,7 +444,10 @@ private:
                              const SequenceReadOnly& context);
   void syncOctaveFromMidiNote(double midiNote);
   void clampStepCursorToCurrentStep();
-  bool applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals);
+  bool applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals,
+                               const std::string& familyLabel, std::size_t variationIndex);
+  void resetChordCycle();
+  void setChordRoot(double midiNote);
   std::vector<std::vector<UIBox>> buildMachineStackCells(std::size_t stackIndex);
   std::optional<CommandType> getSelectedStackMachineType() const;
   void leaveMachineDetail();
@@ -524,14 +540,21 @@ private:
   std::size_t currentSongCol;
   /** one sequence can be armed for live MIDI recording */
   size_t armedSequence;
+  /** Transient safety gate for Sequence-page computer-key note/chord entry. */
+  bool sequenceEntryArmed = false;
 
   SequencerEditorMode editMode;
   SequencerEditorMode pageBeforeHelp = SequencerEditorMode::selectingSeqAndStep;
   SequencerEditorSubMode editSubMode;
   double stepIncrement;
   double octave;
-  /** Last piano-key note actually auditioned while stopped; roots preview-only chords. */
-  std::optional<double> lastAuditionedMidiNote;
+  /** Last computer-piano root, independent of generated chord voicings. */
+  std::optional<double> chordRootMidiNote;
+  char activeChordFamilyKey = '\0';
+  std::string activeChordFamilyLabel;
+  std::size_t activeChordVariation = 0;
+  double chordHudExpiryMs = 0.0;
+  bool lastMusicalKeyChangedContent = false;
   struct HeldKeyboardNote
   {
     CommandType machineType;
@@ -539,6 +562,8 @@ private:
     unsigned short note = 0;
   };
   std::unordered_map<char, std::vector<HeldKeyboardNote>> heldKeyboardNotes;
+  /** Physical chord keys held since their first press; blocks OS key-repeat cycling. */
+  std::unordered_set<char> heldChordKeys;
   std::vector<std::vector<UIBox>> machineCells;
   std::size_t machineCursorRow = 0;
   std::size_t machineCursorCol = 0;

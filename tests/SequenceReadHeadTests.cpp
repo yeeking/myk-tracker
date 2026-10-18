@@ -327,6 +327,7 @@ int main()
     Sequencer editorSequencer(1, 4);
     SequencerEditor editor(&editorSequencer);
     require(!editor.handleControlKey('z'), "control keys are inactive in note mode");
+    editor.setSequenceEntryArmed(true);
     require(editor.handleNoteKey('z'), "note keys remain active in note mode");
     auto noteEntry = editorSequencer.getStepData(0, 0);
     require(!noteEntry.empty()
@@ -480,15 +481,126 @@ int main()
     putNote(*keyboardSequencer.getSequence(0), 0, 60.0);
     SequencerEditor keyboardEditor(&keyboardSequencer);
     machines.notes.clear();
+    require(!keyboardEditor.isSequenceEntryArmed(), "Sequence keyboard entry starts disarmed");
+    const auto beforeDisarmedChord = keyboardSequencer.getStepData(0, 0);
+    require(keyboardEditor.handleNoteKey('z'), "disarmed Sequence-page piano key is handled");
+    require(keyboardEditor.handleChordKey('q'), "disarmed Sequence-page chord key is handled");
+    require(keyboardSequencer.getStepData(0, 0) == beforeDisarmedChord,
+            "disarmed Sequence-page musical keys do not mutate step data");
+    require(machines.notes.size() == 4, "disarmed Sequence-page note and chord audition while stopped");
+    keyboardEditor.releaseKeyboardAuditionKey('z');
+    keyboardEditor.releaseKeyboardAuditionKey('q');
+
+    keyboardEditor.toggleSequenceEntryArmed();
+    require(keyboardEditor.isSequenceEntryArmed(), "Sequence keyboard entry can be armed globally");
+    machines.notes.clear();
+    machines.releasedNotes.clear();
     require(keyboardEditor.handleChordKey('q'), "sequence-page chord key is handled");
     const auto sequenceChord = keyboardSequencer.getStepData(0, 0);
-    require(sequenceChord.size() == 3 && sequenceChord[0][Step::noteInd] == 60.0
-                && sequenceChord[1][Step::noteInd] == 64.0 && sequenceChord[2][Step::noteInd] == 67.0,
-            "sequence-page chord key writes the expected major chord");
+    require(sequenceChord.size() == 3 && sequenceChord[0][Step::noteInd] == 72.0
+                && sequenceChord[1][Step::noteInd] == 76.0 && sequenceChord[2][Step::noteInd] == 79.0,
+            "sequence-page chord key uses the last piano-key root");
     require(machines.notes.size() == 3, "sequence-page chord auditions while stopped");
     keyboardEditor.releaseKeyboardAuditionKey('q');
     require(machines.releasedNotes.size() == 3,
             "releasing an auditioned chord key sends one note-off per chord note");
+
+    struct ChordFamilyExpectation
+    {
+        char key;
+        std::array<std::vector<int>, 6> variations;
+    };
+    const std::array<ChordFamilyExpectation, 10> chordFamilies {{
+        {'q', {{{0,4,7}, {4,7,12}, {7,12,16}, {0,7,16}, {0,4,7,9}, {0,4,7,14}}}},
+        {'w', {{{0,3,7}, {3,7,12}, {7,12,15}, {0,7,15}, {0,3,7,9}, {0,3,7,14}}}},
+        {'e', {{{0,4,7,10}, {4,7,10,12}, {7,10,12,16}, {10,12,16,19}, {0,4,7,10,14}, {0,4,10,14,21}}}},
+        {'r', {{{0,3,6}, {3,6,12}, {6,12,15}, {0,3,6,9}, {-3,0,6,15}, {0,3,6,10}}}},
+        {'t', {{{0,4,8}, {4,8,12}, {8,12,16}, {0,8,16}, {0,4,8,10}, {0,4,8,11}}}},
+        {'y', {{{0,5,7}, {0,2,7}, {5,7,12}, {0,7,17}, {0,5,7,10}, {0,5,7,10,14}}}},
+        {'u', {{{0,4,7,11}, {0,4,7,11,14}, {0,4,9,14}, {0,4,7,11,17}, {-5,0,4,11}, {-5,0,4,11,14}}}},
+        {'i', {{{0,3,7,10}, {0,3,7,10,14}, {0,3,7,10,17}, {0,3,9,14}, {-5,0,3,10}, {-5,0,3,10,14}}}},
+        {'o', {{{0,4,6,10}, {0,4,8,10}, {0,4,7,10,13}, {0,4,7,10,15}, {0,4,8,10,13}, {0,4,10,13,15}}}},
+        {'p', {{{0,5,10}, {0,5,10,15}, {0,5,10,15,20}, {-5,0,5,10}, {0,10,17}, {0,7,14}}}}
+    }};
+    const auto chordNotes = [] (const std::vector<std::vector<double>>& rows)
+    {
+        std::vector<int> notes;
+        for (const auto& row : rows)
+            notes.push_back(static_cast<int>(std::lround(row[Step::noteInd])));
+        return notes;
+    };
+
+    // The stored root is 72 from the earlier Z-key press. Every family must
+    // expose its complete six-shape cycle without deriving a new root from a
+    // preceding inversion.
+    keyboardEditor.setCurrentStep(1);
+    keyboardEditor.setCurrentStep(0);
+    for (const auto& family : chordFamilies)
+    {
+        for (std::size_t variation = 0; variation < family.variations.size(); ++variation)
+        {
+            require(keyboardEditor.handleChordKey(family.key), "chord-family key is handled");
+            std::vector<int> expected;
+            for (const auto interval : family.variations[variation]) expected.push_back(72 + interval);
+            require(chordNotes(keyboardSequencer.getStepData(0, 0)) == expected,
+                    "chord family writes its exact variation");
+            require(keyboardEditor.getChordHudVariation() == variation
+                        && keyboardEditor.getChordHudVariationCount() == 6,
+                    "chord HUD reports the active variation");
+            // Repeated key events while still held cannot advance or rewrite.
+            const auto heldData = keyboardSequencer.getStepData(0, 0);
+            require(keyboardEditor.handleChordKey(family.key), "held chord key is swallowed");
+            require(keyboardSequencer.getStepData(0, 0) == heldData,
+                    "held chord key does not advance the cycle");
+            keyboardEditor.releaseKeyboardAuditionKey(family.key);
+        }
+    }
+    require(keyboardEditor.handleChordKey('p'), "seventh chord press is handled");
+    require(chordNotes(keyboardSequencer.getStepData(0, 0)) == std::vector<int>({72, 77, 82}),
+            "seventh press wraps a family to variation one");
+    keyboardEditor.releaseKeyboardAuditionKey('p');
+
+    keyboardEditor.handleNoteKey('x');
+    keyboardEditor.releaseKeyboardAuditionKey('x');
+    require(keyboardEditor.handleChordKey('q'), "new piano root chord is handled");
+    require(chordNotes(keyboardSequencer.getStepData(0, 0)) == std::vector<int>({74, 78, 81}),
+            "piano root changes reset the family and anchor it to the new note");
+    keyboardEditor.releaseKeyboardAuditionKey('q');
+    keyboardEditor.setCurrentStep(1);
+    require(keyboardEditor.handleChordKey('q'), "step-change chord is handled");
+    require(chordNotes(keyboardSequencer.getStepData(0, 1)) == std::vector<int>({74, 78, 81}),
+            "step changes reset the family while retaining the piano root");
+    keyboardEditor.releaseKeyboardAuditionKey('q');
+
+    Sequencer lowBoundarySequencer(1, 4);
+    lowBoundarySequencer.stop();
+    SequencerEditor lowBoundaryEditor(&lowBoundarySequencer);
+    for (int i = 0; i < 6; ++i) lowBoundaryEditor.decrementOctave();
+    require(lowBoundaryEditor.handleNoteKey('s'), "low-boundary piano root is handled");
+    lowBoundaryEditor.releaseKeyboardAuditionKey('s');
+    lowBoundaryEditor.setSequenceEntryArmed(true);
+    for (int i = 0; i < 4; ++i)
+    {
+        require(lowBoundaryEditor.handleChordKey('p'), "low-boundary quartal variation is handled");
+        lowBoundaryEditor.releaseKeyboardAuditionKey('p');
+    }
+    require(chordNotes(lowBoundarySequencer.getStepData(0, 0)) == std::vector<int>({8, 13, 18, 23}),
+            "low MIDI boundary octave-folds the complete lowered voicing");
+
+    Sequencer highBoundarySequencer(1, 4);
+    highBoundarySequencer.stop();
+    SequencerEditor highBoundaryEditor(&highBoundarySequencer);
+    for (int i = 0; i < 3; ++i) highBoundaryEditor.incrementOctave();
+    require(highBoundaryEditor.handleNoteKey('m'), "high-boundary piano root is handled");
+    highBoundaryEditor.releaseKeyboardAuditionKey('m');
+    highBoundaryEditor.setSequenceEntryArmed(true);
+    for (int i = 0; i < 6; ++i)
+    {
+        require(highBoundaryEditor.handleChordKey('p'), "high-boundary quartal variation is handled");
+        highBoundaryEditor.releaseKeyboardAuditionKey('p');
+    }
+    require(chordNotes(highBoundarySequencer.getStepData(0, 0)) == std::vector<int>({107, 114, 121}),
+            "high MIDI boundary octave-folds the complete extended voicing");
 
     keyboardEditor.gotoMixerPage();
     const auto beforePreview = keyboardSequencer.getStepData(0, 0);
@@ -524,6 +636,14 @@ int main()
 
     keyboardSequencer.toggleStepActive(0, 1);
     keyboardEditor.gotoStepPage();
+    keyboardEditor.setCurrentStep(2);
+    keyboardEditor.setSequenceEntryArmed(false);
+    const auto beforeStepPageNote = keyboardSequencer.getStepData(0, 2);
+    require(keyboardEditor.handleNoteKey('z'), "disarmed Step-page piano key is handled");
+    require(keyboardSequencer.getStepData(0, 2) != beforeStepPageNote,
+            "Step-page piano entry remains editable while Sequence ARM is off");
+    keyboardEditor.releaseKeyboardAuditionKey('z');
+    keyboardEditor.setCurrentStep(1);
     machines.notes.clear();
     require(keyboardEditor.triggerCurrentStep(), "Return-style Step-page step trigger is handled");
     require(machines.notes == std::vector<unsigned short>({62, 65}),
@@ -538,6 +658,8 @@ int main()
     keyboardEditor.gotoMixerPage();
     require(keyboardEditor.handleNoteKey('x'), "playing mixer-page piano key is swallowed");
     require(machines.notes.empty(), "preview remains suppressed while playing");
+    keyboardEditor.resetCursor();
+    require(!keyboardEditor.isSequenceEntryArmed(), "reset clears transient Sequence keyboard entry ARM");
 
     Sequencer tpsSequencer(1, 4);
     SequencerEditor tpsEditor(&tpsSequencer);

@@ -142,7 +142,7 @@ private:
                                                        size_t cursorRow,
                                                        const std::vector<std::pair<int, int>>& highlightCells,
                                                        bool showCursor,
-                                                       size_t armedSeq) const;
+                                                       bool sequenceEntryArmed) const;
     juce::Colour getSamplerCellColour(const UIBox& cell) const;
     juce::Colour getSamplerTextColour(const UIBox& cell) const;
     float getSamplerCellDepthScale(const UIBox& cell) const;

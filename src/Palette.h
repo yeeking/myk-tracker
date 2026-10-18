@@ -65,6 +65,10 @@ struct TrackerPalette
     juce::Colour textBackground { juce::Colours::transparentBlack };
     /** highlight colour for armed/ok states */
     juce::Colour statusOk { 0xFF19FF6A };
+    /** Sequence-page cursor while piano/chord entry is explicitly armed. */
+    juce::Colour sequenceEntryArmedCursor { 0xCCFFD21A };
+    /** High-contrast text inside the armed Sequence-page cursor. */
+    juce::Colour sequenceEntryArmedCursorText { 0xFF241A00 };
     /** outer border accent for UI panels */
     juce::Colour borderNeon { 0xFF0F5F4B };
     /** sequence-config row tint for routing cells */

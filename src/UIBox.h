@@ -40,6 +40,8 @@ struct UIBox
     bool isHighlighted = false;
     /** True when the parent track is armed for input. */
     bool isArmed = false;
+    /** True when this selected Sequence-page cell accepts piano/chord entry. */
+    bool isSequenceEntryArmedCursor = false;
     /** True when the cell belongs to a control-mode sequence column. */
     bool isControlModeSequence = false;
     /** True when the cell belongs to a soloed sequence or mixer channel. */

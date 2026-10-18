@@ -2311,6 +2311,11 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("currentStepRow", static_cast<int>(seqEditor.getCurrentStepRow()));
     state->setProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol()));
     state->setProperty("armedSequence", static_cast<int>(seqEditor.getArmedSequence()));
+    state->setProperty("sequenceEntryArmed", seqEditor.isSequenceEntryArmed());
+    state->setProperty("chordHudLabel", juce::String(seqEditor.getChordHudLabel()));
+    state->setProperty("chordHudVariation", static_cast<int>(seqEditor.getChordHudVariation()));
+    state->setProperty("chordHudVariationCount", static_cast<int>(seqEditor.getChordHudVariationCount()));
+    state->setProperty("chordHudExpiryMs", seqEditor.getChordHudExpiryMs());
     state->setProperty("currentSeqParam", static_cast<int>(seqEditor.getCurrentSeqParam()));
     state->setProperty("mixerColumn", static_cast<int>(seqEditor.getMixerColumn()));
     const auto selectedMixerStack = seqEditor.getSelectedMixerStack();
@@ -2802,6 +2807,11 @@ std::size_t TrackerMainProcessor::getStepCountForSequenceSet(std::size_t setInde
 
 void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
 {
+    // This is a live-performance safety state, deliberately not part of a
+    // tracker document. Any state-load attempt starts with Sequence note entry off.
+    seqEditor.setSequenceEntryArmed(false);
+    seqEditor.resetChordEntryState();
+
     if (!stateVar.isObject())
         return;
 

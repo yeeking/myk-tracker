@@ -1285,6 +1285,12 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                             static_cast<std::size_t>(shiftedSequenceTps));
                         contentChanged = handled;
                     }
+                    else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::sequence && key == 'a')
+                    {
+                        editor.toggleSequenceEntryArmed();
+                        viewChanged = true;
+                        handled = true;
+                    }
                     else if (!ctrl && shift && editor.getCurrentPage() == SequencerEditorPage::step
                              && (key == '{' || key == '}'))
                     {
@@ -1359,11 +1365,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (keyCode >= '1' && keyCode <= '7') { handled = editor.selectPageShortcut(keyCode - '0'); viewChanged = handled; }
                     else if (editor.handleChordKey(key) || editor.handleControlKey(key) || editor.handleNoteKey(key))
                     {
-                        const auto page = editor.getCurrentPage();
-                        const bool samplerRangeInput = page == SequencerEditorPage::machine
-                            && editor.isCurrentSamplerRangeCell();
-                        contentChanged = page == SequencerEditorPage::sequence
-                            || page == SequencerEditorPage::step || samplerRangeInput;
+                        contentChanged = editor.didLastMusicalKeyChangeContent();
                         handled = true;
                     }
                     else if (keyCode == juce::KeyPress::backspaceKey) { handled = editor.machineHandleTextBackspace(); if (!handled) { editor.resetAtCursor(); handled = true; } contentChanged = handled; }
@@ -1438,12 +1440,12 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         return fail("not_found", "Sequencer does not exist");
                     sequencer->toggleSequenceControlMode(editor.getCurrentSequence());
                 }
-                else if (action == "arm") editor.toggleArmCurrentSequence();
+                else if (action == "arm") editor.toggleSequenceEntryArmed();
                 else if (action == "note") editor.enterDataAtCursor(numberArg(args, "value"));
                 else if (action == "page") editor.selectPageShortcut(intArg(args, "value"));
                 else return fail("invalid_argument", "Unknown UI action");
                 contentChanged = action != "up" && action != "down" && action != "left" && action != "right"
-                    && action != "page" && action != "next_step";
+                    && action != "page" && action != "next_step" && action != "arm";
                 viewChanged = true;
                 break;
             }

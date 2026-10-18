@@ -5,6 +5,7 @@
 #include "SequencerCommands.h"
 #include <JuceHeader.h>
 #include <algorithm>
+#include <array>
 #include <cmath> // fmod
 #include <limits>
 #include <assert.h>
@@ -26,29 +27,35 @@ bool isSequencerPlaying(SequencerAbs *sequencer)
 struct ChordShortcut
 {
   char key;
-  std::vector<int> intervals;
+  const char* label;
+  std::array<std::vector<int>, 6> variations;
 };
 
-const std::vector<ChordShortcut> kChordShortcuts = {
-  {'q', {0, 4, 7}},
-  {'w', {0, 3, 7}},
-  {'e', {0, 4, 7, 10}},
-  {'r', {0, 4, 7, 11}},
-  {'t', {0, 3, 7, 10}},
-  {'y', {0, 3, 6, 9}},
-  {'u', {0, 3, 6, 10}},
-  {'i', {0, 5, 7}},
-  {'o', {0, 4, 7, 11, 14}},
-  {'p', {0, 3, 7, 10, 14}}
-};
+const std::array<ChordShortcut, 10> kChordShortcuts = {{
+  {'q', "MAJ",  {{{0, 4, 7}, {4, 7, 12}, {7, 12, 16}, {0, 7, 16}, {0, 4, 7, 9}, {0, 4, 7, 14}}}},
+  {'w', "MIN",  {{{0, 3, 7}, {3, 7, 12}, {7, 12, 15}, {0, 7, 15}, {0, 3, 7, 9}, {0, 3, 7, 14}}}},
+  {'e', "DOM",  {{{0, 4, 7, 10}, {4, 7, 10, 12}, {7, 10, 12, 16}, {10, 12, 16, 19}, {0, 4, 7, 10, 14}, {0, 4, 10, 14, 21}}}},
+  {'r', "DIM",  {{{0, 3, 6}, {3, 6, 12}, {6, 12, 15}, {0, 3, 6, 9}, {-3, 0, 6, 15}, {0, 3, 6, 10}}}},
+  {'t', "AUG",  {{{0, 4, 8}, {4, 8, 12}, {8, 12, 16}, {0, 8, 16}, {0, 4, 8, 10}, {0, 4, 8, 11}}}},
+  {'y', "SUS",  {{{0, 5, 7}, {0, 2, 7}, {5, 7, 12}, {0, 7, 17}, {0, 5, 7, 10}, {0, 5, 7, 10, 14}}}},
+  {'u', "MAJX", {{{0, 4, 7, 11}, {0, 4, 7, 11, 14}, {0, 4, 9, 14}, {0, 4, 7, 11, 17}, {-5, 0, 4, 11}, {-5, 0, 4, 11, 14}}}},
+  {'i', "MINX", {{{0, 3, 7, 10}, {0, 3, 7, 10, 14}, {0, 3, 7, 10, 17}, {0, 3, 9, 14}, {-5, 0, 3, 10}, {-5, 0, 3, 10, 14}}}},
+  {'o', "ALT",  {{{0, 4, 6, 10}, {0, 4, 8, 10}, {0, 4, 7, 10, 13}, {0, 4, 7, 10, 15}, {0, 4, 8, 10, 13}, {0, 4, 10, 13, 15}}}},
+  {'p', "QRTL", {{{0, 5, 10}, {0, 5, 10, 15}, {0, 5, 10, 15, 20}, {-5, 0, 5, 10}, {0, 10, 17}, {0, 7, 14}}}}
+}};
 
-bool isChordShortcutKey(char key)
+const ChordShortcut* findChordShortcut(char key)
 {
   for (const auto& shortcut : kChordShortcuts)
     if (shortcut.key == key)
-      return true;
-  return false;
+      return &shortcut;
+  return nullptr;
 }
+
+bool isChordShortcutKey(char key)
+{
+  return findChordShortcut(key) != nullptr;
+};
 
 bool showsStackSendLevel(CommandType type)
 {
@@ -196,6 +203,8 @@ void SequencerEditor::resetCursor()
   currentStepCol = 0;
   currentSongRow = 0;
   currentSongCol = 0;
+  sequenceEntryArmed = false;
+  resetChordEntryState();
   editMode = SequencerEditorMode::selectingSeqAndStep;
   pageBeforeHelp = SequencerEditorMode::selectingSeqAndStep;
   editSubMode = SequencerEditorSubMode::editCol1;
@@ -249,6 +258,8 @@ SequencerEditorSubMode SequencerEditor::getEditSubMode() const
 }
 void SequencerEditor::setEditMode(SequencerEditorMode mode)
 {
+  if (this->editMode != mode)
+    resetChordCycle();
   this->editMode = mode;
   if (mode != SequencerEditorMode::machineConfig)
   {
@@ -806,12 +817,14 @@ void SequencerEditor::insertNoteAtTickPos(size_t sequence, int channel, int note
 /** add one to current step */
 void SequencerEditor::nextStep()
 {
-
+  const auto stepBefore = currentStep;
   currentStep += 1;
   if (currentStep >= sequencer->howManySteps(currentSequence))
   {
     currentStep = sequencer->howManySteps(currentSequence) - 1;
   }
+  if (currentStep != stepBefore)
+    resetChordCycle();
 }
 
 bool SequencerEditor::nextNonEmptyStep()
@@ -828,6 +841,8 @@ bool SequencerEditor::nextNonEmptyStep()
     if (sequencer->stepHasTriggerableEvent(currentSequence, candidate))
     {
       currentStep = candidate;
+      if (currentStep != start)
+        resetChordCycle();
       return true;
     }
   }
@@ -838,6 +853,8 @@ bool SequencerEditor::nextNonEmptyStep()
 
 void SequencerEditor::moveCursorLeft()
 {
+  const auto sequenceBefore = currentSequence;
+  const auto stepBefore = currentStep;
   switch (getCurrentPage())
   {
   case SequencerEditorPage::song: moveCursorLeftOnSongPage(); break;
@@ -850,10 +867,14 @@ void SequencerEditor::moveCursorLeft()
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorLeftOnResetConfirmationPage(); break;
   }
+  if (currentSequence != sequenceBefore || currentStep != stepBefore)
+    resetChordCycle();
 }
 
 void SequencerEditor::moveCursorRight()
 {
+  const auto sequenceBefore = currentSequence;
+  const auto stepBefore = currentStep;
   switch (getCurrentPage())
   {
   case SequencerEditorPage::song: moveCursorRightOnSongPage(); break;
@@ -866,10 +887,14 @@ void SequencerEditor::moveCursorRight()
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorRightOnResetConfirmationPage(); break;
   }
+  if (currentSequence != sequenceBefore || currentStep != stepBefore)
+    resetChordCycle();
 }
 
 void SequencerEditor::moveCursorUp()
 {
+  const auto sequenceBefore = currentSequence;
+  const auto stepBefore = currentStep;
   switch (getCurrentPage())
   {
   case SequencerEditorPage::song: moveCursorUpOnSongPage(); break;
@@ -882,10 +907,14 @@ void SequencerEditor::moveCursorUp()
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorUpOnResetConfirmationPage(); break;
   }
+  if (currentSequence != sequenceBefore || currentStep != stepBefore)
+    resetChordCycle();
 }
 
 void SequencerEditor::moveCursorDown()
 {
+  const auto sequenceBefore = currentSequence;
+  const auto stepBefore = currentStep;
   switch (getCurrentPage())
   {
   case SequencerEditorPage::song: moveCursorDownOnSongPage(); break;
@@ -898,6 +927,8 @@ void SequencerEditor::moveCursorDown()
   case SequencerEditorPage::help: break;
   case SequencerEditorPage::resetConfirmation: moveCursorDownOnResetConfirmationPage(); break;
   }
+  if (currentSequence != sequenceBefore || currentStep != stepBefore)
+    resetChordCycle();
 }
 
 /** increase the value at the cursor */
@@ -1898,18 +1929,24 @@ void SequencerEditor::decrementOnMachinePage()
 /** move the cursor to a specific sequence*/
 void SequencerEditor::setCurrentSequence(int seq)
 {
+  const auto sequenceBefore = currentSequence;
   if (seq < 0)
     currentSequence = 0;
   else
     currentSequence = static_cast<std::size_t>(seq);
+  if (currentSequence != sequenceBefore)
+    resetChordCycle();
 }
 /** move the cursor to a specific step*/
 void SequencerEditor::setCurrentStep(int step)
 {
+  const auto stepBefore = currentStep;
   if (step < 0)
     currentStep = 0;
   else
     currentStep = static_cast<std::size_t>(step);
+  if (currentStep != stepBefore)
+    resetChordCycle();
 }
 
 void SequencerEditor::setStepCursor(std::size_t row, std::size_t col)
@@ -1992,6 +2029,7 @@ void SequencerEditor::beginKeyboardAudition(char physicalKey,
 
 void SequencerEditor::releaseKeyboardAuditionKey(char key)
 {
+  heldChordKeys.erase(key);
   const auto found = heldKeyboardNotes.find(key);
   if (found == heldKeyboardNotes.end())
     return;
@@ -2011,6 +2049,14 @@ void SequencerEditor::releaseKeyboardAuditionKey(char key)
 
 void SequencerEditor::releaseKeyboardAuditionsExcept(const std::string& stillHeldKeys)
 {
+  for (auto it = heldChordKeys.begin(); it != heldChordKeys.end();)
+  {
+    if (stillHeldKeys.find(*it) == std::string::npos)
+      it = heldChordKeys.erase(it);
+    else
+      ++it;
+  }
+
   std::vector<HeldKeyboardNote> released;
   for (auto it = heldKeyboardNotes.begin(); it != heldKeyboardNotes.end();)
   {
@@ -2070,7 +2116,7 @@ void SequencerEditor::previewEnteredNote(double midiNote, char physicalKey)
 
     data[safeRow][Step::noteInd] = midiNote;
     beginKeyboardAudition(physicalKey, { data[safeRow] }, context);
-    lastAuditionedMidiNote = midiNote;
+    chordRootMidiNote = midiNote;
   }
 }
 
@@ -2435,6 +2481,70 @@ void SequencerEditor::toggleArmCurrentSequence()
   setArmedSequence(getCurrentSequence());
 }
 
+void SequencerEditor::toggleSequenceEntryArmed()
+{
+  sequenceEntryArmed = !sequenceEntryArmed;
+  resetChordCycle();
+}
+
+void SequencerEditor::setSequenceEntryArmed(bool armed)
+{
+  if (sequenceEntryArmed != armed)
+    resetChordCycle();
+  sequenceEntryArmed = armed;
+}
+
+bool SequencerEditor::isSequenceEntryArmed() const
+{
+  return sequenceEntryArmed;
+}
+
+bool SequencerEditor::didLastMusicalKeyChangeContent() const
+{
+  return lastMusicalKeyChangedContent;
+}
+
+void SequencerEditor::resetChordCycle()
+{
+  activeChordFamilyKey = '\0';
+  activeChordFamilyLabel.clear();
+  activeChordVariation = 0;
+  chordHudExpiryMs = 0;
+}
+
+void SequencerEditor::setChordRoot(double midiNote)
+{
+  chordRootMidiNote = midiNote;
+  resetChordCycle();
+}
+
+void SequencerEditor::resetChordEntryState()
+{
+  chordRootMidiNote.reset();
+  heldChordKeys.clear();
+  resetChordCycle();
+}
+
+std::string SequencerEditor::getChordHudLabel() const
+{
+  return activeChordFamilyLabel;
+}
+
+std::size_t SequencerEditor::getChordHudVariation() const
+{
+  return activeChordVariation;
+}
+
+std::size_t SequencerEditor::getChordHudVariationCount() const
+{
+  return kChordShortcuts.empty() ? 0u : kChordShortcuts.front().variations.size();
+}
+
+double SequencerEditor::getChordHudExpiryMs() const
+{
+  return chordHudExpiryMs;
+}
+
 void SequencerEditor::toggleMuteCurrentSequence()
 {
   auto* impl = getSequencerImpl();
@@ -2577,6 +2687,7 @@ void SequencerEditor::enterControlCommand(CommandType command)
 
 bool SequencerEditor::handleChordKey(char key)
 {
+  lastMusicalKeyChangedContent = false;
   const auto page = getCurrentPage();
   if (page == SequencerEditorPage::help)
     return true;
@@ -2588,21 +2699,27 @@ bool SequencerEditor::handleChordKey(char key)
   if (editingSequence && isChordShortcutKey(key) && currentSequenceControlMode())
     return true;
 
-  for (const auto& shortcut : kChordShortcuts)
-  {
-    if (shortcut.key == key)
-    {
-      if (!isSequencerPlaying(sequencer) && heldKeyboardNotes.find(key) != heldKeyboardNotes.end())
-        return true;
-      return applyChordToCurrentStep(key, shortcut.intervals);
-    }
-  }
+  const auto* shortcut = findChordShortcut(key);
+  if (shortcut == nullptr)
+    return false;
 
-  return false;
+  // Keep key-repeat from advancing the family while a physical key is held,
+  // even when transport playback suppresses audition and creates no held note.
+  if (heldChordKeys.find(key) != heldChordKeys.end())
+    return true;
+  heldChordKeys.insert(key);
+
+  const auto variationCount = shortcut->variations.size();
+  const auto variationIndex = activeChordFamilyKey == key
+      ? (activeChordVariation + 1) % variationCount
+      : 0u;
+  return applyChordToCurrentStep(key, shortcut->variations[variationIndex],
+                                 shortcut->label, variationIndex);
 }
 
 bool SequencerEditor::handleControlKey(char key)
 {
+  lastMusicalKeyChangedContent = false;
   const auto page = getCurrentPage();
   if (page == SequencerEditorPage::help)
     return true;
@@ -2624,11 +2741,13 @@ bool SequencerEditor::handleControlKey(char key)
     return false;
 
   enterControlCommand(*command);
+  lastMusicalKeyChangedContent = true;
   return true;
 }
 
 bool SequencerEditor::handleNoteKey(char key)
 {
+  lastMusicalKeyChangedContent = false;
   const auto page = getCurrentPage();
   if (page == SequencerEditorPage::help)
     return true;
@@ -2648,14 +2767,22 @@ bool SequencerEditor::handleNoteKey(char key)
   // LOW/HIGH are the deliberate machine-page exception: piano keys set the
   // selected sampler player's MIDI range instead of merely auditioning.
   if (page == SequencerEditorPage::machine && isCurrentSamplerRangeCell())
-    return machineInsertCurrentCell(note);
+  {
+    lastMusicalKeyChangedContent = machineInsertCurrentCell(note);
+    return lastMusicalKeyChangedContent;
+  }
 
   if (!isSequencerPlaying(sequencer) && heldKeyboardNotes.find(key) != heldKeyboardNotes.end())
     return true;
+  setChordRoot(note);
   previewEnteredNote(note, key);
 
-  if (page == SequencerEditorPage::sequence || page == SequencerEditorPage::step)
+  if (page == SequencerEditorPage::step
+      || (page == SequencerEditorPage::sequence && sequenceEntryArmed))
+  {
     enterStepData(midiNote.value(), Step::noteInd);
+    lastMusicalKeyChangedContent = true;
+  }
   return true;
 }
 
@@ -2698,7 +2825,8 @@ bool SequencerEditor::isCurrentSamplerRangeCell() const
   return machineCells[machineCursorCol][machineCursorRow].onInsert != nullptr;
 }
 
-bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals)
+bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals,
+                                              const std::string& familyLabel, std::size_t variationIndex)
 {
   if (sequencer == nullptr || intervals.empty())
     return false;
@@ -2713,19 +2841,18 @@ bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vecto
       row.resize(Step::maxInd + 1, 0.0);
   }
 
-  std::vector<double> baseRow = data[0];
-  double rootNote = baseRow[Step::noteInd];
-  if ((rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
-      && currentStepRow < data.size())
+  const auto baseRowIndex = currentStepRow < data.size() ? currentStepRow : 0u;
+  std::vector<double> baseRow = data[baseRowIndex];
+  double rootNote = chordRootMidiNote.value_or(0.0);
+  if (rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
   {
-    baseRow = data[currentStepRow];
-    rootNote = baseRow[Step::noteInd];
+    for (const auto& row : data)
+      if (isPlayableNoteRow(row))
+      {
+        rootNote = row[Step::noteInd];
+        break;
+      }
   }
-
-  const bool editingSequence = editMode == SequencerEditorMode::editingStep
-      || editMode == SequencerEditorMode::selectingSeqAndStep;
-  if (!editingSequence && lastAuditionedMidiNote.has_value())
-    rootNote = *lastAuditionedMidiNote;
 
   if (rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
     return true;
@@ -2735,14 +2862,31 @@ bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vecto
   if (std::abs(baseRow[Step::lengthInd]) < std::numeric_limits<double>::epsilon())
     baseRow[Step::lengthInd] = 1.0;
 
+  const int roundedRoot = static_cast<int>(std::lround(rootNote));
+  const auto [minimumInterval, maximumInterval] = std::minmax_element(intervals.begin(), intervals.end());
+  const int minimumOctaveShift = static_cast<int>(std::ceil((1.0 - roundedRoot - *minimumInterval) / 12.0));
+  const int maximumOctaveShift = static_cast<int>(std::floor((127.0 - roundedRoot - *maximumInterval) / 12.0));
+  const int octaveShift = minimumOctaveShift <= maximumOctaveShift
+      ? juce::jlimit(minimumOctaveShift, maximumOctaveShift, 0)
+      : 0;
+
   std::vector<std::vector<double>> chordRows;
   chordRows.reserve(intervals.size());
   for (const int interval : intervals)
   {
     auto row = baseRow;
-    row[Step::noteInd] = juce::jlimit(0.0, 127.0, rootNote + static_cast<double>(interval));
+    row[Step::noteInd] = static_cast<double>(juce::jlimit(1, 127,
+        roundedRoot + interval + 12 * octaveShift));
     chordRows.push_back(std::move(row));
   }
+
+  activeChordFamilyKey = physicalKey;
+  activeChordFamilyLabel = familyLabel;
+  activeChordVariation = variationIndex;
+  chordHudExpiryMs = juce::Time::getMillisecondCounterHiRes() + 1200.0;
+
+  const bool writingSequence = editMode == SequencerEditorMode::editingStep
+      || (editMode == SequencerEditorMode::selectingSeqAndStep && sequenceEntryArmed);
 
   if (!isSequencerPlaying(sequencer))
   {
@@ -2753,11 +2897,12 @@ bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vecto
     }
   }
 
-  if (editingSequence)
+  if (writingSequence)
   {
     writeStepData(std::move(chordRows));
     clampStepCursorToCurrentStep();
     requestStringRefresh();
+    lastMusicalKeyChangedContent = true;
   }
   return true;
 }
