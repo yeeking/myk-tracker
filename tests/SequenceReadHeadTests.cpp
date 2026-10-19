@@ -724,6 +724,24 @@ int main()
                 && tpsHost.silencedStacks.empty(),
             "Sequence-page TPS shortcut keeps locked resync without silencing voices");
 
+    Sequencer routingSequencer(1, 4);
+    SequencerEditor routingEditor(&routingSequencer);
+    TestMachineHost routingHost;
+    routingEditor.setMachineHost(&routingHost);
+    routingSequencer.getSequence(0)->setMachineId(1.0);
+    routingEditor.gotoSequenceConfigPage();
+    require(routingEditor.getCurrentSeqParam() == Sequence::sendConfig,
+            "SEND is the initial sequence-config selection");
+    routingEditor.decrementAtCursor();
+    require(routingSequencer.getSequence(0)->getMachineId() == 0.0
+                && routingHost.silencedStacks == std::vector<std::size_t>({ 1 }),
+            "rerouting cleans only the former stack and preserves destination tails");
+    routingHost.silencedStacks.clear();
+    routingEditor.enterDataAtCursor(1.0);
+    require(routingSequencer.getSequence(0)->getMachineId() == 1.0
+                && routingHost.silencedStacks == std::vector<std::size_t>({ 0 }),
+            "numeric SEND insertion also cleans only the former stack");
+
     Sequencer durationSequencer(1, 1);
     durationSequencer.setStepData(0, 0,
         {{ static_cast<double>(CommandType::MidiNote), 60.0, 100.0, 15.0 }});

@@ -13,13 +13,13 @@ constexpr int kBlockSize = 256;
 
 const char* stageName(PerformanceMetrics::Stage stage)
 {
-    static constexpr const char* names[] = { "callback", "sequencing", "modulation", "sampler", "wavetable", "distortion", "delay", "channel", "filter", "aux1", "aux2", "scope_meter", "master" };
+    static constexpr const char* names[] = { "callback", "sequencing", "modulation", "sampler", "wavetable", "drum", "distortion", "delay", "channel", "filter", "aux1", "aux2", "scope_meter", "master" };
     return names[static_cast<std::size_t>(stage)];
 }
 
 void addAllMachines(TrackerMainProcessor& processor, std::size_t stack)
 {
-    for (int i = 0; i < 8; ++i)
+    for (std::size_t i = 0; i < kSlotCycleTypes.size(); ++i)
         processor.addMachineToStack(stack);
 }
 

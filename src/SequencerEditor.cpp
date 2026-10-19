@@ -763,9 +763,15 @@ void SequencerEditor::enterDataAtCursor(double inValue)
   {
     Sequence* sequence = sequencer->getSequence(currentSequence);
     if (currentSeqParam == Sequence::sendConfig){
+      const auto oldStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1,
+          static_cast<int>(sequence->getMachineId())));
       double machineId = fmod(inValue, kMachineStackCount);
       if (machineId < 0) machineId = 0;
       sequence->setMachineId(machineId);
+      const auto newStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1,
+          static_cast<int>(sequence->getMachineId())));
+      if (machineHost != nullptr && newStack != oldStack)
+        machineHost->silenceStack(oldStack);
     }
     else if (currentSeqParam == Sequence::headConfig){
       currentConfigHead = static_cast<std::size_t>(juce::jlimit(0, static_cast<int>(sequence->getReadHeadCount() - 1), static_cast<int>(inValue)));
@@ -1854,8 +1860,12 @@ void SequencerEditor::incrementOnSequenceConfigPage()
         const auto newStack = static_cast<std::size_t>(juce::jlimit(0, kMachineStackCount - 1, static_cast<int>(sequence->getMachineId())));
         if (newStack != oldStack)
         {
+          // The sequence has stopped feeding its previous route, so clear
+          // that route's outstanding voices.  The destination may already be
+          // sounding another sequence (notably a DRUM one-shot); silencing it
+          // here would cut an unrelated tail before the rerouted sequence has
+          // even emitted a note there.
           machineHost->silenceStack(oldStack);
-          machineHost->silenceStack(newStack);
         }
       }
     }
@@ -1912,7 +1922,6 @@ void SequencerEditor::decrementOnSequenceConfigPage()
         if (newStack != oldStack)
         {
           machineHost->silenceStack(oldStack);
-          machineHost->silenceStack(newStack);
         }
       }
     }

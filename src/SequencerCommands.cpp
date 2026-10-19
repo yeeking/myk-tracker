@@ -155,6 +155,21 @@ void CommandProcessor::initialiseCommands() {
                 sendSequenceNote(CommandType::WavetableSynth, stepData, sequenceContext);
             }
     };
+    Command drumSynthCommand{
+            "DrumSynth", "Drum", "Plays the internal six-part drum synth",
+            { Parameter("Note", "N", 0, 127, 1, 36, Step::noteInd),
+              Parameter("Vel", "V", 0, 127, 4, 96, Step::velInd),
+              Parameter("Dur", "D", 0, 16, 1, 1, Step::lengthInd)},
+            Step::noteInd,
+            Step::velInd,
+            Step::lengthInd,
+            [sendSequenceNote](std::vector<double>* stepData, const SequenceReadOnly* sequenceContext) {
+                assert(stepData->size() == Step::maxInd + 1);
+                assert(sequenceContext != nullptr);
+                if ((*stepData)[Step::noteInd] > 0)
+                    sendSequenceNote(CommandType::DrumSynth, stepData, sequenceContext);
+            }
+    };
     // Command sample{
     //         "Sample", "Samp", "Plays a Sample",
     //         { Parameter("Sound", "Bank", 0, 16, 1, 0, Step::chanInd), 
@@ -231,6 +246,7 @@ void CommandProcessor::initialiseCommands() {
     CommandData::commands[logCommand.shortName] = logCommand;
     CommandData::commands[samplerCommand.shortName] = samplerCommand;
     CommandData::commands[wavetableSynthCommand.shortName] = wavetableSynthCommand;
+    CommandData::commands[drumSynthCommand.shortName] = drumSynthCommand;
     CommandData::commands[toggleAux1Command.shortName] = toggleAux1Command;
     CommandData::commands[toggleAux2Command.shortName] = toggleAux2Command;
     CommandData::commands[filterCutoffCommand.shortName] = filterCutoffCommand;
@@ -238,6 +254,7 @@ void CommandProcessor::initialiseCommands() {
     CommandData::commandsDouble[static_cast<double>(CommandType::Log)] = logCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::Sampler)] = samplerCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::WavetableSynth)] = wavetableSynthCommand;
+    CommandData::commandsDouble[static_cast<double>(CommandType::DrumSynth)] = drumSynthCommand;
     CommandData::commandsDouble[static_cast<double>(CommandType::ToggleAux1)] = toggleAux1Command;
     CommandData::commandsDouble[static_cast<double>(CommandType::ToggleAux2)] = toggleAux2Command;
     CommandData::commandsDouble[static_cast<double>(CommandType::FilterCutoff)] = filterCutoffCommand;

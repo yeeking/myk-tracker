@@ -43,6 +43,7 @@ std::optional<CommandType> commandTypeFromName(const juce::String& name)
         { "midi", CommandType::MidiNote }, { "midinote", CommandType::MidiNote },
         { "sampler", CommandType::Sampler },
         { "wavetable_synth", CommandType::WavetableSynth },
+        { "drum", CommandType::DrumSynth }, { "drum_synth", CommandType::DrumSynth },
         { "distortion", CommandType::DistortionFx }, { "delay", CommandType::DelayFx },
         { "channel_strip", CommandType::ChannelStripFx }, { "aux_send_1", CommandType::AuxSend1Fx },
         { "aux_send_2", CommandType::AuxSend2Fx }, { "filter", CommandType::FilterFx },
@@ -715,9 +716,10 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 {
                     const auto previousCommandValue = event.size() > Step::cmdInd ? std::max(0.0, event[Step::cmdInd]) : 0.0;
                     const auto previousCommandIndex = static_cast<std::size_t>(previousCommandValue);
-                    const auto previousCommand = previousCommandIndex <= static_cast<std::size_t>(CommandType::FilterCutoff)
-                        ? static_cast<CommandType>(previousCommandIndex)
-                        : CommandType::MidiNote;
+                    const auto previousCandidate = previousCommandIndex <= static_cast<std::size_t>(CommandType::DrumSynth)
+                        ? static_cast<CommandType>(previousCommandIndex) : CommandType::MidiNote;
+                    const auto previousCommand = machineTraits(previousCandidate).isStepCommandType
+                        ? previousCandidate : CommandType::MidiNote;
 
                     if (hasArg(args, "command"))
                     {
@@ -739,9 +741,10 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
 
                     const auto commandValue = event.size() > Step::cmdInd ? std::max(0.0, event[Step::cmdInd]) : 0.0;
                     const auto commandIndex = static_cast<std::size_t>(commandValue);
-                    const auto effectiveCommand = commandIndex <= static_cast<std::size_t>(CommandType::FilterCutoff)
-                        ? static_cast<CommandType>(commandIndex)
-                        : CommandType::MidiNote;
+                    const auto candidate = commandIndex <= static_cast<std::size_t>(CommandType::DrumSynth)
+                        ? static_cast<CommandType>(commandIndex) : CommandType::MidiNote;
+                    const auto effectiveCommand = machineTraits(candidate).isStepCommandType
+                        ? candidate : CommandType::MidiNote;
                     const auto traits = machineTraits(effectiveCommand);
                     const double maxValue = effectiveCommand == CommandType::FilterCutoff ? 20000.0 : (traits.isControlCommand ? 0.0 : 127.0);
 

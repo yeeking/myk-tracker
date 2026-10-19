@@ -247,7 +247,7 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
                 envelope.setParameters(attackParams);
                 envelope.noteOn();
             }
-            else if (--activeNotes == 0)
+            else if (activeNotes > 0 && --activeNotes == 0)
             {
                 envelope.noteOff();
             }
@@ -290,9 +290,24 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
         {
             const float stageOne = filter.processSample(channel, buffer.getSample(channel, sample));
-            buffer.setSample(channel, sample, useSecondStage
+            const float output = useSecondStage
                 ? secondFilter.processSample(channel, stageOne)
-                : stageOne);
+                : stageOne;
+            // The TPT topology is normally unconditionally stable, but bad
+            // host/state transitions must not let a corrupt recursive value
+            // propagate through the complete stack or reach the speakers.
+            constexpr float safetyLimit = 64.0f;
+            if (!std::isfinite(stageOne) || !std::isfinite(output)
+                || std::abs(stageOne) > safetyLimit || std::abs(output) > safetyLimit)
+            {
+                filter.reset();
+                secondFilter.reset();
+                buffer.setSample(channel, sample, 0.0f);
+            }
+            else
+            {
+                buffer.setSample(channel, sample, output);
+            }
         }
     }
 }

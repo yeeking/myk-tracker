@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <chrono>
 #include <future>
+#include <string>
 #include <unordered_map>
 #include "TrackerMainProcessor.h"
 #include "TrackerControlService.h"
@@ -151,6 +152,10 @@ private:
     std::vector<std::vector<float>> playheadGlow;
     /** Last frame's valueNorm per display cell, used for change pulses. */
     std::vector<std::vector<float>> lastValueNorm;
+    /** Identifies the page/machine owning lastValueNorm. Values from another
+        interface must never be interpreted as fresh parameter changes. */
+    std::string valuePulseContext;
+    std::string lastValuePulseContext;
     std::vector<std::uint64_t> seqConfigTriggerCounts;
     std::vector<float> seqConfigTriggerFlash;
     bool seqConfigTriggerBaselineValid = false;

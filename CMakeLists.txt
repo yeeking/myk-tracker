@@ -77,6 +77,7 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerC
 #    src/SuperSamplerEditor.cpp
     src/SuperSamplerProcessor.cpp
     src/machines/WavetableSynthMachine.cpp
+    src/machines/DrumSynthMachine.cpp
     src/machines/WaveshaperDistortionMachine.cpp
     src/machines/DelayFxMachine.cpp
     src/machines/ChannelStripMachine.cpp
@@ -207,4 +208,32 @@ if (BUILD_TESTING)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
     add_test(NAME wavetable-synth-tests COMMAND wavetable-synth-tests)
+
+    juce_add_console_app(drum-synth-tests PRODUCT_NAME "Drum Synth Tests")
+    juce_generate_juce_header(drum-synth-tests)
+    target_sources(drum-synth-tests PRIVATE
+        tests/DrumSynthTests.cpp
+        src/machines/DrumSynthMachine.cpp)
+    target_include_directories(drum-synth-tests PRIVATE src src/machines)
+    target_compile_features(drum-synth-tests PRIVATE cxx_std_17)
+    target_compile_definitions(drum-synth-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(drum-synth-tests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME drum-synth-tests COMMAND drum-synth-tests)
+
+    add_executable(drum-processor-tests)
+    target_sources(drum-processor-tests PRIVATE tests/DrumProcessorTests.cpp)
+    target_include_directories(drum-processor-tests PRIVATE
+        src src/machines
+        "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE/modules"
+        "${CMAKE_CURRENT_BINARY_DIR}/myk-tracker-plug_artefacts/JuceLibraryCode")
+    target_compile_features(drum-processor-tests PRIVATE cxx_std_17)
+    target_compile_definitions(drum-processor-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(drum-processor-tests PRIVATE
+        myk-tracker-plug
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME drum-processor-tests COMMAND drum-processor-tests)
 endif()

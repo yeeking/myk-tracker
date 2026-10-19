@@ -16,12 +16,12 @@ bool isExplodableNoteRow(const std::vector<double>& row, double fallbackCommand)
   double command = row[Step::cmdInd];
   if (std::abs(command) < std::numeric_limits<double>::epsilon())
     command = fallbackCommand;
-  if (command < 0.0 || command >= static_cast<double>(CommandProcessor::countCommands()))
+  if (command < 0.0 || command > static_cast<double>(CommandType::DrumSynth))
     return false;
 
   const auto type = static_cast<CommandType>(static_cast<std::size_t>(command));
-  return type == CommandType::MidiNote || type == CommandType::Log
-      || type == CommandType::Sampler || type == CommandType::WavetableSynth;
+  const auto traits = machineTraits(type);
+  return traits.isStepCommandType && !traits.isControlCommand;
 }
 
 std::vector<double> makeExplodedNoteRow(const std::vector<double>& source, double fallbackCommand)
@@ -669,8 +669,8 @@ SequenceType Sequence::getType() const
 void Sequence::setMachineType(double newMachineType)
 {
   const auto command = static_cast<CommandType>(static_cast<std::size_t>(std::max(0.0, newMachineType)));
-  if (command != CommandType::MidiNote && command != CommandType::Log
-      && command != CommandType::Sampler && command != CommandType::WavetableSynth)
+  const auto traits = machineTraits(command);
+  if (!traits.isStepCommandType || traits.isControlCommand)
     newMachineType = static_cast<double>(CommandType::MidiNote);
   this->machineType = newMachineType;
 }
@@ -859,8 +859,8 @@ std::size_t Sequence::eligibleRandomSteps(std::array<std::size_t, 128>& eligible
     {
       if (row.size() <= Step::noteInd || row[Step::noteInd] <= 0.0) return false;
       const auto command = static_cast<CommandType>(static_cast<std::size_t>(row[Step::cmdInd]));
-      return command == CommandType::MidiNote || command == CommandType::Log
-          || command == CommandType::Sampler || command == CommandType::WavetableSynth;
+      const auto traits = machineTraits(command);
+      return traits.isStepCommandType && !traits.isControlCommand;
     });
     if (hasNote) eligible[count++] = stepIndex;
   }
@@ -1287,7 +1287,7 @@ void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<
       row.resize(Step::maxInd + 1, 0.0);
 
     const auto commandIndex = static_cast<std::size_t>(std::max(0.0, row[Step::cmdInd]));
-    const bool validCommand = commandIndex <= static_cast<std::size_t>(CommandType::FilterCutoff)
+    const bool validCommand = commandIndex <= static_cast<std::size_t>(CommandType::DrumSynth)
         && machineTraits(static_cast<CommandType>(commandIndex)).isStepCommandType;
     if (!validCommand)
       row[Step::cmdInd] = machineType;

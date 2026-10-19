@@ -12,7 +12,7 @@
 class PerformanceMetrics
 {
 public:
-    enum class Stage : std::size_t { callback, sequencing, modulation, sampler, wavetable, distortion, delay, channel, filter, aux1, aux2, scopeMeter, master, count };
+    enum class Stage : std::size_t { callback, sequencing, modulation, sampler, wavetable, drum, distortion, delay, channel, filter, aux1, aux2, scopeMeter, master, count };
     struct StageSummary { std::uint64_t calls = 0; double meanUs = 0.0; double maxUs = 0.0; };
     struct Snapshot
     {

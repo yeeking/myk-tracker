@@ -83,6 +83,8 @@ enum class CommandType : std::size_t {
     FilterCutoff = 14,
     /** Fixed per-stack modulation block; never a serial slot or step command. */
     ModulationMatrix = 15,
+    /** Six-part internal drum synthesizer. Appended to preserve saved IDs. */
+    DrumSynth = 16,
 };
 
 /** Shared behaviour table for machine types so the processor, editor, UI and
@@ -112,12 +114,13 @@ constexpr MachineTypeTraits machineTraits(CommandType type) {
         case CommandType::LegacyArpeggiator:
         case CommandType::LegacyPolyArpeggiator: return { "LEGACY", "legacy", false, false, false, -1 };
         case CommandType::WavetableSynth: return { "WAVE", "wavetable synth", false, true, true, 1 };
-        case CommandType::DistortionFx: return { "DIST", "distortion", true, false, true, 3 };
-        case CommandType::DelayFx: return { "DELAY", "delay", true, false, true, 4 };
-        case CommandType::ChannelStripFx: return { "CHSTR", "channel strip", true, false, true, 5 };
-        case CommandType::AuxSend1Fx: return { "AUX1", "shared aux [1] reverb", true, false, true, 6 };
-        case CommandType::AuxSend2Fx: return { "AUX2", "shared aux [2] reverb", true, false, true, 7 };
-        case CommandType::FilterFx: return { "FILTER", "filter", true, false, true, 8 };
+        case CommandType::DrumSynth: return { "DRUM", "drum synth", false, true, true, 3 };
+        case CommandType::DistortionFx: return { "DIST", "distortion", true, false, true, 4 };
+        case CommandType::DelayFx: return { "DELAY", "delay", true, false, true, 5 };
+        case CommandType::ChannelStripFx: return { "CHSTR", "channel strip", true, false, true, 6 };
+        case CommandType::AuxSend1Fx: return { "AUX1", "shared aux [1] reverb", true, false, true, 7 };
+        case CommandType::AuxSend2Fx: return { "AUX2", "shared aux [2] reverb", true, false, true, 8 };
+        case CommandType::FilterFx: return { "FILTER", "filter", true, false, true, 9 };
         case CommandType::ToggleAux1: return { "TAUX1", "toggle aux [1] send", false, true, false, -1, true };
         case CommandType::ToggleAux2: return { "TAUX2", "toggle aux [2] send", false, true, false, -1, true };
         case CommandType::FilterCutoff: return { "COFF", "filter cutoff", false, true, false, -1, true };
@@ -127,10 +130,11 @@ constexpr MachineTypeTraits machineTraits(CommandType type) {
 }
 
 /** Slot types a stack can hold, in the order the slot-type cycle walks. */
-constexpr std::array<CommandType, 9> kSlotCycleTypes = {
+constexpr std::array<CommandType, 10> kSlotCycleTypes = {
     CommandType::MidiNote,
     CommandType::WavetableSynth,
     CommandType::Sampler,
+    CommandType::DrumSynth,
     CommandType::DistortionFx,
     CommandType::DelayFx,
     CommandType::ChannelStripFx,

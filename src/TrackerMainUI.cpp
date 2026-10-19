@@ -42,7 +42,7 @@ std::string describeStackCursorAction(const std::string& cellText)
     if (cellText == "ON") return "enabled";
     if (cellText == "OFF") return "disabled";
     if (cellText.empty()) return "stack";
-    for (std::size_t typeValue = 0; typeValue <= static_cast<std::size_t>(CommandType::FilterFx); ++typeValue)
+    for (std::size_t typeValue = 0; typeValue <= static_cast<std::size_t>(CommandType::DrumSynth); ++typeValue)
     {
         const auto traits = machineTraits(static_cast<CommandType>(typeValue));
         if (cellText == traits.shortLabel)
@@ -53,7 +53,8 @@ std::string describeStackCursorAction(const std::string& cellText)
 
 bool isSimpleMachineDetail(CommandType type)
 {
-    return type == CommandType::DistortionFx
+    return type == CommandType::DrumSynth
+        || type == CommandType::DistortionFx
         || type == CommandType::DelayFx
         || type == CommandType::FilterFx
         || type == CommandType::ChannelStripFx
@@ -495,6 +496,30 @@ void TrackerMainUI::timerCallback ()
   else if (snapshotMode == "help") editMode = SequencerEditorMode::help;
   else if (snapshotMode == "reset") editMode = SequencerEditorMode::resetConfirmation;
   const bool isPlaying = static_cast<bool>(snapshotUi.getProperty("isPlaying", false));
+
+  // Parameter-change pulses are meaningful only within the same logical
+  // interface. Reusing a previous page's normalised values made every scaled
+  // control look newly changed (and therefore glow red) on page entry.
+  valuePulseContext = snapshotMode.toStdString();
+  if (stateDialogMode != StateDialogMode::none)
+  {
+      valuePulseContext = "state-dialog/" + std::to_string(static_cast<int>(stateDialogMode));
+  }
+  else if (editMode == SequencerEditorMode::machineConfig)
+  {
+      valuePulseContext += "/sequence/" + std::to_string(seqEditor->getCurrentSequence());
+      if (seqEditor->isEditingMachineDetail())
+      {
+          if (const auto detailType = seqEditor->getFocusedMachineDetailType())
+              valuePulseContext += "/detail/" + std::to_string(static_cast<int>(*detailType));
+          if (const auto detailSlot = seqEditor->getFocusedMachineDetailSlot())
+              valuePulseContext += "/slot/" + std::to_string(*detailSlot);
+      }
+      else
+      {
+          valuePulseContext += "/stack";
+      }
+  }
   if (editMode != SequencerEditorMode::configuringSequence)
   {
       seqConfigTriggerCounts.clear();
@@ -1284,6 +1309,27 @@ void TrackerMainUI::prepareMachineConfigView()
         appendScopeBand(machineBoxes, rowsBeforeScope, scopeStackIndex, scopeSamples);
         updateCellStates(machineBoxes, rowsBeforeScope + 2, cols);
 
+        if (detail == CommandType::DrumSynth)
+        {
+            // Each drum owns a label/value column pair. Thin full-height
+            // separators make those strips legible without boxing every cell.
+            for (std::size_t boundary = 2; boundary < cols; boundary += 2)
+            {
+                TrackerUIComponent::Trace divider;
+                divider.colStart = static_cast<float>(boundary) - 0.002f;
+                divider.colEnd = static_cast<float>(boundary) + 0.002f;
+                divider.rowTop = 0.0f;
+                divider.rowBottom = static_cast<float>(baseRows);
+                divider.samples = { -1.0f, 1.0f };
+                divider.color = palette.sequenceEntryArmedCursor.withAlpha(0.72f);
+                divider.z = 1.16f;
+                divider.lineWidth = 2.0f;
+                divider.cacheId = "drum-divider/" + std::to_string(boundary);
+                divider.cacheRevision = 1;
+                currentTraces.push_back(std::move(divider));
+            }
+        }
+
         if (detail == CommandType::AuxSend1Fx)
             overlayState.text = "Shared aux [1] reverb";
         else if (detail == CommandType::AuxSend2Fx)
@@ -1856,6 +1902,9 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
     if (rowsToDisplay == 0 || colsToDisplay == 0)
         return;
 
+    const bool sameValuePulseContext = valuePulseContext == lastValuePulseContext;
+    lastValuePulseContext = valuePulseContext;
+
     const bool hasStickyHeader = stickyHeaderCells != nullptr;
     const size_t bodyRowsToDisplay = hasStickyHeader ? rowsToDisplay - 1 : rowsToDisplay;
     if (bodyRowsToDisplay == 0)
@@ -1915,7 +1964,8 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
     if (nextEndRow >= maxRows) nextEndRow = maxRows;
     if (nextEndCol >= maxCols) nextEndCol = maxCols;
 
-    const bool reuseGlow = (startCol == nextStartCol && startRow == nextStartRow);
+    const bool reuseGlow = sameValuePulseContext
+        && startCol == nextStartCol && startRow == nextStartRow;
 
     cellStates.resize(colsToDisplay);
     playheadGlow.resize(colsToDisplay);

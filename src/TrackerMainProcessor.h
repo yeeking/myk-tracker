@@ -27,6 +27,7 @@
 #include "TrackerController.h"
 #include "SuperSamplerProcessor.h"
 #include "machines/WavetableSynthMachine.h"
+#include "machines/DrumSynthMachine.h"
 #include "machines/WaveshaperDistortionMachine.h"
 #include "machines/DelayFxMachine.h"
 #include "machines/ChannelStripMachine.h"
@@ -384,6 +385,7 @@ private:
 
         std::unique_ptr<SuperSamplerProcessor> sampler;
         std::unique_ptr<WavetableSynthMachine> wavetableSynth;
+        std::unique_ptr<DrumSynthMachine> drumSynth;
         std::unique_ptr<WaveshaperDistortionMachine> distortionFx;
         std::unique_ptr<DelayFxMachine> delayFx;
         std::unique_ptr<ChannelStripMachine> channelStripFx;
@@ -396,12 +398,15 @@ private:
         juce::MidiBuffer samplerMidiBuffer;
         /** Wavetable notes distributed into the current block, sorted by sample offset. */
         std::vector<MachineScheduledNote> wavetableBlockNotes;
+        /** Drum events distributed into the current block, sorted by sample offset. */
+        std::vector<MachineScheduledNote> drumBlockNotes;
         /** Filter-sweep notes distributed into the current block, sorted by sample offset. */
         std::vector<MachineScheduledNote> filterBlockNotes;
         std::vector<MachineScheduledNote> modulationBlockNotes;
         bool audioProcessingActive = false;
         bool samplerProcessingActive = false;
         bool wavetableProcessingActive = false;
+        bool drumProcessingActive = false;
         bool filterProcessingActive = false;
         bool muted = false;
         bool solo = false;
@@ -428,6 +433,7 @@ private:
         {
             f(*sampler);
             f(*wavetableSynth);
+            f(*drumSynth);
             f(*distortionFx);
             f(*delayFx);
             f(*channelStripFx);
@@ -452,6 +458,7 @@ private:
     std::vector<ScheduledSamplerEvent> samplerEventsToSend;
     std::vector<ScheduledSamplerEvent> scratchFutureSamplerEvents;
     NoteEventQueue wavetableEvents;
+    NoteEventQueue drumEvents;
     NoteEventQueue filterEvents;
     NoteEventQueue modulationEvents;
     static constexpr std::size_t kMaxModulationClockTicks = 256;
@@ -556,7 +563,7 @@ private:
     static MachineStack::SlotState makeDefaultSlotState(CommandType type);
     /** (property key, machine) pairs for state save/restore. The persisted names
         are part of the plugin state format; do not rename. */
-    static std::array<std::pair<const char*, MachineInterface*>, 7> stackMachineStateEntries(MachineStack& stack);
+    static std::array<std::pair<const char*, MachineInterface*>, 8> stackMachineStateEntries(MachineStack& stack);
     static bool isAuxSendType(CommandType type);
     static bool slotSupportsReturnLevel(CommandType type);
     static bool slotAllowsDuplicate(CommandType type);
