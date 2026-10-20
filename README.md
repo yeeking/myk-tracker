@@ -144,6 +144,14 @@ The standalone app is produced under:
 build/myk-tracker-plug_artefacts/Debug/Standalone/
 ```
 
+### VS Code debugging
+
+Open the repository folder in VS Code, select `MYK Tracker GL (Debug
+Standalone)` in the Run and Debug view, and press the green debug button (or
+`F5`). The repository launch configuration configures the `build` directory as
+a Debug build, builds the standalone target with two jobs, and launches it
+under GDB. The Microsoft C/C++ extension is required for the `cppdbg` debugger.
+
 ## Local MCP control
 
 The standalone application starts a local-only MCP Streamable HTTP server at

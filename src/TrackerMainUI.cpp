@@ -1958,6 +1958,16 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
     if (cursorRow < nextStartRow) nextStartRow = cursorRow;
     if (cursorRow >= nextEndRow) nextStartRow = cursorRow - bodyRowsToDisplay + 1;
 
+    // Scroll origins are intentionally shared while moving between related
+    // sequence views, but a wider/shorter page may not have enough content to
+    // support the previous page's origin.  Clamp the origin itself rather than
+    // only the end: otherwise the leading cells disappear and the unused tail
+    // of the display is filled with blanks until the cursor moves back.
+    const size_t maxStartCol = maxCols > colsToDisplay ? maxCols - colsToDisplay : 0;
+    const size_t maxStartRow = maxRows > bodyRowsToDisplay ? maxRows - bodyRowsToDisplay : 0;
+    nextStartCol = std::min(nextStartCol, maxStartCol);
+    nextStartRow = std::min(nextStartRow, maxStartRow);
+
     nextEndCol = nextStartCol + colsToDisplay;
     nextEndRow = nextStartRow + bodyRowsToDisplay;
 
