@@ -170,25 +170,6 @@ void CommandProcessor::initialiseCommands() {
                     sendSequenceNote(CommandType::DrumSynth, stepData, sequenceContext);
             }
     };
-    // Command sample{
-    //         "Sample", "Samp", "Plays a Sample",
-    //         { Parameter("Sound", "Bank", 0, 16, 1, 0, Step::chanInd), 
-    //           Parameter("Note", "N", 0, 127, 1, 0, Step::noteInd), 
-    //           Parameter("Vel", "V", 0, 127, 1, 0, Step::velInd), 
-    //           Parameter("Dur", "D", 0, 8, 1, 0, Step::lengthInd),
-
-    //         Step::noteInd, // int noteEditGoesToParam;
-    //         Step::velInd, // int numberEditGoesToParam;
-    //         Step::lengthInd, // int lengthEditGoesToParam;  
-    //         [](std::vector<double>* params) {
-    //             assert(params->size() == Step::maxInd + 1);// need +1 params as we also get sent the cmd index as a param
-    //             std::cout << "Executing command " << "sample" << std::endl;
-    //             for (double d : *params){
-    //                 std::cout << d << std::endl;
-    //             }
-    //         }
-    // };
-
     Command toggleAux1Command{
             "ToggleAux1", "TAUX1", "Toggles the enabled state of the aux [1] send on the sequence's machine stack",
             { Parameter("Aux", "-", 0, 0, 1, 0, Step::noteInd),

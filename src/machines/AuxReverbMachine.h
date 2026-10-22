@@ -40,5 +40,4 @@ private:
     void updateParameters();
 
     static float clampUnit(float value);
-    UIBox makeValueCell(std::atomic<float>& target, float step, int decimals);
 };

@@ -1,8 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <cmath>
 #include <functional>
 #include <string>
+#include <utility>
 
 #include <JuceHeader.h>
 
@@ -68,6 +70,24 @@ inline UIBox makeFloatCell(float currentValue, float minValue, float maxValue, i
         ? juce::jlimit(0.0f, 1.0f, (currentValue - minValue) / (maxValue - minValue))
         : 0.0f;
     return cell;
+}
+
+/** Builds the common atomic float control used by lock-free machine
+    parameters. The optional callback marks dependent DSP state dirty. */
+inline UIBox makeAtomicFloatCell(std::atomic<float>& target, float step,
+                                 float minValue, float maxValue, int decimals,
+                                 std::function<void()> onChanged = {})
+{
+    return makeFloatCell(target.load(std::memory_order_relaxed), minValue, maxValue, decimals,
+        [&target, step, minValue, maxValue, onChanged = std::move(onChanged)](int direction)
+        {
+            const float currentValue = target.load(std::memory_order_relaxed);
+            target.store(juce::jlimit(minValue, maxValue,
+                                      currentValue + step * static_cast<float>(direction)),
+                         std::memory_order_relaxed);
+            if (onChanged)
+                onChanged();
+        });
 }
 
 /** Builds an on/off toggle cell. As with makeFloatCell, the adjust callback

@@ -907,7 +907,8 @@ void DrumSynthMachine::getStateInformation(juce::MemoryBlock& destData)
 
 void DrumSynthMachine::setStateInformation(const void* data, int sizeInBytes)
 {
-    const auto state = parseMachineStateJson(data, sizeInBytes); if (state.isVoid()) return;
+    const auto state = parseMachineStateJson(data, sizeInBytes);
+    if (state.isVoid() || static_cast<int>(state.getProperty("version", 0)) != kStateVersion) return;
     resetParametersToDefaults();
     const auto getI = [&state](const char* key, std::atomic<int>& value, int minimum, int maximum) { value.store(getIntProperty(state, key, value.load(), minimum, maximum)); };
     const auto getF = [&state](const char* key, std::atomic<float>& value, float minimum, float maximum) { const float restored = getFloatProperty(state, key, value.load(), minimum, maximum); value.store(std::isfinite(restored) ? restored : juce::jlimit(minimum, maximum, value.load())); };

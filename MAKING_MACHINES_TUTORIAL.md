@@ -1,287 +1,227 @@
 # Making Machines Tutorial
 
-This tutorial explains how to add a new machine to MYK Tracker GL. It is written
-for two audiences:
+This guide explains how to add a machine to the current MYK Tracker GL codebase.
+It is written for both human contributors and coding agents. It describes the
+architecture that exists now, the integration points that are easy to miss, and
+the checks needed before a new instrument or effect is safe to use live.
 
-- Humans who want to understand where machines live and how they are wired in.
-- Language-model agents that need a precise, checkable runbook.
+The worked example is a conventional serial audio effect. Terminal instruments,
+shared buses, the fixed modulation matrix, and modulation destinations need
+additional work described later.
 
-The primary path is adding a new stack-owned audio-effect machine, such as a
-tremolo, phaser, gate, or other in-place audio processor. Advanced sections
-cover note-consuming terminal instruments and shared bus machines.
+## Before you start
 
-Use `TremoloFx` / `TremoloFxMachine` as the running example. The example is
-illustrative; adapt the names and DSP to the real machine being added.
+Read:
 
-## When to use this tutorial
+1. `AGENTS.md` for repository, thread, build, and verification rules.
+2. `README.md` for current build and MCP instructions.
+3. `src/MachineInterface.h` and `src/machines/AudioEffectMachine.h`.
+4. One existing machine of the same category as the proposed machine.
 
-Use this tutorial when you need to:
+Good references are:
 
-- Add a new machine type that can appear in a machine stack slot.
-- Add a new audio effect that processes stack audio.
-- Add a new terminal instrument that consumes sequencer notes.
-- Register a new machine type with the UI, MCP control service, and saved state.
+- Simple serial effect: `WaveshaperDistortionMachine.*`
+- Clock-aware effect with a tail: `DelayFxMachine.*`
+- Note-aware/enveloped effect: `FilterFxMachine.*`
+- Polyphonic terminal: `WavetableSynthMachine.*`
+- Multi-engine terminal: `DrumSynthMachine.*`
+- Sampler/file UI: `SuperSamplerProcessor.*`
+- Shared stereo return: `AuxReverbMachine.*`
+- Fixed pre-source control generator: `ModulationMatrixMachine.*`
 
-Do not use this tutorial to:
-
-- Resurrect or extend `ArpeggiatorMachine` or `PolyArpeggiatorMachine`.
-- Renumber existing `CommandType` values.
-- Change persisted state formats without a migration plan.
-- Modify `libs/JUCE`.
-
-## Human reading path
-
-1. Read “Machine model”.
-2. Fill in the “Machine decision table”.
-3. Follow the numbered steps for the relevant machine kind.
-4. Run the verification checklist.
-5. Update user-facing docs only if the change is user-visible.
+The old arpeggiator machine implementations and command IDs have been removed.
+Arpeggiation is implemented by sequence read heads; do not reintroduce stack
+machines for it.
 
 ## Agent fast path
 
-1. Jump to “Agent runbook”.
-2. Use the grep patterns to locate the current integration points.
-3. Make only the required changes.
-4. Build the affected targets.
-5. Run `sequence-read-head-tests` when sequencing or command code is touched.
-6. Stop and report if any stop condition is hit.
+For an ordinary stack effect, the usual path is:
 
-## Machine model
+1. Add a class derived from `AudioEffectMachine`.
+2. Make parameters thread-safe, state versioned, and the callback allocation-free.
+3. Return a column-major `UIBox` grid.
+4. Add the `.cpp` to `CMakeLists.txt`.
+5. Append a stable `CommandType`; update `machineTraits` and `kSlotCycleTypes`.
+6. Add one persistent instance to each `MachineStack`.
+7. Add construction, `forEachMachine`, type lookup, state entry, count, restore,
+   and exhaustive-switch handling.
+8. Update the canonical command endpoint and inspect type allowlists; do not
+   assume the compiler finds every semantic routing case.
+9. Add focused tests, build the Debug Standalone, and run CTest.
+10. Manually test order, bypass, state, sample-rate changes, and live edits.
 
-MYK Tracker has 16 fixed machine stacks. Each stack owns persistent machine
-instances and an ordered list of slots.
+Terminal instruments also need event queues, sample-offset distribution, note
+dispatch/release, source rendering, activity flags, and note descriptions.
 
-Important distinction:
+## The current machine model
 
-- A slot is a routing/chain entry.
-- A slot does not own a machine.
-- A slot references one of the stack’s fixed machine instances.
-
-Current stack-owned machines are:
-
-```text
-sampler
-wavetableSynth
-distortionFx
-delayFx
-channelStripFx
-filterFx
-```
-
-Shared bus machines are special:
+MYK Tracker has eight fixed machine stacks. A stack owns one persistent object
+for every supported stack-owned machine type. Its editable `slots` vector stores
+only routing/order state:
 
 ```text
-AuxSend1Fx -> auxBus1
-AuxSend2Fx -> auxBus2
+SlotState
+  id               stable identity, e.g. slot-7
+  type             CommandType
+  enabled          bypass state
+  sendLevelDb      gain before a serial effect or into an aux send
+  returnLevelDb    gain after a serial effect
 ```
 
-Notes enter a stack through `dispatchNoteThroughStack`. They walk the enabled
-slots in order:
+Moving serial effects or aux taps changes their order in the DSP walk but never
+moves or reconstructs a machine object. Terminal source audio is always mixed
+before that walk, regardless of where its terminal slot is displayed. Machine
+parameters therefore remain attached to the stack and type. Slot enabled
+states, including the fixed MOD enabled state, are recalled per sequence set;
+machine parameters are shared across sequence sets.
+
+### Current types
+
+| UI | Category | Ownership | Audio behavior |
+|---|---|---|---|
+| `MIDI` | terminal | no DSP object | emits external MIDI |
+| `WAVE` | terminal instrument | one per stack | mixes mono source audio |
+| `SAMPLER` | terminal instrument | one per stack | mixes mono sample audio |
+| `DRUM` | terminal instrument | one per stack | mixes six-engine mono drums |
+| `DIST` | serial effect | one per stack | transforms mono stack buffer |
+| `DELAY` | serial effect | one per stack | transforms mono buffer; drains tails when bypassed |
+| `CHSTR` | serial effect | one per stack | transforms mono stack buffer |
+| `FILTER` | serial/note-aware effect | one per stack | transforms mono audio and receives note timing |
+| `AUX1`, `AUX2` | parallel send slots | two shared global returns | copy mono send to stereo reverb buses |
+| `MOD` | fixed control block | one per stack | runs before sources; not a serial slot |
+
+The user-facing slot cycle is:
 
 ```text
-sequence note
-    -> dispatchNoteThroughStack
-        -> effect slots: pass through / retrigger filter chain
-        -> terminal slot: consume note
+MIDI → WAVE → SAMPLER → DRUM → DIST → DELAY → CHSTR → AUX1 → AUX2 → FILTER
 ```
 
-Audio is rendered per stack:
+`MOD` is permanently displayed above the slots and uses the pseudo-slot ID
+`mod-matrix`. It is not in the cycle and cannot be moved or removed.
+
+### Current audio path
 
 ```text
-stack sources
-    -> sampler
-    -> wavetable synth
-    -> effect slots in slot order
-    -> stack gain
-    -> shared aux buses
-    -> plugin output
+sequencer/audition note
+        |
+        +--> fixed MOD note/PITCH observation
+        |
+        +--> enabled terminal slot(s): MIDI / WAVE / SAMPLER / DRUM
+
+WAVE + SAMPLER + DRUM                    (mono stack buffer)
+        |
+        v
+ordered non-source slot walk             (mono)
+  serial effect: SEND -> effect -> RETURN
+  AUX slot: copy the signal at this point ----> shared stereo reverb
+        |
+        v
+stack gain -> stack scope/meter -> equal-power stack pan
+        |                                  (stereo from here)
+        +--------------------------+
+                                   v
+                         AUX return gain/balance/mute
+                                   |
+                                   v
+                         master gain/mute/meter
+                                   |
+                                   v
+                         host output and WAV recorder
 ```
 
-For audio-effect machines, the normal audio path is driven by:
+A new serial effect normally receives a one-channel buffer. It should still be
+correct for every channel JUCE supplies so the class remains reusable and tests
+can exercise stereo buffers. Do not make the entire stack stereo to implement a
+local effect.
 
-- `machineTraits(type).isAudioEffect`
-- `getMachineForStackType()`
-- `getAudioEffectForStackType()`
-- `refreshStackProcessingState()`
-- the effect-slot loop in `TrackerMainProcessor::processBlock()`
+## Choose the right extension type
 
-For terminal instruments, note routing must also be wired explicitly.
+### Serial audio effect
 
-## Machine decision table
+Use `AudioEffectMachine` when the machine changes existing audio in place and
+does not generate notes. It supplies final implementations of the generic
+prepare/release/process/note methods. Implement:
 
-Before editing code, decide and record these facts:
-
-```text
-Class name:
-Header file:
-Source file:
-CommandType name:
-CommandType value:
-State key:
-Short UI label:
-Long UI name:
-Base class:
-Audio-only effect?
-Terminal instrument?
-Shared bus machine?
-Sequence step command?
-Stack routable?
-Can be cycled into a slot?
-Slot cycle position:
-Send level supported?
-Return level supported?
-Clock-driven?
-Needs allNotesOff()?
-Needs custom machine detail page?
-MCP command name:
-Aliases:
+```cpp
+void prepareDsp(double sampleRate, int samplesPerBlock) override;
+void processAudioBuffer(juce::AudioBuffer<float>& buffer) override;
 ```
 
-For a normal new audio effect, typical answers are:
+Optionally override `clearTransientState()` for filters, delay lines, phase, or
+envelopes. Do not override the base class's final `prepareToPlay`,
+`releaseResources`, or `processBlock` methods.
 
-```text
-Base class: AudioEffectMachine
-Audio-only effect? yes
-Terminal instrument? no
-Shared bus machine? no
-Sequence step command? no
-Stack routable? yes
-Can be cycled into a slot? yes
-Slot cycle position: append at end
-Send level supported? yes
-Return level supported? yes
-Clock-driven? no
-Needs allNotesOff()? only if it has tails or active notes
-Needs custom machine detail page? no, if getUIBoxes() is enough
-```
+### Terminal instrument
 
-## Choosing the base class
+Derive directly from `MachineInterface` when the machine generates audio from
+notes. Use the existing sample-offset pipeline:
 
-### Audio-only effect
+- UI/control code queues a note for its stack.
+- `processBlock` distributes events into the current block as
+  `MachineScheduledNote` values.
+- The processor calls `scheduleBlockNotes()` before the instrument renders.
+- Rendering applies events at `sampleOffset`, not merely at the block edge.
+- Held keyboard audition arrives as explicit note-on/note-off events.
 
-Use:
+Preallocate voices and event storage. A disabled or idle terminal should do
+negligible work, while enabling it must not allocate or cold-initialize DSP in
+the callback.
 
-```text
-src/machines/AudioEffectMachine.h
-```
+### Note-aware effect
 
-This is the recommended path for most new machines.
+FILTER is both a serial effect and a consumer of scheduled note timing for its
+envelope. Treat this as a special case: the effect still renders in slot order,
+but processor dispatch must also deliver note events to it.
 
-`AudioEffectMachine` finalizes:
+### Shared bus or fixed block
 
-```text
-prepareToPlay()
-releaseResources()
-processBlock()
-handleIncomingNote()
-```
+Do not force these through the ordinary slot recipe:
 
-Subclasses implement:
+- AUX return machines are shared stereo processors with per-stack send slots.
+- MOD is a fixed pre-source generator with a compiled route matrix and
+  sequence-set-specific bypass.
 
-```text
-processAudioBuffer(juce::AudioBuffer<float>&)
-prepareDsp(double, int)
-```
+Adding another global bus or fixed block is a processor architecture change,
+not simply “one more effect.” Plan its ownership, state, UI identity, and signal
+position explicitly.
 
-and optionally:
+## The `MachineInterface` contract
 
-```text
-clearTransientState()
-allNotesOff()
-scheduleBlockNotes(...)
-setSecondsPerTick(...)
-handleClockTick(...)
-```
+Every machine provides:
 
-Rules:
+- preparation, release, transient reset, and audio/MIDI processing;
+- a column-major editor grid from `getUIBoxes()`;
+- note handling, even if the implementation returns `false`;
+- state serialization and restoration.
 
-- Do not override `prepareToPlay()` in an `AudioEffectMachine` subclass.
-- Do not override `releaseResources()` in an `AudioEffectMachine` subclass.
-- `prepareToPlay()` calls `prepareDsp()`, then `clearTransientState()`.
-- `releaseResources()` calls `clearTransientState()`.
-- `processBlock()` forwards to `processAudioBuffer()`.
-- `handleIncomingNote()` always returns `false` for audio effects.
-- If the machine has transient DSP state, override `clearTransientState()`.
-- If the machine uses a mutex, `clearTransientState()` should self-lock.
-- If the machine uses atomics, follow the existing scalar-parameter style.
+Optional hooks support:
 
-### Note-consuming terminal instrument
+- sample-offset block notes;
+- tracker tick duration and clock ticks;
+- `allNotesOff`;
+- learned note assignment;
+- add/remove rows;
+- transient file/popup UI;
+- wide-grid left/right navigation;
+- modulation block input;
+- text entry, backspace, cell clearing, and note shifting.
 
-Use `MachineInterface` directly, like:
+Implement only hooks your machine owns. Keep generic behavior generic.
 
-```text
-WavetableSynthMachine
-SuperSamplerProcessor
-```
+## Worked example: an efficient tremolo effect
 
-This path is more involved. The machine must handle:
+This example emphasizes the repository conventions rather than a particular
+tremolo sound. It uses a triangle LFO so there is no trigonometry in the sample
+loop.
 
-- incoming sequencer notes
-- sample-accurate scheduling
-- audio rendering
-- note-off and `allNotesOff()` cleanup
-- state persistence
-- UI cells
+### 1. Create the files
 
-Terminal machines also require processor routing changes. See “Advanced:
-terminal instruments”.
-
-### Shared bus machine
-
-Shared bus machines are larger changes. Examples:
-
-```text
-AuxSend1Fx
-AuxSend2Fx
-```
-
-They are not normal stack-owned machines. They require:
-
-- a shared bus member in `TrackerMainProcessor`
-- mapping in `getAuxBusForType()`
-- special parallel processing in `processBlock()`
-- shared state save/restore
-- UI and control-service treatment as a shared resource
-
-Only use this path when the machine must be shared across stacks.
-
-## Worked example: TremoloFx
-
-This example adds a simple audio-only tremolo effect.
-
-Planned names:
-
-```text
-Class: TremoloFxMachine
-Header: src/machines/TremoloFxMachine.h
-Source: src/machines/TremoloFxMachine.cpp
-CommandType: TremoloFx
-State key: "tremoloFx"
-Short label: "TREM"
-Long name: "tremolo"
-MCP name: "tremolo"
-MCP alias: "tremolo_fx"
-```
-
-### Step 1: Create the machine files
-
-Create:
-
-```text
-src/machines/TremoloFxMachine.h
-src/machines/TremoloFxMachine.cpp
-```
-
-Example header:
+`src/machines/TremoloFxMachine.h`:
 
 ```cpp
 #pragma once
 
-#include <array>
 #include <atomic>
-#include <string>
-#include <vector>
-
 #include <JuceHeader.h>
 
 #include "AudioEffectMachine.h"
@@ -289,35 +229,26 @@ Example header:
 class TremoloFxMachine final : public AudioEffectMachine
 {
 public:
-    TremoloFxMachine() = default;
-
+    std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext&) override;
+    void processAudioBuffer(juce::AudioBuffer<float>&) override;
     void clearTransientState() override;
-    std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
-    void processAudioBuffer(juce::AudioBuffer<float>& buffer) override;
-    void getStateInformation(juce::MemoryBlock& destData) override;
-    void setStateInformation(const void* data, int sizeInBytes) override;
+    void getStateInformation(juce::MemoryBlock&) override;
+    void setStateInformation(const void*, int) override;
 
 protected:
     void prepareDsp(double sampleRate, int samplesPerBlock) override;
 
 private:
-    static constexpr float kMinRateHz = 0.1f;
-    static constexpr float kMaxRateHz = 30.0f;
-    static constexpr float kMinDepth = 0.0f;
-    static constexpr float kMaxDepth = 1.0f;
-    static constexpr float kMinMix = 0.0f;
-    static constexpr float kMaxMix = 1.0f;
-
-    std::atomic<double> currentSampleRate { 44100.0 };
-    std::atomic<float> rateHz { 4.0f };
-    std::atomic<float> depth { 1.0f };
-    std::atomic<float> mix { 1.0f };
-
-    std::array<float, 2> phase {};
+    static constexpr float kDefaultRate = 4.0f;
+    static constexpr float kDefaultDepth = 0.5f;
+    std::atomic<double> sampleRate { 44100.0 };
+    std::atomic<float> rateHz { kDefaultRate };
+    std::atomic<float> depth { kDefaultDepth };
+    float phase = 0.0f;
 };
 ```
 
-Example source:
+`src/machines/TremoloFxMachine.cpp`:
 
 ```cpp
 #include "TremoloFxMachine.h"
@@ -328,1080 +259,578 @@ Example source:
 
 namespace
 {
-constexpr double kTremoloStateVersion = 1.0;
+constexpr int kStateVersion = 1;
+constexpr float kMinRate = 0.01f;
+constexpr float kMaxRate = 40.0f;
 }
 
-void TremoloFxMachine::prepareDsp(double sampleRate, int samplesPerBlock)
+void TremoloFxMachine::prepareDsp(double newRate, int samplesPerBlock)
 {
     juce::ignoreUnused(samplesPerBlock);
-    currentSampleRate.store(sanitizedSampleRate(sampleRate), std::memory_order_relaxed);
+    sampleRate.store(sanitizedSampleRate(newRate), std::memory_order_relaxed);
 }
 
 void TremoloFxMachine::clearTransientState()
 {
-    phase.fill(0.0f);
-}
-
-std::vector<std::vector<UIBox>> TremoloFxMachine::getUIBoxes(const MachineUiContext& context)
-{
-    juce::ignoreUnused(context);
-
-    std::vector<std::vector<UIBox>> boxes(2, std::vector<UIBox>(4));
-
-    auto makeValueCell = [](std::atomic<float>& target, float step, float minValue, float maxValue, int decimals)
-    {
-        return makeFloatCell(target.load(std::memory_order_relaxed), minValue, maxValue, decimals,
-            [&target, step, minValue, maxValue](int direction)
-            {
-                const float currentValue = target.load(std::memory_order_relaxed);
-                const float nextValue = juce::jlimit(minValue, maxValue, currentValue + step * static_cast<float>(direction));
-                target.store(nextValue, std::memory_order_relaxed);
-            });
-    };
-
-    boxes[0][0].kind = UIBox::Kind::TrackerCell;
-    boxes[0][0].text = "RATE";
-    boxes[1][0] = makeValueCell(rateHz, 0.5f, kMinRateHz, kMaxRateHz, 1);
-
-    boxes[0][1].kind = UIBox::Kind::TrackerCell;
-    boxes[0][1].text = "DEPTH";
-    boxes[1][1] = makeValueCell(depth, 0.05f, kMinDepth, kMaxDepth, 2);
-
-    boxes[0][2].kind = UIBox::Kind::TrackerCell;
-    boxes[0][2].text = "MIX";
-    boxes[1][2] = makeValueCell(mix, 0.05f, kMinMix, kMaxMix, 2);
-
-    return boxes;
+    phase = 0.0f;
 }
 
 void TremoloFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
 {
-    const float rateValue = rateHz.load(std::memory_order_relaxed);
-    const float depthValue = depth.load(std::memory_order_relaxed);
-    const float mixValue = mix.load(std::memory_order_relaxed);
-    const float sampleRateValue = static_cast<float>(currentSampleRate.load(std::memory_order_relaxed));
+    const float rate = rateHz.load(std::memory_order_relaxed);
+    const float amount = depth.load(std::memory_order_relaxed);
+    const float increment = rate / static_cast<float>(sampleRate.load(std::memory_order_relaxed));
 
-    const float phaseStep = juce::jlimit(0.0f, 0.25f, rateValue / juce::jmax(1.0f, sampleRateValue));
-
-    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    float currentPhase = phase;
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
     {
-        auto* samples = buffer.getWritePointer(channel);
-        float channelPhase = phase[static_cast<std::size_t>(juce::jlimit(0, 1, channel))];
-
-        for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
-        {
-            channelPhase += phaseStep;
-            if (channelPhase >= 1.0f)
-                channelPhase -= 1.0f;
-
-            const float cosine = std::cos(2.0f * juce::MathConstants<float>::pi * channelPhase);
-            const float gain = 1.0f - depthValue * 0.5f * (1.0f - cosine);
-            const float dry = samples[sampleIndex];
-            samples[sampleIndex] = juce::jmap(mixValue, dry, dry * gain);
-        }
-
-        phase[static_cast<std::size_t>(juce::jlimit(0, 1, channel))] = channelPhase;
+        const float triangle = 1.0f - 4.0f * std::abs(currentPhase - 0.5f);
+        const float unipolar = 0.5f * (triangle + 1.0f);
+        buffer.applyGain(sample, 1, (1.0f - amount) + amount * unipolar);
+        currentPhase += increment;
+        if (currentPhase >= 1.0f)
+            currentPhase -= 1.0f;
     }
+    phase = currentPhase;
+}
+```
+
+Load atomics once per block. If rate/depth changes need smoothing, add prepared
+fixed-state smoothers; do not allocate during the edit or callback.
+
+### 2. Build a column-major machine grid
+
+The outer vector is columns and the inner vector is rows:
+
+```cpp
+std::vector<std::vector<UIBox>> TremoloFxMachine::getUIBoxes(const MachineUiContext& context)
+{
+    juce::ignoreUnused(context);
+    std::vector<std::vector<UIBox>> cells(2, std::vector<UIBox>(2));
+
+    cells[0][0] = makeLabelCell("RATE");
+    cells[1][0] = makeFloatCell(rateHz.load(std::memory_order_relaxed),
+                                kMinRate, kMaxRate, 2,
+        [this](int direction)
+        {
+            const float old = rateHz.load(std::memory_order_relaxed);
+            rateHz.store(juce::jlimit(kMinRate, kMaxRate,
+                         old + 0.1f * static_cast<float>(direction)),
+                         std::memory_order_relaxed);
+        });
+    cells[1][0].onInsert = [this](double value)
+    {
+        rateHz.store(juce::jlimit(kMinRate, kMaxRate, static_cast<float>(value)),
+                     std::memory_order_relaxed);
+    };
+
+    cells[0][1] = makeLabelCell("DEP");
+    cells[1][1] = makeFloatCell(depth.load(std::memory_order_relaxed),
+                                0.0f, 1.0f, 2,
+        [this](int direction)
+        {
+            const float old = depth.load(std::memory_order_relaxed);
+            depth.store(juce::jlimit(0.0f, 1.0f,
+                        old + 0.05f * static_cast<float>(direction)),
+                        std::memory_order_relaxed);
+        });
+    cells[1][1].onInsert = [this](double value)
+    {
+        depth.store(juce::jlimit(0.0f, 1.0f, static_cast<float>(value)),
+                    std::memory_order_relaxed);
+    };
+    return cells;
+}
+```
+
+`UIBox` callbacks are used by the keyboard UI and generic MCP machine control.
+Labels and positions contribute to generated control IDs, so changing them can
+break an external controller even though there is no bespoke MCP schema.
+
+Use `MachineUi.h` helpers for normal labels, floats, toggles, Hz, and dB. Set
+`isDisabled`, `isActive`, value scales, and custom colors deliberately. A cell
+with no callback is presentation-only.
+
+### 3. Store versioned, validated state
+
+```cpp
+void TremoloFxMachine::getStateInformation(juce::MemoryBlock& destination)
+{
+    auto object = juce::DynamicObject::Ptr(new juce::DynamicObject());
+    object->setProperty("version", kStateVersion);
+    object->setProperty("rateHz", rateHz.load(std::memory_order_relaxed));
+    object->setProperty("depth", depth.load(std::memory_order_relaxed));
+    writeMachineStateJson(destination, juce::var(object.get()));
 }
 
-void TremoloFxMachine::getStateInformation(juce::MemoryBlock& destData)
+void TremoloFxMachine::setStateInformation(const void* data, int size)
 {
-    juce::DynamicObject::Ptr root = new juce::DynamicObject();
-    root->setProperty("version", kTremoloStateVersion);
-    root->setProperty("rateHz", rateHz.load(std::memory_order_relaxed));
-    root->setProperty("depth", depth.load(std::memory_order_relaxed));
-    root->setProperty("mix", mix.load(std::memory_order_relaxed));
-
-    writeMachineStateJson(destData, juce::var(root.get()));
-}
-
-void TremoloFxMachine::setStateInformation(const void* data, int sizeInBytes)
-{
-    const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid())
+    const auto object = parseMachineStateJson(data, size);
+    if (!object.isObject())
+    {
+        rateHz.store(kDefaultRate, std::memory_order_relaxed);
+        depth.store(kDefaultDepth, std::memory_order_relaxed);
+        clearTransientState();
         return;
+    }
 
-    const float rateValue = getFloatProperty(parsed, "rateHz", rateHz.load(std::memory_order_relaxed), kMinRateHz, kMaxRateHz);
-    const float depthValue = getFloatProperty(parsed, "depth", depth.load(std::memory_order_relaxed), kMinDepth, kMaxDepth);
-    const float mixValue = getFloatProperty(parsed, "mix", mix.load(std::memory_order_relaxed), kMinMix, kMaxMix);
-
-    rateHz.store(rateValue, std::memory_order_relaxed);
-    depth.store(depthValue, std::memory_order_relaxed);
-    mix.store(mixValue, std::memory_order_relaxed);
-
-    phase.fill(0.0f);
+    float restoredRate = static_cast<float>(object.getProperty("rateHz", kDefaultRate));
+    float restoredDepth = static_cast<float>(object.getProperty("depth", kDefaultDepth));
+    if (!std::isfinite(restoredRate)) restoredRate = kDefaultRate;
+    if (!std::isfinite(restoredDepth)) restoredDepth = kDefaultDepth;
+    rateHz.store(juce::jlimit(kMinRate, kMaxRate, restoredRate), std::memory_order_relaxed);
+    depth.store(juce::jlimit(0.0f, 1.0f, restoredDepth), std::memory_order_relaxed);
+    clearTransientState();
 }
 ```
 
-Notes:
+Use semantic defaults, not whatever value happens to be left in a reused
+machine. `setStateInformation()` is not called when the top-level machine blob
+is absent, so also provide a parameter-default reset and invoke it in processor
+restore before decoding the optional new entry (DRUM demonstrates this pattern).
+A malformed current song must not inherit tremolo settings from the song that
+was open before it. Machine state versions are exact: reject mismatched blobs
+rather than migrating them.
 
-- The UI grid is column-major: the outer vector is columns, each inner vector
-  is a column’s rows.
-- Labels are compact and uppercase.
-- `MachineUi.h` helpers only present cells; the adjust callback owns state
-  updates.
-- `MachineStateCodec.h` helpers validate and clamp persisted values.
-- `processAudioBuffer()` must not allocate, log, touch files, sleep, or take
-  per-sample locks.
+### 4. Add the source to CMake
 
-### Step 2: Add the source file to CMake
-
-Edit:
-
-```text
-CMakeLists.txt
-```
-
-Add the new `.cpp` to the plugin target’s machine source list, near the other
-machine sources:
+Add the `.cpp` under `target_sources(myk-tracker-plug PRIVATE ...)`:
 
 ```cmake
-target_sources(myk-tracker-plug
-    PRIVATE
-    ...
-    src/machines/FilterFxMachine.cpp
-    src/machines/TremoloFxMachine.cpp
-)
+src/machines/TremoloFxMachine.cpp
 ```
 
-Do not add legacy arpeggiator sources.
+Headers are included normally and do not have to be listed. If a focused test
+compiles the implementation directly, add it to that test's sources as well.
 
-### Step 3: Register the `CommandType`
+## Registering an ordinary stack machine
 
-Edit:
+Registration is deliberately explicit. Complete every applicable item.
 
-```text
-src/SequencerCommands.h
-```
+### 1. Append a stable `CommandType`
 
-Append the new type after the current last value. Do not renumber existing
-values.
-
-Current example:
+`CommandType` values are serialized in sequence rows and slot state. Never
+renumber, reorder, or reuse them. At the time of writing the final value is:
 
 ```cpp
-enum class CommandType : std::size_t {
-    MidiNote = 0,
-    Log = 1,
-    Sampler = 2,
-    LegacyArpeggiator = 3,
-    WavetableSynth = 4,
-    LegacyPolyArpeggiator = 5,
-    DistortionFx = 6,
-    DelayFx = 7,
-    ChannelStripFx = 8,
-    AuxSend1Fx = 9,
-    AuxSend2Fx = 10,
-    FilterFx = 11,
-    TremoloFx = 12,
-};
+DrumSynth = 16
 ```
 
-Rules:
+A new type would be appended with the next value, followed by an update to the
+single canonical `kLastCommandType` endpoint. Recheck the live enum before
+editing; do not trust this document as an allocator.
 
-- Never change an existing value.
-- Never reuse `LegacyArpeggiator` or `LegacyPolyArpeggiator`.
-- Prefer appending to preserve persisted integer compatibility.
-- After appending, search for hard-coded upper bounds such as
-  `CommandType::FilterFx` and update the ones that assume it is the last value.
+### 2. Add centralized traits
 
-Important places to check:
-
-```text
-src/TrackerMainUI.cpp
-src/TrackerMainProcessor.cpp
-src/SequencerCommands.h
-src/SequencerCommands.cpp
-src/TrackerControlService.cpp
-```
-
-A hard-coded upper bound is a problem when it is used to mean “last known
-command type”, not when it specifically refers to the filter machine.
-
-### Step 4: Add machine traits
-
-Edit:
-
-```text
-src/SequencerCommands.h
-machineTraits(CommandType)
-```
-
-For a normal audio effect appended to the slot cycle:
+Add a `machineTraits()` case. A tremolo is an audio effect, is not a sequencer
+step command, is stack-routable, and has a slot-cycle index:
 
 ```cpp
-case CommandType::TremoloFx: return { "TREM", "tremolo", true, false, true, 9 };
+case CommandType::TremoloFx:
+    return { "TREM", "tremolo", true, false, true, 10 };
 ```
 
-Field meanings:
+Append it to `kSlotCycleTypes` and update that array's declared size. Traits are
+consumed by the processor, editor, renderer descriptions, and control service;
+avoid duplicating classification elsewhere.
 
-```text
-shortLabel       stack-grid label
-longName         detail/MCP-facing name
-isAudioEffect    true for audio-only stack effects
-isStepCommandType true only for sequence step commands
-isStackRoutable  true for machines that can route notes through a stack
-slotCycleIndex   index in kSlotCycleTypes, or -1 if not cycleable
-```
+### 3. Add persistent ownership
 
-For a non-cycleable helper type, use:
-
-```cpp
-case CommandType::TremoloFx: return { "TREM", "tremolo", true, false, true, -1 };
-```
-
-and do not add it to `kSlotCycleTypes`.
-
-### Step 5: Update slot cycling
-
-If the new machine can be cycled into a stack slot, edit:
-
-```text
-src/SequencerCommands.h
-kSlotCycleTypes
-```
-
-Append it at the end for the least disruptive change:
-
-```cpp
-constexpr std::array<CommandType, 10> kSlotCycleTypes = {
-    CommandType::MidiNote,
-    CommandType::WavetableSynth,
-    CommandType::Sampler,
-    CommandType::DistortionFx,
-    CommandType::DelayFx,
-    CommandType::ChannelStripFx,
-    CommandType::AuxSend1Fx,
-    CommandType::AuxSend2Fx,
-    CommandType::FilterFx,
-    CommandType::TremoloFx
-};
-```
-
-If inserting in the middle:
-
-- update the array size
-- update every affected `slotCycleIndex`
-- manually verify the UI slot cycle order
-- manually verify MCP `cycle_type` behavior
-
-### Step 6: Register a step command only if required
-
-Audio-only effects normally are not sequence step commands. For `TremoloFx`,
-skip this step.
-
-If the new machine is a step command:
-
-1. Set `isStepCommandType = true` in `machineTraits()`.
-2. Register a `Command` in:
-
-   ```text
-   src/SequencerCommands.cpp
-   CommandProcessor::initialiseCommands()
-   ```
-
-3. Insert it into both command lookup structures used by the sequencer.
-4. Update any persisted-step validation that rejects unknown or non-step
-   command types.
-
-`CommandProcessor::getCommand()` asserts that a command exists, so a step
-command type must be fully registered.
-
-### Step 7: Add machine ownership to `MachineStack`
-
-Edit:
-
-```text
-src/TrackerMainProcessor.h
-```
-
-Include the new machine header if the processor header does not already get it
-transitively.
-
-Add a member to `MachineStack`:
+In `TrackerMainProcessor::MachineStack`:
 
 ```cpp
 std::unique_ptr<TremoloFxMachine> tremoloFx;
 ```
 
-Add the machine to `forEachMachine()`:
+Then update:
+
+- the forward declaration/include;
+- `initialiseMachines()` construction;
+- `MachineStack::forEachMachine()`;
+- `getMachineForStackType()`;
+- `getMachineCount()`;
+- `stackMachineStateEntries()` and its `std::array` size.
+
+The state key becomes part of saved files:
 
 ```cpp
-template <typename F>
-void forEachMachine(F&& f)
-{
-    f(*sampler);
-    f(*wavetableSynth);
-    f(*distortionFx);
-    f(*delayFx);
-    f(*channelStripFx);
-    f(*filterFx);
-    f(*tremoloFx);
-}
+{ "tremoloFx", stack.tremoloFx.get() }
 ```
 
-This is required so the machine receives:
+Keep it stable after release.
 
-```text
-setSecondsPerTick()
-prepareToPlay()
-releaseResources()
-allNotesOff()
-```
+### 4. Make processor switches exhaustive
 
-### Step 8: Construct the machine
-
-Edit:
-
-```text
-src/TrackerMainProcessor.cpp
-TrackerMainProcessor::initialiseMachines()
-```
-
-Construct the machine for every stack:
-
-```cpp
-stack.tremoloFx = std::make_unique<TremoloFxMachine>();
-```
-
-All machines referenced by `forEachMachine()` must be constructed before any
-use.
-
-### Step 9: Map type to machine
-
-Edit:
-
-```text
-src/TrackerMainProcessor.cpp
-TrackerMainProcessor::getMachineForStackType()
-```
-
-Add:
-
-```cpp
-case CommandType::TremoloFx: return stack.tremoloFx.get();
-```
-
-The const overload forwards to the non-const overload, so one case is usually
-enough.
-
-### Step 10: Verify audio-effect lookup
-
-For audio effects, check:
-
-```text
-TrackerMainProcessor::getAudioEffectForStackType()
-```
-
-It should work once:
-
-- `machineTraits(type).isAudioEffect` is true
-- `getMachineForStackType()` returns the new machine
-- the machine inherits `AudioEffectMachine`
-
-No extra cast table is normally needed.
-
-### Step 11: Add state persistence entry
-
-Edit:
-
-```text
-src/TrackerMainProcessor.h
-src/TrackerMainProcessor.cpp
-TrackerMainProcessor::stackMachineStateEntries()
-```
-
-Increase the array size in both the declaration and definition.
-
-Example header:
-
-```cpp
-static std::array<std::pair<const char*, MachineInterface*>, 7> stackMachineStateEntries(MachineStack& stack);
-```
-
-Example definition:
-
-```cpp
-std::array<std::pair<const char*, MachineInterface*>, 7> TrackerMainProcessor::stackMachineStateEntries(MachineStack& stack)
-{
-    std::array<std::pair<const char*, MachineInterface*>, 7> entries;
-    entries[0] = { "sampler", stack.sampler.get() };
-    entries[1] = { "wavetableSynth", stack.wavetableSynth.get() };
-    entries[2] = { "distortionFx", stack.distortionFx.get() };
-    entries[3] = { "delayFx", stack.delayFx.get() };
-    entries[4] = { "channelStripFx", stack.channelStripFx.get() };
-    entries[5] = { "filterFx", stack.filterFx.get() };
-    entries[6] = { "tremoloFx", stack.tremoloFx.get() };
-    return entries;
-}
-```
-
-State rules:
-
-- The state key is part of the persisted plugin state format.
-- Old saved states may not contain the new key.
-- Missing state must restore to defaults.
-- Missing fields must use safe defaults.
-- Invalid values must be clamped or ignored.
-- Do not depend on new fields being present in old state.
-
-### Step 12: Check processing-state refresh
-
-Check:
-
-```text
-src/TrackerMainProcessor.cpp
-TrackerMainProcessor::refreshStackProcessingState()
-```
-
-For a normal audio effect, the existing `isAudioEffectType()` path should mark
-the stack as having an audio path.
-
-Add special logic only if the machine needs:
-
-- a dedicated processing flag
-- special tail handling
-- special block-note scheduling
-- disabled-slot drain behavior
-
-For example, `DelayFx` has special disabled-tail behavior. A simple tremolo
-does not.
-
-### Step 13: Wire note dispatch behavior
-
-Edit:
-
-```text
-src/TrackerMainProcessor.cpp
-TrackerMainProcessor::dispatchNoteThroughStack()
-```
-
-For a normal audio-effect slot, add the new type to the existing audio-effect
-case group:
-
-```cpp
-case CommandType::DistortionFx:
-case CommandType::DelayFx:
-case CommandType::ChannelStripFx:
-case CommandType::AuxSend1Fx:
-case CommandType::AuxSend2Fx:
-case CommandType::FilterFx:
-case CommandType::TremoloFx:
-    enqueueStackNote(filterEvents, stackIndex, note, velocity, durInTicks);
-    break;
-```
-
-This matches the current behavior where notes passing through stack effect
-slots can retrigger the stack filter chain.
-
-If the new effect should not participate in that behavior, use a different
-case and document why.
-
-### Step 14: Clock wiring, only if needed
-
-If the machine is clock-driven, register it in:
-
-```text
-src/TrackerMainProcessor.cpp
-TrackerMainProcessor::configureClockListeners()
-```
-
-Only delay machines currently use `ClockAbs`. Treat clock-driven machines as a
-special case and verify:
-
-- registration
-- unregistration
-- event re-entry through the correct slot
-- behavior when the machine is disabled or removed
-
-A sample-rate-based tremolo does not need clock wiring.
-
-### Step 15: UI integration
-
-Edit:
-
-```text
-src/TrackerMainUI.cpp
-```
-
-If the machine can use the generic machine detail page, add it to:
-
-```text
-isSimpleMachineDetail()
-```
-
-Example:
-
-```cpp
-bool isSimpleMachineDetail(CommandType type)
-{
-    return type == CommandType::DistortionFx
-        || type == CommandType::DelayFx
-        || type == CommandType::FilterFx
-        || type == CommandType::ChannelStripFx
-        || type == CommandType::AuxSend1Fx
-        || type == CommandType::AuxSend2Fx
-        || type == CommandType::MidiNote
-        || type == CommandType::TremoloFx;
-}
-```
-
-Also update any enum-range logic that assumes the old last command type. For
-example, `describeStackCursorAction()` currently walks command types up to a
-hard-coded upper bound. Extend that upper bound to include the new type.
-
-If the machine needs a custom detail page, add a dedicated branch in
-`TrackerMainUI.cpp` instead of using `isSimpleMachineDetail()`.
-
-The stack grid label comes from:
-
-```text
-machineTraits(type).shortLabel
-```
-
-so do not hard-code the new label in the editor.
-
-### Step 16: MCP / control-service name
-
-Edit:
-
-```text
-src/TrackerControlService.cpp
-commandTypeFromName()
-```
-
-Add the canonical name and any useful aliases:
-
-```cpp
-{ "tremolo", CommandType::TremoloFx },
-{ "tremolo_fx", CommandType::TremoloFx },
-```
-
-Direct machine control usually works generically once:
-
-- the slot type resolves through `getMachineForStackType()`
-- the machine returns correct `UIBox` cells
-- the `UIBox` callbacks work
-- the control service can resolve the stable slot id
-
-A new MCP tool is usually not required unless the machine introduces a new
-command category.
-
-If the new machine changes advertised command names, resources, or control
-scopes, update:
-
-```text
-TrackerControlService::capabilities()
-```
-
-and any MCP tool descriptions that list machine names.
-
-### Step 17: Documentation
-
-Update user-facing docs only when the change is user-visible.
-
-Update:
-
-```text
-README.md
-```
-
-if the change affects:
-
-- slot cycle order
-- machine page behavior
-- machine detail page behavior
-- keyboard controls
-- build commands or artifact locations
-
-Update:
-
-```text
-AGENTS.md
-```
-
-if the change affects architecture invariants such as:
-
-- stack-owned machine list
-- slot-cycle order
-- `AudioEffectMachine` lifecycle
-- `allNotesOff` behavior
-- state compatibility rules
-
-Do not update docs for internal-only refactors.
-
-## Advanced: terminal instruments
-
-Use this path when the machine consumes notes and generates audio, like:
-
-```text
-WavetableSynthMachine
-SuperSamplerProcessor
-```
-
-A terminal instrument usually requires all of the normal machine steps plus:
-
-1. `MachineInterface` implementation, not `AudioEffectMachine`.
-2. Note handling:
-   - `handleIncomingNote()`
-   - `scheduleBlockNotes()`
-   - `processBlock()`
-3. Stack note queue or event pipeline.
-4. Terminal-route recognition in:
-
-   ```text
-   TrackerMainProcessor::dispatchNoteThroughStack()
-   ```
-
-5. Note-dispatch switch behavior in:
-
-   ```text
-   TrackerMainProcessor::dispatchNoteThroughStack()
-   ```
-
-6. A processing flag in `MachineStack` if the source needs special activation.
-7. Source processing in:
-
-   ```text
-   TrackerMainProcessor::processBlock()
-   ```
-
-8. `refreshStackProcessingState()` logic for the new source.
-9. `allNotesOff()` cleanup.
-10. Step-command registration if sequence rows can store the machine directly.
-
-Terminal instruments are more likely to need:
-
-- sample-accurate note scheduling
-- per-stack note buffers
-- note-off tracking
-- transport stop/reset behavior
-- state for learned notes, sample selection, or synthesis patches
-
-Treat terminal instruments as a separate design review before implementation.
-
-## Advanced: shared bus machines
-
-Use this path when the machine is shared by many stacks, like aux reverb.
-
-Shared bus machines require:
-
-- a shared bus member in `TrackerMainProcessor`
-- construction in `initialiseMachines()`
-- mapping in:
-
-  ```text
-  getMachineForStackType()
-  getAuxBusForType()
-  ```
-
-- parallel bus processing in:
-
-  ```text
-  TrackerMainProcessor::processBlock()
-  ```
-
-- shared state save/restore
-- UI treatment that makes shared ownership clear
-- MCP naming that makes shared ownership clear
-
-Shared bus machines are not stack-owned. Do not add them to `MachineStack`
-unless the design explicitly changes.
-
-## Real-time and state rules
-
-### Audio-thread rules
-
-The audio path is real-time-sensitive.
-
-In `processBlock()`, `processAudioBuffer()`, and related audio-path helpers:
-
-- Do not allocate.
-- Do not log.
-- Do not touch files.
-- Do not use network/OSC.
-- Do not sleep.
-- Do not use contended synchronization per sample.
-- Do not create or destroy DSP objects.
-- Allocate buffers and prepare DSP in `prepareToPlay()` / `prepareDsp()`.
-
-Acceptable patterns:
-
-- Atomics for simple scalar parameters.
-- One uncontended mutex lock per block to snapshot parameters, as done by
-  `FilterFxMachine`.
-- Preallocated vectors and buffers.
-- Lock-free per-sample processing after a per-block snapshot.
-
-If using a mutex:
-
-- `clearTransientState()` should acquire the lock itself.
-- Call sites that already hold the lock must not call `clearTransientState()`
-  directly; they should call the private reset helper instead.
-
-### State rules
-
-Persisted state must remain loadable.
-
-Required behavior:
-
-- New state loads in the new build.
-- Old state missing the new machine key loads with defaults.
-- Old state missing new machine fields loads with defaults.
-- Invalid numeric values are clamped.
-- Corrupt or non-JSON state does not crash.
-- Slot ids remain stable.
-- Existing `CommandType` values keep their numeric values.
-
-Machine state rules:
-
-- Each machine serializes its own versioned JSON.
-- Use `MachineStateCodec.h` helpers.
-- Use `juce::var::isVoid()` for parsed-state emptiness checks.
-- Keep property names stable once shipped.
-- Add new fields additively.
-- Increment a state version only when adding a real migration need.
-
-## Verification checklist
-
-Run the narrowest relevant build first. For a new machine, build both plugin
-formats when available:
+Search for the canonical endpoint and for switches over `CommandType`:
 
 ```sh
+rg -n 'kLastCommandType|switch \(.*CommandType|switch \(type\)|switch \(slot' src tests
+```
+
+Review every result. Common sites include:
+
+- persisted command validation in `Sequencer.cpp` and processor restore;
+- `TrackerMainUI` label/type iteration;
+- `TrackerControlService` command-name parsing and command validation;
+- aux-bus/type lookup switches;
+- current slot-order validation;
+- note description and held-note routing;
+- stack state normalization;
+- performance-stage classification.
+
+The canonical endpoint handles numeric range checks. Explicit cases that
+describe DRUM routing or behavior remain DRUM-specific.
+
+For a normal effect:
+
+- `machineTraits(type).isAudioEffect` makes it eligible for serial processing.
+- `getMachineForStackType` must return an `AudioEffectMachine` object.
+- `refreshStackProcessingState` already treats enabled audio-effect traits as an
+  audio path, but still inspect it if the machine has special activity flags or
+  modulation destinations.
+- `dispatchNoteThroughStack` must have an exhaustive pass-through case even if
+  the effect ignores notes.
+- the process timing switch should give it a meaningful performance stage
+  rather than silently attributing it to another effect.
+
+### 5. Decide whether it is a step command
+
+An ordinary effect is not a step command. Do not add a `Command` merely because
+the effect is stack-routable.
+
+Only add `CommandProcessor` registration if a sequence row can explicitly store
+and execute that command. Current examples include note terminals and control
+commands such as AUX toggles and filter cutoff. A new step command must preserve
+the four-value row layout and be accepted by restore/API validation.
+
+### 6. UI and MCP behavior
+
+The Machine page gets controls from `getUIBoxes()`. For a simple effect, add its
+type to any detail-page allowlist/special rendering switch in `TrackerMainUI`.
+Do not hard-code a second parameter grid in the editor.
+
+Direct MCP controls are generated from the same cells. Usually no new MCP tool
+is needed. If users/API calls need to name the new type when editing a stack or
+step, add aliases to `commandTypeFromName()` in `TrackerControlService.cpp` and
+update exposed capabilities/documentation.
+
+## Adding a terminal instrument
+
+A terminal needs everything above plus a sample-accurate note path. Follow WAVE
+or DRUM end to end.
+
+### Processor storage
+
+Add, reserve, and clear:
+
+- a pending/scratch `NoteEventQueue`;
+- one `std::vector<MachineScheduledNote>` per stack;
+- a `*ProcessingActive` flag when useful.
+
+Reserve capacities before playback. Event collection and stable ordering in
+the callback must not grow storage.
+
+### Dispatch and release
+
+Update all of:
+
+- `dispatchNoteThroughStack()` terminal detection and enqueue;
+- `beginHeldNote()` and `endHeldNote()`;
+- `allNotesOff()` and `allNotesOffForStack()`;
+- current-block distribution;
+- source rendering in `processBlock()`;
+- `describeStepNote()` if the instrument maps notes to named sounds;
+- `refreshStackProcessingState()`.
+
+Define whether more than one enabled terminal may respond. The current walk can
+trigger each enabled terminal it encounters. A disabled terminal still counts
+as an explicit terminal route for fallback decisions, preventing accidental
+external MIDI output.
+
+### Timing and gates
+
+`MachineScheduledNote` includes sample offset, MIDI note, velocity, duration in
+tracker ticks, and explicit note-off. Use `setSecondsPerTick()` when converting
+duration to samples. Preserve fractional durations used by HALF/QUARTER
+performance gating, and clamp any resulting positive gate to at least one
+sample.
+
+If the instrument is normally one-shot, explicitly define how note-off,
+retrigger, and `allNotesOff` behave. DRUM supports per-engine one-shot/gated
+behavior; SAMPLER has special performance deadlines; WAVE uses envelope release.
+
+### CPU behavior
+
+Voice count must control actual work. A preallocated maximum is good, but do not
+process every inactive voice. Idle engines should exit cheaply after envelope
+and filter tails finish. Changing a voice count or enable flag must not allocate
+or initialize large resources in the callback.
+
+## Adding a modulation destination
+
+This is separate from adding a machine control. Inspect:
+
+- `src/ModulationTypes.h`
+- `ModulationMatrixMachine.*`
+- `TrackerMainProcessor::refreshStackProcessingState()`
+- the destination consumer (WAVE, FILTER, SAMPLER, DELAY, or stack mixer)
+
+The matrix uses fixed source/destination identifiers, preallocated block
+buffers, compiled nonzero routes, and active-destination masks. A new
+destination generally requires:
+
+1. Adding a destination ID and updating the tracker schema version.
+2. Defining its full-scale mapping and clamp/wrap behavior.
+3. Updating labels and installed-machine visibility masks.
+4. Extending route storage and bumping the exact machine-state version.
+5. Producing the destination without allocation or route discovery.
+6. Applying it at the documented point in the target DSP.
+7. Testing positive/negative/full depth, summing, bounds, bypass, and state round trips.
+
+Use lookup/interpolation for expensive audio-rate transforms. Preserve the
+unmodulated fast path. Trigger sources (NOTE/CLK) may have different semantics
+from continuous LFO/PITCH sources, so define both.
+
+Do not expose a destination merely because a parameter exists. The correct
+application point matters—for example filter cutoff modulation is applied
+before its envelope, delay-time modulation is ignored in step-synced mode, and
+stack pan is applied at the mono-to-stereo mixer boundary.
+
+## Shared aux and fixed-block changes
+
+### Shared aux return
+
+An aux send slot does not own the reverb it names. The processor owns two
+`SharedAuxBus` objects containing a stereo input buffer, one `AuxReverbMachine`,
+gain, balance pan, mute, and stereo meters. Adding another bus means changing:
+
+- processor ownership and preparation;
+- per-block stereo input clearing;
+- stack send routing;
+- return processing and final sum;
+- Mixer columns and `MachineHost` accessors;
+- current-version persistence and safe malformed-input handling;
+- all editor/control stubs and tests.
+
+### Fixed MOD-style block
+
+A fixed block needs a stable pseudo-slot ID, dedicated Machine-page row,
+per-sequence-set enabled recall if applicable, explicit pre/post position in the
+callback, and generic control discovery. It should not be inserted into
+`kSlotCycleTypes` unless it truly becomes reorderable serial DSP.
+
+## State and format versions
+
+There are three related formats:
+
+1. Each machine emits a versioned JSON blob.
+2. `TrackerMainProcessor` Base64-encodes those blobs into its JSON document,
+   stores that JSON in an APVTS `ValueTree`, and writes the tree as XML.
+3. Explicit `WITH AUDIO` save wraps that same XML as `state.xml` in a ZIP with
+   `manifest.json` and 24-bit FLAC sampler assets. The extension remains
+   `.myktracker`.
+
+`getStateInformation()` must remain lightweight and path-based because hosts,
+automatic standalone state, MCP state, and `STATE ONLY` saves use it. Do not
+embed sample buffers in ordinary plug-in state.
+
+Current-format rules:
+
+- the top-level tracker JSON must contain the exact current `stateVersion`;
+- each machine blob must contain its exact current version;
+- reject unversioned or mismatched state without partially mutating the song;
+- change the schema version when persisted enum values or layouts change;
+- clamp restored numbers and reject non-finite values;
+- validate external data in Release, not only with `jassert`;
+- reset transient DSP separately from parameters;
+- do not serialize phases, meter values, UI glows, or other transient state
+  unless the feature specifically requires it.
+
+Test a current-version round trip, malformed current data, and rejection of an
+unversioned document.
+
+## Real-time and concurrency checklist
+
+Before considering DSP complete, answer all of these:
+
+- Does `processAudioBuffer` or `processBlock` allocate, resize, sort using new
+  storage, acquire a mutex, log, read a file, or call the message thread?
+- Are lookup tables, delay buffers, wavetables, voices, events, and scratch
+  buffers prepared before playback?
+- Are atomics loaded once per block where possible?
+- Are expensive coefficients recalculated only when their inputs change?
+- Does disabled/idle state skip meaningful work without causing a surprise
+  allocation on re-enable?
+- Are deliberate delay/reverb/release tails preserved?
+- Can a UI edit race with a vector/index the callback is traversing?
+- Are all indices validated before `operator[]`?
+- Does sample-rate/block-size change rebuild all dependent state safely?
+- Do `allNotesOff`, transport reset, held-key release, and route changes clean up
+  every pending queue?
+
+The current stack buffer is mono. Aux returns and the master are stereo. Be
+explicit about the channel domain in tests.
+
+## UI and control checklist
+
+- Return `cells[column][row]`, not row-major data.
+- Keep labels short, uppercase, and legible at low resolution.
+- Give selectable cells at least one supported callback.
+- Support `[`/`]` through `onAdjust`; use `onInsert` for direct numeric entry
+  when the parameter should accept it.
+- Clamp inside callbacks, not only in rendering.
+- Use `width` for long values instead of adding fake cells.
+- Avoid setting maximum glow merely because a page was opened. Dynamic glow
+  should reflect real activity and disappear on bypass.
+- Cache waveform/envelope geometry when its source state is unchanged.
+- If the machine has a horizontally windowed editor, implement
+  `navigateLeft()`/`navigateRight()` and keep cursor coordinates valid.
+- Check generated machine controls through MCP after changing labels/layout.
+
+## Tests and verification
+
+### Focused automated tests
+
+Create a focused JUCE console target when the behavior is substantial. Current
+examples are:
+
+- `sequence-read-head-tests`
+- `sampler-tuning-tests`
+- `modulation-matrix-tests`
+- `wavetable-synth-tests`
+- `drum-synth-tests`
+- `drum-processor-tests`
+
+Good machine tests cover:
+
+- defaults and parameter bounds;
+- bracket adjustment and numeric insertion;
+- deterministic audio or state transitions;
+- note-on/off/retrigger/all-notes-off where applicable;
+- sample-rate and block-size changes;
+- bypass/idle behavior and tails;
+- current-version state round trip, schema rejection, and malformed input;
+- modulation application and inactive fast path;
+- no callback allocation where the harness can observe it.
+
+Run:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --target myk-tracker-plug_Standalone -j2
+ctest --test-dir build --output-on-failure
+```
+
+Build VST3 when processor/state/host behavior changes:
+
+```sh
 cmake --build build --target myk-tracker-plug_VST3 -j2
 ```
 
-Run sequence tests when touching:
+### Manual audio/UI checks
 
-```text
-src/Sequencer.cpp
-src/SequencerCommands.cpp
-src/SequencerCommands.h
-read-head behavior
-step-command validation
-```
+At minimum:
 
-Command:
+1. Add, remove, move, enable, and bypass the machine.
+2. Verify effect order audibly.
+3. Edit every parameter while stopped and playing.
+4. Try more than one sample rate and buffer size.
+5. Exercise note-off, retrigger, route changes, transport reset, and tails.
+6. Save/reload current state and confirm an unversioned state is rejected.
+7. Switch pages repeatedly, resize, zoom, and scroll wide grids.
+8. Confirm the machine costs little while disabled/idle and does not spike when
+   its detail page opens.
 
-```sh
-cmake --build build --target sequence-read-head-tests -j2
-ctest --test-dir build
-```
+### MCP checks
 
-Even when only adding an audio effect, running the sequence tests is a cheap
-sanity check because `CommandType` and traits affect command validation.
+With the Debug Standalone running:
 
-### Manual checks
+1. Check `/health`.
+2. Call modern `server/discover` and `tools/list`.
+3. Read `myktracker://view` or use `tracker_get_state`.
+4. Query `scope: "machine_controls"`.
+5. Address the new control by `stackId`, persisted `slotId`, and `controlId`.
+6. Adjust or set it without changing the visible GUI cursor.
+7. Use `tracker_screenshot` to inspect the active page if visual behavior changed.
 
-For a new slot machine:
-
-- Cycle a stack slot into the new machine type.
-- Add, remove, move up, move down, enable, and disable the slot.
-- Verify the short label appears correctly in the stack grid.
-- Verify the machine detail page renders the `getUIBoxes()` cells.
-- Adjust at least one parameter while paused and while playing.
-- Verify send and return levels behave correctly if supported.
-- Verify the machine processes audio when enabled.
-- Verify disabling the machine stops normal processing.
-- Verify notes route correctly through the stack.
-- Verify `allNotesOff` clears tails or active notes if applicable.
-- Verify transport stop/reset does not leave stuck audio.
-- Save state, reload it, and verify machine parameters remain.
-- Load an old state without the new machine key and verify defaults.
-- Load an old state without the new slot type and verify no slot is created
-  unless the user adds it.
-- Check MCP discovery/control if `commandTypeFromName()` or capabilities
-  changed.
-
-### Real-time audit
-
-Before considering the machine done, audit the audio path:
-
-```text
-No new heap allocation in processBlock or processAudioBuffer.
-No new DBG/log calls in the audio path.
-No file, network, or OSC access in the audio path.
-No sleeps or waits in the audio path.
-No per-sample mutex locking.
-Buffers allocated in prepareToPlay/prepareDsp where possible.
-Transient state cleared on prepare and release.
-allNotesOff clears any active notes or tails.
-```
-
-### State audit
-
-```text
-New save contains the new machine key.
-Old save without the new machine key loads.
-Missing fields restore to defaults.
-Out-of-range values are clamped.
-Corrupt machine JSON is ignored safely.
-Slot id remains stable across save/load.
-CommandType values were not renumbered.
-```
-
-## Agent runbook
-
-Use this runbook for a new stack-owned audio-effect machine.
-
-### 0. Inspect the repository
-
-```sh
-git status --short
-git branch --show-current
-```
-
-Preserve unrelated local changes. Do not stage or commit unless explicitly
-instructed.
-
-### 1. Locate integration points
-
-Useful greps:
-
-```sh
-rg "CommandType::FilterFx" src
-rg "kSlotCycleTypes|machineTraits" src
-rg "forEachMachine|initialiseMachines|getMachineForStackType" src
-rg "stackMachineStateEntries" src
-rg "refreshStackProcessingState|getAudioEffectForStackType" src
-rg "dispatchNoteThroughStack" src
-rg "isSimpleMachineDetail|describeStackCursorAction" src/TrackerMainUI.cpp
-rg "commandTypeFromName" src/TrackerControlService.cpp
-rg "target_sources\\(myk-tracker-plug" CMakeLists.txt
-```
-
-### 2. Create the machine
-
-Create:
-
-```text
-src/machines/<MachineName>.h
-src/machines/<MachineName>.cpp
-```
-
-For audio effects:
-
-- inherit `AudioEffectMachine`
-- implement `processAudioBuffer()`
-- implement `prepareDsp()`
-- implement `getUIBoxes()`
-- implement `getStateInformation()`
-- implement `setStateInformation()`
-- implement `clearTransientState()` if there is transient DSP state
-- implement `allNotesOff()` if there are tails or active notes
-
-Do not override final `AudioEffectMachine` lifecycle methods.
-
-### 3. Add CMake source
-
-Add:
-
-```text
-src/machines/<MachineName>.cpp
-```
-
-to:
-
-```text
-target_sources(myk-tracker-plug ...)
-```
-
-### 4. Register type metadata
-
-In:
-
-```text
-src/SequencerCommands.h
-```
-
-- Append a new `CommandType` value.
-- Add a `machineTraits()` case.
-- If cycleable, append to `kSlotCycleTypes`.
-- If cycleable, set the correct `slotCycleIndex`.
-- If not cycleable, set `slotCycleIndex = -1`.
-
-### 5. Update hard-coded enum bounds
-
-Search for:
-
-```text
-CommandType::FilterFx
-```
-
-Update bounds that mean “last known command type”. Do not change uses that
-specifically mean the filter machine.
-
-### 6. Wire processor ownership
-
-In:
-
-```text
-src/TrackerMainProcessor.h
-```
-
-- Add the machine member to `MachineStack`.
-- Add the machine to `forEachMachine()`.
-
-In:
-
-```text
-src/TrackerMainProcessor.cpp
-```
-
-- Construct it in `initialiseMachines()`.
-- Add a `getMachineForStackType()` case.
-- Add a `stackMachineStateEntries()` entry and update the array size.
-- Add the type to the audio-effect case group in
-  `dispatchNoteThroughStack()` if it should behave like the other stack
-  effects.
-- Check `refreshStackProcessingState()` for special activation needs.
-- Check `processBlock()` for special scheduling or tail needs.
-
-### 7. Wire UI
-
-In:
-
-```text
-src/TrackerMainUI.cpp
-```
-
-- Add the type to `isSimpleMachineDetail()` if using the generic detail page.
-- Update enum-range logic such as `describeStackCursorAction()`.
-- Add a custom detail branch only if the generic page is insufficient.
-
-### 8. Wire control service
-
-In:
-
-```text
-src/TrackerControlService.cpp
-```
-
-- Add the machine name and aliases to `commandTypeFromName()`.
-- Update capabilities or tool descriptions if machine names are advertised.
-
-### 9. Build and test
-
-```sh
-cmake --build build --target myk-tracker-plug_Standalone -j2
-cmake --build build --target myk-tracker-plug_VST3 -j2
-cmake --build build --target sequence-read-head-tests -j2
-ctest --test-dir build
-```
-
-Report exactly which builds and tests were run. Do not say tests passed
-without running them.
-
-### 10. Do not commit
-
-Unless explicitly instructed:
-
-- Do not run `git add`.
-- Do not run `git commit`.
-- Do not use `git add -A`.
-- Do not use `git commit -a`.
-- Leave `build/`, `libs/JUCE`, and unrelated user changes untouched.
+Do not add a bespoke MCP operation when `tracker_machine_control` already
+expresses the action.
 
 ## Common mistakes
 
 ### Renumbering `CommandType`
 
-This breaks persisted sequence rows and slot state.
+This corrupts the meaning of saved sequence rows and slots. Append only.
 
-### Forgetting `forEachMachine()`
+### Updating the enum but not its canonical endpoint
 
-The machine will not receive prepare, release, BPM, or `allNotesOff` updates.
+Numeric range checks use `kLastCommandType` and `kCommandTypeCount`. Update the
+endpoint when appending a type, then inspect explicit switches for routing and
+behavior changes.
 
-### Forgetting `stackMachineStateEntries()`
+### Forgetting `forEachMachine`
 
-The machine state will not be saved or restored.
+The machine then misses prepare, release, tick-duration, or all-notes-off style
+lifecycle operations.
 
-### Forgetting hard-coded enum upper bounds
+### Forgetting `stackMachineStateEntries`
 
-The new type may exist but UI descriptions, validation, or command handling
-may still stop at the old last type.
+The UI may work, but parameters silently disappear on save/load. Update the
+fixed `std::array` size too.
 
-### Overriding final `AudioEffectMachine` methods
+### Treating slots as owners
 
-This breaks the shared lifecycle:
+Reordering or deleting a slot must not destroy machine parameters. The stack
+owns persistent instances.
 
-```text
-prepareToPlay() -> prepareDsp() -> clearTransientState()
-releaseResources() -> clearTransientState()
-```
+### Making a serial effect stereo upstream
 
-### Double-locking in `clearTransientState()`
+Stacks are mono until mixer panning. Process the supplied channels correctly;
+do not double every source/effect merely to add stereo behavior.
 
-If `clearTransientState()` locks `stateMutex`, a caller that already holds
-`stateMutex` must not call it. Use a private unlocked reset helper instead.
+### Allocating on first use
 
-### Allocating in the audio path
+This creates exactly the live CPU surprise the architecture tries to avoid.
+Prepare maximum-capacity resources, then process only active voices/routes.
 
-Avoid vector growth, string construction, object creation, logging, file I/O,
-or lock contention in `processBlock()` / `processAudioBuffer()`.
+### Using UI coordinates as external identity
 
-### Assuming old state has the new fields
+Grid coordinates move. MCP uses stable slot IDs and generated machine-local
+control IDs; MOD uses `mod-matrix`.
 
-Old saved states are valid input. Missing keys and missing machines must
-restore safely.
+### Editing shared data without audio exclusion
 
-### Using row-major UI grids
+A bounds check does not cure a vector resize race. Use the processor's existing
+exclusive mutation path and keep the protected section small.
 
-Tracker machine UI grids are column-major:
+### Reintroducing arpeggiator machines
 
-```text
-outer vector = columns
-inner vector = rows for that column
-```
+Arpeggiation belongs to sequence read heads. Extend that system instead.
 
-### Hard-coding labels in the editor
+### Assuming a successful build is enough
 
-Use:
+DSP can compile while being silent, out of order, unrestorable, unreachable by
+MCP, or unsafe during live edits. Perform the relevant focused and manual checks.
 
-```text
-machineTraits(type).shortLabel
-machineTraits(type).longName
-```
+## Final implementation checklist
 
-### Adding a new MCP tool too early
-
-Most machines work with the existing generic machine-control path. Add a new
-tool only for a genuinely new command category.
-
-### Resurrecting legacy arpeggiators
-
-Do not add:
-
-```text
-src/machines/ArpeggiatorMachine.cpp
-src/machines/PolyArpeggiatorMachine.cpp
-```
-
-to the build, and do not extend legacy arpeggiator command types.
-
-## Stop conditions
-
-Stop and report if any of these are true:
-
-- The task requires renumbering an existing `CommandType`.
-- The task requires reusing a legacy arpeggiator value.
-- The task requires adding legacy arpeggiator sources to CMake.
-- The task requires changing the meaning of an existing persisted field.
-- The task requires incompatible saved-state migration.
-- The task requires allocation or blocking in the audio path.
-- The task requires changing `AudioEffectMachine` final lifecycle in a way
-  that breaks existing machines.
-- The task requires modifying `libs/JUCE`.
-- The task is really a shared bus redesign, not a normal stack machine.
-- The task requires changing slot identity rules.
-
-When stopping, report:
-
-```text
-What was completed.
-What blocked the work.
-Which files were touched.
-Which builds/tests were run.
-What decision is needed.
-```
+- [ ] Correct machine category and signal position chosen
+- [ ] Callback allocation/lock/file/log free
+- [ ] Parameters safe between UI and audio threads
+- [ ] Transient resources prepared and reset correctly
+- [ ] Column-major `UIBox` grid with normal controls
+- [ ] Exact-version, validated state with clean rejection on mismatch
+- [ ] Production `.cpp` listed in CMake
+- [ ] Stable `CommandType` appended
+- [ ] Traits and slot cycle updated
+- [ ] Stack ownership, construction, lifecycle, lookup, and state updated
+- [ ] Processing flags and special routing updated
+- [ ] Canonical command endpoint, restore allowlists, and switches audited
+- [ ] Terminal queues/dispatch/release/rendering added if applicable
+- [ ] Modulation visibility/state/consumer added if applicable
+- [ ] Generic MCP controls verified; aliases/docs updated if needed
+- [ ] Focused tests added and full CTest run
+- [ ] Debug Standalone built and manually auditioned
+- [ ] VST3 built when shared processor/state behavior changed
+- [ ] `README.md`, cheat sheet, and this tutorial updated as appropriate
+- [ ] Only intended source/document files staged

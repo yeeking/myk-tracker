@@ -617,7 +617,7 @@ void WavetableSynthMachine::setStateInformation(const void* data, int sizeInByte
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid())
+    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kStateVersion))
         return;
 
     const auto* obj = parsed.getDynamicObject();

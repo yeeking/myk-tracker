@@ -171,28 +171,9 @@ int main()
     require(restoredTuning.second == 75,
             "fine tuning survives state round-trip");
 
-    juce::ValueTree legacyPlugin("PluginState");
-    juce::ValueTree legacySampler("SamplerState");
-    juce::ValueTree legacyPlayer("Player");
-    legacyPlayer.setProperty("id", 7, nullptr);
-    legacyPlayer.setProperty("midiLow", 36, nullptr);
-    legacyPlayer.setProperty("midiHigh", 60, nullptr);
-    legacyPlayer.setProperty("gain", 1.0f, nullptr);
-    legacyPlayer.setProperty("filePath", {}, nullptr);
-    legacySampler.addChild(legacyPlayer, -1, nullptr);
-    legacyPlugin.addChild(legacySampler, -1, nullptr);
-
-    SuperSamplerProcessor legacyRestored;
-    const auto legacyState = serialiseValueTree(legacyPlugin);
-    legacyRestored.setStateInformation(legacyState.getData(), static_cast<int>(legacyState.getSize()));
-    const auto legacyTuning = firstPlayerTuning(legacyRestored);
-    require(legacyTuning.first == 0,
-            "missing coarse tuning defaults to zero");
-    require(legacyTuning.second == 0,
-            "missing fine tuning defaults to zero");
-
     juce::ValueTree malformedPlugin("PluginState");
     juce::ValueTree malformedSampler("SamplerState");
+    malformedSampler.setProperty("version", 1, nullptr);
     juce::ValueTree malformedPlayer("Player");
     malformedPlayer.setProperty("id", 8, nullptr);
     malformedPlayer.setProperty("midiLow", 36, nullptr);

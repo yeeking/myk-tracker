@@ -63,16 +63,18 @@ target_link_libraries(tracker-hardware-emulator
 target_sources(myk-tracker-plug
     PRIVATE
     src/TrackerMainUI.cpp
+    src/TrackerMainUIStateDialog.cpp
     src/PortableTrackerState.cpp
     src/TrackerFileBrowser.cpp
     src/TrackerMainProcessor.cpp
+    src/TrackerMainProcessorState.cpp
     src/TrackerControlService.cpp
     src/McpRouter.cpp
     src/HTTPServer.cpp
     src/standalone/TrackerStandaloneHost.cpp
     # src/StringTable.cpp
     src/TrackerUIComponent.cpp
-src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerCommands.cpp src/TrackerController.cpp
+src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerEditorMachine.cpp src/SequencerCommands.cpp src/TrackerController.cpp
     src/SuperSamplePlayer.cpp
 #    src/SuperSamplerEditor.cpp
     src/SuperSamplerProcessor.cpp
@@ -152,7 +154,8 @@ if (BUILD_TESTING)
         src/TrackerFileBrowser.cpp
         src/Sequencer.cpp
         src/SequencerCommands.cpp
-        src/SequencerEditor.cpp)
+        src/SequencerEditor.cpp
+        src/SequencerEditorMachine.cpp)
     target_include_directories(sequence-read-head-tests PRIVATE src)
     target_compile_features(sequence-read-head-tests PRIVATE cxx_std_17)
     target_compile_definitions(sequence-read-head-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)

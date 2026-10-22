@@ -716,7 +716,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 {
                     const auto previousCommandValue = event.size() > Step::cmdInd ? std::max(0.0, event[Step::cmdInd]) : 0.0;
                     const auto previousCommandIndex = static_cast<std::size_t>(previousCommandValue);
-                    const auto previousCandidate = previousCommandIndex <= static_cast<std::size_t>(CommandType::DrumSynth)
+                    const auto previousCandidate = isValidCommandTypeValue(previousCommandIndex)
                         ? static_cast<CommandType>(previousCommandIndex) : CommandType::MidiNote;
                     const auto previousCommand = machineTraits(previousCandidate).isStepCommandType
                         ? previousCandidate : CommandType::MidiNote;
@@ -741,7 +741,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
 
                     const auto commandValue = event.size() > Step::cmdInd ? std::max(0.0, event[Step::cmdInd]) : 0.0;
                     const auto commandIndex = static_cast<std::size_t>(commandValue);
-                    const auto candidate = commandIndex <= static_cast<std::size_t>(CommandType::DrumSynth)
+                    const auto candidate = isValidCommandTypeValue(commandIndex)
                         ? static_cast<CommandType>(commandIndex) : CommandType::MidiNote;
                     const auto effectiveCommand = machineTraits(candidate).isStepCommandType
                         ? candidate : CommandType::MidiNote;

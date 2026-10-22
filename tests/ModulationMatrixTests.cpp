@@ -130,23 +130,6 @@ int main()
     require(restored.getBlockView().isActive(ModulationDestination::delayTime),
             "delay-time routes publish an audio-rate modulation buffer");
 
-    // Version 3 used thirteen destinations ending at PAN. Appending D TIME in
-    // version 4 must preserve that old stride and leave the new route empty.
-    auto* legacyRoot = new juce::DynamicObject();
-    legacyRoot->setProperty("version", 3);
-    juce::Array<juce::var> legacyRoutes;
-    for (std::size_t i = 0; i < kModulationSourceCount * 13u; ++i)
-        legacyRoutes.add(i == static_cast<std::size_t>(ModulationDestination::stackPan) ? 37 : 0);
-    legacyRoot->setProperty("routes", legacyRoutes);
-    const auto legacyJson = juce::JSON::toString(juce::var(legacyRoot));
-    ModulationMatrixMachine legacyRestored;
-    legacyRestored.setInstalledDestinations(8u);
-    legacyRestored.setStateInformation(legacyJson.toRawUTF8(), legacyJson.getNumBytesAsUTF8());
-    while (legacyRestored.navigateRight()) {}
-    cells = legacyRestored.getUIBoxes({});
-    require(cells[6][1].text == "0" && cells[7][1].text == "37",
-            "version-three routes preserve PAN and default D TIME to zero");
-
     DelayFxMachine delayUi;
     auto delayCells = delayUi.getUIBoxes({});
     delayCells[1][0].onAdjust(1);

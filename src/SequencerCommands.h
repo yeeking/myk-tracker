@@ -64,28 +64,37 @@ struct Command {
             std::function<void(std::vector<double>*, const SequenceReadOnly*)> _execute);
 };
 
-// Stable identifiers for command slots in CommandProcessor::commandsDouble.
+// Identifiers for command slots in CommandProcessor::commandsDouble. Project
+// state is guarded by an exact schema version, so obsolete command IDs are not
+// retained in this enum.
 enum class CommandType : std::size_t {
     MidiNote = 0,
     Log = 1,
     Sampler = 2,
-    LegacyArpeggiator = 3,
-    WavetableSynth = 4,
-    LegacyPolyArpeggiator = 5,
-    DistortionFx = 6,
-    DelayFx = 7,
-    ChannelStripFx = 8,
-    AuxSend1Fx = 9,
-    AuxSend2Fx = 10,
-    FilterFx = 11,
-    ToggleAux1 = 12,
-    ToggleAux2 = 13,
-    FilterCutoff = 14,
+    WavetableSynth = 3,
+    DistortionFx = 4,
+    DelayFx = 5,
+    ChannelStripFx = 6,
+    AuxSend1Fx = 7,
+    AuxSend2Fx = 8,
+    FilterFx = 9,
+    ToggleAux1 = 10,
+    ToggleAux2 = 11,
+    FilterCutoff = 12,
     /** Fixed per-stack modulation block; never a serial slot or step command. */
-    ModulationMatrix = 15,
-    /** Six-part internal drum synthesizer. Appended to preserve saved IDs. */
-    DrumSynth = 16,
+    ModulationMatrix = 13,
+    /** Six-part internal drum synthesizer. */
+    DrumSynth = 14,
 };
+
+/** Canonical command range. */
+inline constexpr CommandType kLastCommandType = CommandType::DrumSynth;
+inline constexpr std::size_t kCommandTypeCount = static_cast<std::size_t>(kLastCommandType) + 1;
+
+constexpr bool isValidCommandTypeValue(std::size_t value)
+{
+    return value < kCommandTypeCount;
+}
 
 /** Shared behaviour table for machine types so the processor, editor, UI and
     control service all agree on labels and routing. */
@@ -111,8 +120,6 @@ constexpr MachineTypeTraits machineTraits(CommandType type) {
         case CommandType::MidiNote: return { "MIDI", "midi", false, true, true, 0 };
         case CommandType::Log: return { "LOG", "log", false, true, false, -1 };
         case CommandType::Sampler: return { "SAMPLER", "sampler", false, true, true, 2 };
-        case CommandType::LegacyArpeggiator:
-        case CommandType::LegacyPolyArpeggiator: return { "LEGACY", "legacy", false, false, false, -1 };
         case CommandType::WavetableSynth: return { "WAVE", "wavetable synth", false, true, true, 1 };
         case CommandType::DrumSynth: return { "DRUM", "drum synth", false, true, true, 3 };
         case CommandType::DistortionFx: return { "DIST", "distortion", true, false, true, 4 };

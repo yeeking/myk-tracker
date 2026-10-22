@@ -218,7 +218,7 @@ void ChannelStripMachine::getStateInformation(juce::MemoryBlock& destData)
 void ChannelStripMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid())
+    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kStateVersion))
         return;
 
     satDriveDb.store(getFloatProperty(parsed, "satDriveDb", satDriveDb.load(), kMinSatDriveDb, kMaxSatDriveDb));
@@ -230,11 +230,8 @@ void ChannelStripMachine::setStateInformation(const void* data, int sizeInBytes)
     compRatio.store(getFloatProperty(parsed, "compRatio", compRatio.load(), kMinCompRatio, kMaxCompRatio));
     compAttackMs.store(getFloatProperty(parsed, "compAttackMs", compAttackMs.load(), kMinCompAttackMs, kMaxCompAttackMs));
     compOutputDb.store(getFloatProperty(parsed, "compOutputDb", compOutputDb.load(), kMinCompOutputDb, kMaxCompOutputDb));
-    // limiterThresholdDb was the old, misleadingly named persisted field.
-    // Continue accepting it so existing sessions retain their displayed value.
     limiterCeilingDb.store(getFloatProperty(parsed, "limiterCeilingDb",
-        static_cast<float>(parsed.getProperty("limiterThresholdDb", limiterCeilingDb.load())),
-        kMinLimiterCeilingDb, kMaxLimiterCeilingDb));
+        limiterCeilingDb.load(), kMinLimiterCeilingDb, kMaxLimiterCeilingDb));
     bassDb.store(getFloatProperty(parsed, "bassDb", bassDb.load(), kMinEqDb, kMaxEqDb));
     midDb.store(getFloatProperty(parsed, "midDb", midDb.load(), kMinEqDb, kMaxEqDb));
     midFreqHz.store(getFloatProperty(parsed, "midFreqHz", midFreqHz.load(), kMinMidFreqHz, kMaxMidFreqHz));
@@ -337,14 +334,8 @@ void ChannelStripMachine::resetDSPState()
 
 UIBox ChannelStripMachine::makeValueCell(std::atomic<float>& target, float step, float minValue, float maxValue, int decimals)
 {
-    return makeFloatCell(target.load(std::memory_order_relaxed), minValue, maxValue, decimals,
-        [this, targetPtr = &target, step, minValue, maxValue](int direction)
-        {
-            const auto next = juce::jlimit(minValue, maxValue,
-                targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
-            targetPtr->store(next, std::memory_order_relaxed);
-            dspDirty.store(true, std::memory_order_release);
-        });
+    return makeAtomicFloatCell(target, step, minValue, maxValue, decimals,
+        [this] { dspDirty.store(true, std::memory_order_release); });
 }
 
 UIBox ChannelStripMachine::makeDbCell(std::atomic<float>& target, float step, float minValue, float maxValue, int decimals)

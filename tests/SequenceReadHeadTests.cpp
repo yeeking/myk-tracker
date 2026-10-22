@@ -1054,8 +1054,8 @@ int main()
             "quarter performance gate preserves the stored duration");
 
     // Head-count changes rebuild read-head state while the sequence grid may
-    // be refreshed.  Empty legacy rows are normalised before either path sees
-    // them, so this must remain safe through repeated changes.
+    // be refreshed. Empty rows are normalised before either path sees them,
+    // so this must remain safe through repeated changes.
     Sequencer headSafetySequencer(1, 2);
     headSafetySequencer.setStepData(0, 0, {});
     for (int i = 0; i < 12; ++i)
@@ -1063,7 +1063,7 @@ int main()
         headSafetySequencer.incrementSeqParam(0, Sequence::headCountConfig);
         headSafetySequencer.decrementSeqParam(0, Sequence::headCountConfig);
         const auto& grid = headSafetySequencer.getSequenceAsGridOfStrings();
-        require(!grid.empty() && !grid[0].empty(), "head changes tolerate empty legacy step rows");
+        require(!grid.empty() && !grid[0].empty(), "head changes tolerate empty step rows");
     }
     return 0;
 }

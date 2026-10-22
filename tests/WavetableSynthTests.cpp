@@ -72,6 +72,7 @@ juce::AudioBuffer<float> renderNotes(int voiceCount,
 juce::MemoryBlock stateWithVoiceCount(int voiceCount)
 {
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
+    root->setProperty("version", 1);
     root->setProperty("voiceCount", voiceCount);
     juce::MemoryBlock state;
     writeMachineStateJson(state, juce::var(root.get()));
@@ -133,14 +134,6 @@ int main()
     WavetableSynthMachine restored;
     restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
     require(restored.getVoiceCount() == 7, "voice count survives state round trip");
-
-    juce::DynamicObject::Ptr legacyRoot = new juce::DynamicObject();
-    legacyRoot->setProperty("waveStepCount", 2);
-    juce::MemoryBlock legacyState;
-    writeMachineStateJson(legacyState, juce::var(legacyRoot.get()));
-    setVoiceCount(restored, 8.0);
-    restored.setStateInformation(legacyState.getData(), static_cast<int>(legacyState.getSize()));
-    require(restored.getVoiceCount() == 4, "legacy WAVE state defaults to four voices");
 
     auto tooLowState = stateWithVoiceCount(-50);
     restored.setStateInformation(tooLowState.getData(), static_cast<int>(tooLowState.getSize()));

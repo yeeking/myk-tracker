@@ -36,6 +36,17 @@ Standalone)` in the Run and Debug view, and press the green debug button (or
 a Debug build, builds the standalone target with two jobs, and launches it
 under GDB. The Microsoft C/C++ extension is required for the `cppdbg` debugger.
 
+## Project state compatibility
+
+Tracker projects use an exact current schema version. Both lightweight
+`STATE ONLY` XML files and portable `WITH AUDIO` ZIP/FLAC files contain the
+same versioned tracker document. Unversioned projects and projects written by
+another schema version are rejected without changing the song currently in
+memory; MYK Tracker does not migrate older project layouts.
+
+This clean-slate rule applies to project and plug-in state. It does not affect
+the optional legacy MCP client handshake described below.
+
 ## Local MCP control
 
 The standalone application starts a local-only MCP Streamable HTTP server at

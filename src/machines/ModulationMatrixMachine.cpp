@@ -353,26 +353,20 @@ void ModulationMatrixMachine::getStateInformation(juce::MemoryBlock& out)
 }
 void ModulationMatrixMachine::setStateInformation(const void* data, int size)
 {
-    // Machine state arrives from persisted sessions and must not be assumed to
-    // be valid UTF-8.  Calling String::fromUTF8 directly here asserted in a
-    // Debug build when a corrupt or legacy blob was encountered.
+    // Machine state is external data and must not be assumed to be valid UTF-8.
+    // Calling String::fromUTF8 directly here asserts in a Debug build on a
+    // corrupt blob.
     const auto parsed = parseMachineStateJson(data, size);
-    if (parsed.isVoid())
+    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != 4)
         return;
 
-    const int version = static_cast<int>(parsed.getProperty("version", 0));
     for (auto& row : depths) for (auto& value : row) value = 0;
     const auto load = [&parsed](const char* name, auto& values, int low, int high) { if (const auto* array = parsed.getProperty(name, {}).getArray()) for (std::size_t i = 0; i < values.size() && i < static_cast<std::size_t>(array->size()); ++i) values[i] = juce::jlimit(low, high, static_cast<int>(array->getReference(static_cast<int>(i)))); };
     load("wave", waveforms, 0, 4); load("coarse", coarse, 0, 127); load("fine", fine, -99, 99); load("div", dividers, 1, 16);
     if (const auto* array = parsed.getProperty("routes", {}).getArray())
         for (std::size_t source = 0; source < kModulationSourceCount; ++source) for (std::size_t destination = 0; destination < kModulationDestinationCount; ++destination)
         {
-            if (version < 2 && source == static_cast<std::size_t>(ModulationSource::noteTrigger)) continue;
-            if (version < 3 && destination == static_cast<std::size_t>(ModulationDestination::stackPan)) continue;
-            if (version < 4 && destination == static_cast<std::size_t>(ModulationDestination::delayTime)) continue;
-            const std::size_t oldDestinationCount = version < 3 ? 12
-                : version < 4 ? 13 : kModulationDestinationCount;
-            const auto index = source * oldDestinationCount + destination;
+            const auto index = source * kModulationDestinationCount + destination;
             if (index < static_cast<std::size_t>(array->size())) depths[source][destination] = juce::jlimit(-100, 100, static_cast<int>(array->getReference(static_cast<int>(index))));
         }
     for (const auto source : { ModulationSource::clock1, ModulationSource::clock2, ModulationSource::clock3, ModulationSource::noteTrigger })

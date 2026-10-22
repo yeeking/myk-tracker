@@ -24,32 +24,21 @@ std::vector<std::vector<UIBox>> WaveshaperDistortionMachine::getUIBoxes(const Ma
     juce::ignoreUnused(context);
     std::vector<std::vector<UIBox>> boxes(2, std::vector<UIBox>(4));
 
-    auto makeValueCell = [](std::atomic<float>& target, float step, float minValue, float maxValue, int decimals)
-    {
-        return makeFloatCell(target.load(std::memory_order_relaxed), minValue, maxValue, decimals,
-            [&target, step, minValue, maxValue](int direction)
-            {
-                const float currentValue = target.load(std::memory_order_relaxed);
-                const float nextValue = juce::jlimit(minValue, maxValue, currentValue + step * static_cast<float>(direction));
-                target.store(nextValue, std::memory_order_relaxed);
-            });
-    };
-
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
     boxes[0][0].text = "DRV";
-    boxes[1][0] = makeValueCell(drive, 0.5f, kMinDrive, kMaxDrive, 1);
+    boxes[1][0] = makeAtomicFloatCell(drive, 0.5f, kMinDrive, kMaxDrive, 1);
 
     boxes[0][1].kind = UIBox::Kind::TrackerCell;
     boxes[0][1].text = "TONE";
-    boxes[1][1] = makeValueCell(tone, 0.05f, 0.0f, 1.0f, 2);
+    boxes[1][1] = makeAtomicFloatCell(tone, 0.05f, 0.0f, 1.0f, 2);
 
     boxes[0][2].kind = UIBox::Kind::TrackerCell;
     boxes[0][2].text = "MIX";
-    boxes[1][2] = makeValueCell(mix, 0.05f, 0.0f, 1.0f, 2);
+    boxes[1][2] = makeAtomicFloatCell(mix, 0.05f, 0.0f, 1.0f, 2);
 
     boxes[0][3].kind = UIBox::Kind::TrackerCell;
     boxes[0][3].text = "OUT";
-    boxes[1][3] = makeValueCell(output, 0.05f, 0.0f, 2.0f, 2);
+    boxes[1][3] = makeAtomicFloatCell(output, 0.05f, 0.0f, 2.0f, 2);
 
     return boxes;
 }
@@ -101,7 +90,7 @@ void WaveshaperDistortionMachine::getStateInformation(juce::MemoryBlock& destDat
 void WaveshaperDistortionMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid())
+    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kDistortionStateVersion))
         return;
 
     const float driveValue = getFloatProperty(parsed, "drive", drive.load(std::memory_order_relaxed), kMinDrive, kMaxDrive);

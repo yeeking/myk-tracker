@@ -354,23 +354,13 @@ void FilterFxMachine::getStateInformation(juce::MemoryBlock& destData)
 void FilterFxMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid())
+    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kFilterStateVersion))
         return;
 
     {
         const std::lock_guard<std::mutex> lock(stateMutex);
-        const double version = static_cast<double>(parsed.getProperty("version", 0.0));
-        if (version < 2.0)
-        {
-            filterMode = getBoolProperty(parsed, "mode", false)
-                ? FilterMode::highpass12
-                : FilterMode::lowpass12;
-        }
-        else
-        {
-            filterMode = static_cast<FilterMode>(getIntProperty(parsed, "mode",
-                static_cast<int>(filterMode), 0, static_cast<int>(FilterMode::count) - 1));
-        }
+        filterMode = static_cast<FilterMode>(getIntProperty(parsed, "mode",
+            static_cast<int>(filterMode), 0, static_cast<int>(FilterMode::count) - 1));
         cutoffHz = getFloatProperty(parsed, "cutoff", cutoffHz, kMinCutoffHz, kMaxCutoffHz);
         resonance = getFloatProperty(parsed, "resonance", resonance, 0.0f, 1.0f);
         amount = getFloatProperty(parsed, "amount", amount, 0.0f, 1.0f);

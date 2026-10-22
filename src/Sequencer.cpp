@@ -16,7 +16,7 @@ bool isExplodableNoteRow(const std::vector<double>& row, double fallbackCommand)
   double command = row[Step::cmdInd];
   if (std::abs(command) < std::numeric_limits<double>::epsilon())
     command = fallbackCommand;
-  if (command < 0.0 || command > static_cast<double>(CommandType::DrumSynth))
+  if (command < 0.0 || command >= static_cast<double>(kCommandTypeCount))
     return false;
 
   const auto type = static_cast<CommandType>(static_cast<std::size_t>(command));
@@ -1287,7 +1287,7 @@ void Sequencer::setStepData(std::size_t sequence, std::size_t step, std::vector<
       row.resize(Step::maxInd + 1, 0.0);
 
     const auto commandIndex = static_cast<std::size_t>(std::max(0.0, row[Step::cmdInd]));
-    const bool validCommand = commandIndex <= static_cast<std::size_t>(CommandType::DrumSynth)
+    const bool validCommand = isValidCommandTypeValue(commandIndex)
         && machineTraits(static_cast<CommandType>(commandIndex)).isStepCommandType;
     if (!validCommand)
       row[Step::cmdInd] = machineType;

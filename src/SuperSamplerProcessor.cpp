@@ -1020,6 +1020,7 @@ juce::ValueTree SuperSamplerProcessor::exportToValueTree() const
 {
     const std::lock_guard<std::mutex> lock (playerMutex);
     juce::ValueTree root ("SamplerState");
+    root.setProperty ("version", 1, nullptr);
     root.setProperty ("count", (int) players.size(), nullptr);
     root.setProperty ("lastSampleDirectory", lastSampleDirectory.getFullPathName(), nullptr);
 
@@ -1043,6 +1044,9 @@ juce::ValueTree SuperSamplerProcessor::exportToValueTree() const
 
 void SuperSamplerProcessor::importFromValueTree (const juce::ValueTree& tree)
 {
+    if ((int) tree.getProperty("version", 0) != 1)
+        return;
+
     struct PendingPlayer
     {
         SuperSamplePlayer::State state;

@@ -344,6 +344,7 @@ int main()
             "enable toggles, FM/ring/tuning, responder notes, and trigger modes survive state round trip");
 
     juce::DynamicObject::Ptr malformed = new juce::DynamicObject();
+    malformed->setProperty("version", 1);
     malformed->setProperty("kickTune", 1000);
     malformed->setProperty("rideRatio", -10.0);
     malformed->setProperty("crashDecayMs", 99999);
@@ -353,27 +354,6 @@ int main()
     cells = restored.getUIBoxes({});
     require(cells[1][3].text == "96" && cells[9][3].text == "0.25" && cells[7][10].text == "12000",
             "malformed drum state clamps to the adventurous but safe ranges");
-
-    juce::DynamicObject::Ptr legacy = new juce::DynamicObject();
-    juce::MemoryBlock legacyState;
-    writeMachineStateJson(legacyState, juce::var(legacy.get()));
-    restored.setStateInformation(legacyState.getData(), static_cast<int>(legacyState.getSize()));
-    cells = restored.getUIBoxes({});
-    require(cells[1][0].text == "ON" && cells[3][0].text == "ON"
-            && cells[5][0].text == "ON" && cells[7][0].text == "ON"
-            && cells[9][0].text == "ON" && cells[11][0].text == "ON"
-            && cells[1][1].text == "72" && cells[3][1].text == "73"
-            && cells[5][1].text == "74" && cells[7][1].text == "75"
-            && cells[9][1].text == "76" && cells[11][1].text == "77"
-            && cells[1][3].text == "36" && cells[1][4].text == "24"
-            && cells[1][6].text == "60" && cells[1][7].text == "1200"
-            && cells[1][9].text == "45" && cells[1][11].text == "95"
-            && cells[7][6].text == "20"
-            && cells[9][4].text == "2.5"
-            && cells[1][12].text == "1SHOT" && cells[3][12].text == "1SHOT"
-            && cells[5][12].text == "1SHOT" && cells[7][12].text == "1SHOT"
-            && cells[9][12].text == "1SHOT" && cells[11][12].text == "1SHOT",
-            "legacy state without drum properties restores enabled one-shot musical defaults");
 
     const int decayBeforeAdjustment = std::stoi(cells[1][7].text);
     cells[1][7].onAdjust(1);

@@ -38,16 +38,17 @@ std::vector<std::vector<UIBox>> AuxReverbMachine::getUIBoxes(const MachineUiCont
     boxes[0][0] = makeLabelCell("ROOM");
     boxes[1][0] = makeLabelCell("DAMP");
     boxes[2][0] = makeLabelCell("WET");
-    boxes[0][1] = makeValueCell(roomSize, 0.05f, 2);
-    boxes[1][1] = makeValueCell(damping, 0.05f, 2);
-    boxes[2][1] = makeValueCell(wetLevel, 0.05f, 2);
+    const auto markDirty = [this] { dspDirty.store(true, std::memory_order_release); };
+    boxes[0][1] = makeAtomicFloatCell(roomSize, 0.05f, 0.0f, 1.0f, 2, markDirty);
+    boxes[1][1] = makeAtomicFloatCell(damping, 0.05f, 0.0f, 1.0f, 2, markDirty);
+    boxes[2][1] = makeAtomicFloatCell(wetLevel, 0.05f, 0.0f, 1.0f, 2, markDirty);
 
     boxes[0][2] = makeLabelCell("DRY");
     boxes[1][2] = makeLabelCell("WID");
     boxes[2][2] = makeLabelCell("FRZ");
-    boxes[0][3] = makeValueCell(dryLevel, 0.05f, 2);
-    boxes[1][3] = makeValueCell(width, 0.05f, 2);
-    boxes[2][3] = makeValueCell(freezeMode, 0.05f, 2);
+    boxes[0][3] = makeAtomicFloatCell(dryLevel, 0.05f, 0.0f, 1.0f, 2, markDirty);
+    boxes[1][3] = makeAtomicFloatCell(width, 0.05f, 0.0f, 1.0f, 2, markDirty);
+    boxes[2][3] = makeAtomicFloatCell(freezeMode, 0.05f, 0.0f, 1.0f, 2, markDirty);
 
     return boxes;
 }
@@ -80,7 +81,7 @@ void AuxReverbMachine::getStateInformation(juce::MemoryBlock& destData)
 void AuxReverbMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid())
+    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kStateVersion))
         return;
 
     roomSize.store(getFloatProperty(parsed, "roomSize", roomSize.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);
@@ -112,15 +113,4 @@ void AuxReverbMachine::updateParameters()
 float AuxReverbMachine::clampUnit(float value)
 {
     return juce::jlimit(0.0f, 1.0f, value);
-}
-
-UIBox AuxReverbMachine::makeValueCell(std::atomic<float>& target, float step, int decimals)
-{
-    return makeFloatCell(target.load(std::memory_order_relaxed), 0.0f, 1.0f, decimals,
-        [this, targetPtr = &target, step](int direction)
-        {
-            const float next = clampUnit(targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
-            targetPtr->store(next, std::memory_order_relaxed);
-            dspDirty.store(true, std::memory_order_release);
-        });
 }
