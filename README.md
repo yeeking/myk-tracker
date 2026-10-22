@@ -1,130 +1,14 @@
 # MYK Tracker GL
 
-MYK Tracker GL is a keyboard-driven music tracker built with JUCE. It combines classic step sequencing with sequence-owned read heads, machine stacks, internal instruments, and audio effects, so you can build patterns, arrange them into songs, and perform most editing directly from the keyboard.
+MYK TRACKER is an integrated live performance and composition sequencer, sampler, synthesizer and effects system. 
 
-Fresh or reset tracker sessions place an enabled wavetable synth in every
-machine stack, so newly entered notes are audible without first configuring
-external MIDI routing.
+It aims to capture the joy of rapidly editing and performing with sequences, with all sounds built-in. You can even save your songs in a MOD-like format and share them with other people. 
 
-Machine stacks chain instruments and effects; each also has a fixed `MOD` block above the serial slots. It is recalled on/off per sequence set while its matrix settings are shared by the stack. The slot type cycles in the
-order MIDI, WAVE, SAMPLER, DRUM, DIST, DELAY, CHSTR, AUX1, AUX2, FILTER. The
-FILTER slot is a resonant low/band/high-pass filter at the end of the stack's
-audio path. A note-triggered envelope (`A`, `D`, `S`, `R`, `BEND` cells)
-sweeps the cutoff on every note: `COFF` is the top of the sweep, `AMT` sets
-how far the low end falls (0 leaves the cutoff static, 1 reaches 20 Hz),
-`POL` chooses whether the attack runs low-to-high or high-to-low, `MODE`
-cycles through 12/24 dB `LP`, `BP`, and `HP` responses, and `RES` adds
-resonance with a progressively stronger upper range. `BEND` curves the
-envelope stages
-from -2 (slow-then-fast) through 0 (linear) to +2 (fast-then-slow) while
-leaving the sustain level unchanged.
+## Instructions
 
-## Main Pages
+You can find most of the commands in the cheat sheet poster in the docs folder: 
 
-- `Song` page: arrange sequence sets into a song and choose each row's `SET`, duration in beats, and pattern-local `BPM`. Each sequence set also recalls the enabled/bypassed state of every machine-stack slot, while the stack order, machine parameters, mixer state, and audio data remain shared. Song playback recalls those slot states and BPM at the same beat boundary as the sequence-set switch. Editing the `SET` of the row currently playing queues the replacement for the next beat boundary (four clock ticks), rather than changing patterns mid-beat.
-- `Sequence` page: browse sequences and steps, mute/solo tracks, and move around the current pattern. A pattern can hold from 1 to 128 sequences. A fixed cyan oscilloscope cell sits above every visible sequence column while its eight step rows scroll; it shows that sequence's final machine-stack output, so columns routed to the same stack intentionally share a scope. Control-mode sequences use a subtly brighter cell background, with violet outlines only on populated control steps; soloed sequences receive a thick yellow outline. Sequence mute/solo is independent of Mixer stack mute/solo, but this page shows their effective result: a muted stack or a non-soloed stack while another stack is soloed renders its routed sequences empty, while every sequence routed to a soloed stack gets the yellow outline. A muted sequence on a soloed stack remains silent and outlined. Removing the stack override reveals the preserved sequence settings. `Shift+E` explodes the current sequence into one note per step; `Shift+G` implodes its note events into pitch-sorted chord steps.
-- `Step` page: edit the command rows inside a single step: command, note, velocity, and duration. Note durations range from `D0` to `D16`. A sequence in control mode can store `TAUX1`, `TAUX2`, or `COFF` events that operate the sequence's machine stack during playback.
-- `Machine` page: inspect and configure the machine stack for the current track, including instruments and effects. SEND/RETURN levels render as horizontal fill bars scaled to their level, and the scope band under the grid shows the stack output with an auto-calibrating vertical scale.
-- `Machine Detail` page: open the focused machine's compact tracker UI for detailed parameter editing. The fixed MOD detail has four free-running LFOs, a NOTE trigger, three clock dividers, a persistent PITCH (last-note) source, and a horizontally scrollable four-column route matrix. NOTE and clock sources make one-sample impulses; when routed to an `L1 F`…`L4 F` destination they instead reset that LFO phase. LFO coarse rate zero uses `FINE:0…99` as a stopped-to-1 Hz sub-Hz range; higher coarse rates remain exponential. LFO and PITCH routes to frequency destinations modulate rate over ±4 octaves. Route depths are signed `-100…+100`, except trigger-to-LFO reset routes which are `0`/`1`; installed WAVE, FILTER, SAMPLER, and DELAY machines expose their applicable destinations, plus the stack output `PAN`. `D TIME` is active only in the delay's `MS` mode: full-scale modulation offsets the configured milliseconds by up to 100%, while synced step timing ignores it. Delay milliseconds adjust in 1 ms increments. LFO waveform cells show cached glyphs and the source labels carry a subtle live red activity glow while MOD is enabled. Scaled parameters render as horizontal fill bars showing their normalized position. SAMPLER rows include fixed `CRS` tuning (-36 to +36 semitones) and `FINE` tuning (-99 to +99 cents); `+12` doubles playback speed and `-12` halves it. WAVE draws waveform glyphs and the current ADSR curve over the ENV columns, its `CYC` rate may be set to zero for MOD-controlled morphing, and its `VOIC` control selects 1–8 voices (default 4); one voice uses smooth phase-continuous monosynth retriggering, while higher settings use round-robin polyphonic voice stealing. DRUM contains kick, snare, hi-hat, crash, ride, and tom strips. It combines wavetables, filtered noise, inharmonic square banks, ring modulation, and a deliberately strong two-operator FM ride bell; its broad parameter ranges are intended to reach beyond conventional drum sounds. FILTER places its mode/cutoff controls on the left, ADSR controls on the right, and draws the current ADSR curve in an ENV band. The bottom of the grid carries the same stack-output scope band (with auto-calibrating vertical scale) shown on the Machine page.
-- `Sequence Config` page: edit `SEND`, sequence mode (`SEQ:NOTE` / `SEQ:CON`), read-head count/selection, TPS, traversal mode, chord polyphony, octave range (`OCT`), rhythm, and head probability. `OCT` randomly chooses a zero-to-three-octave upward transpose independently for each playable note in a triggered step. Control mode switches step entry from notes to `TAUX1`, `TAUX2`, and `COFF` events without rewriting existing step data. Up to three independently timed heads may read the same sequence. A faint column flash briefly marks a sequence when its read head triggers active steps during playback.
-- `Mixer` page: edit the 8 machine stacks' independent mute, solo, gain, pan, and post-mute meters. Stack panning uses equal-power stereo placement; AUX 1 and AUX 2 preserve their stereo reverb width while their PAN control balances the return. Soloed stack columns use the same thick yellow outline as the Sequence page, and multiple soloed stacks remain audible together. The stripped-back far-left master strip has persistent output gain, mute, green stereo post-gain rails, and an `R` recording cell. AUX 1 and AUX 2 immediately follow it, each with persistent -48 to +6 dB return gain, mute, and blue stereo meters measured after return gain and balance but before the main mix. The brightened meter-cell background marks each channel's current gain setting. Activate `R` to start or stop recording; it lights red while a stereo 24-bit WAV is streamed at the current device/host sample rate into `MYK Tracker Recordings` inside the platform-standard Documents folder.
-- `Audio Config` page: in standalone mode, stage separate input/output device, sample-rate (`44.1`, `48`, `88.2`, or `96` kHz), and buffer-size choices, then activate `APPLY` while stopped. It reports audio callback CPU load, peak load, xruns, block duration, latency, bit depth, and backend. `REVERT`, `REFRESH`, and `RESET STATS` are all grid controls. In plug-in builds the page is read-only because the host owns audio configuration.
-- Each normal page has a compact fixed right-hand HUD strip, leaving the grid area clear while playing. Sequence shows the selected one-based sequence, its zero-based machine-stack route, and current step/length; Step shows its sequence and step/length; Config shows its sequence-to-stack route; Machine shows the current stack and, in a machine detail view, the focused machine's short name and ON/OFF state.
-- `Help` page: show the main keyboard shortcuts. `Ctrl+H` toggles the page, `Backspace` returns to the previous page, and page shortcut keys also leave Help.
-- `Reset / Quit` confirmation page: confirm tracker reset and, in standalone builds, quit.
-
-The DRUM detail page uses thin yellow vertical separators to keep its six
-two-column sound strips visually distinct without boxing every control.
-
-### DRUM note map
-
-Each DRUM strip has a `NOTE` control at its top, which selects its MIDI
-responder note in single-note increments. Fresh kits default to `72` kick,
-`73` snare, `74` closed hi-hat, `75` crash, `76` ride, and `77` tom. The open
-hi-hat remains available one octave above the configured closed-hat note.
-The `ON`/`OFF` cell beside each strip heading bypasses that individual sound;
-an `OFF` sound ignores triggers and performs no oscillator, filter, or tail
-processing. Existing and legacy kits restore all six sounds enabled.
-Other notes are ignored. Drum velocity affects level as well as the existing
-transient and brightness accents, giving tracker and MIDI velocity a clear
-dynamic response. Closed hats choke an open hat, and note duration,
-note-off, or the Sequence page's HALF/QUARTER gate applies a short release only
-when that sound's `MODE` is `GATE`. Each sound defaults to `1SHOT`, which ignores
-note-off timing and follows its natural decay. Snare `TYPE` selects 606-, 808-, or 909-inspired fixed character.
-The 909 character phases and pitch-bends two shaped triangle bodies and mixes
-separately contoured low/high snappy-noise paths; these remain efficient musical
-models rather than circuit-exact emulations.
-
-## Keyboard Shortcuts
-
-- `Space`: start/stop playback.
-- `1`: go to Song page.
-- `2`: go to Sequence page.
-- `3`: go to Step page.
-- `4`: go to Machine page.
-- `5`: open Machine Detail from anywhere, or cycle to the next machine detail while already in Machine page detail view.
-- `6`: go to Sequence Config page.
-- `7`: go to Mixer page.
-- `0`: go to Audio Config page.
-- `Enter`: activate/click the current item, including the Mixer master `R` recording toggle.
-- `Esc`: dismiss the current transient UI if a machine owns one.
-- `Arrow keys`: move the editor cursor.
-- `Page Up` / `Page Down`: jump by larger row amounts on the Machine page.
-- `Tab`: next populated step (wrapping on the Step page), or next
-  machine detail when already editing a machine detail view.
-- `Return` on the Sequence or Step page: audition every event in the focused
-  step while stopped, including inactive steps, without changing its data or active state.
-- `Backspace`: reset or clear the current item. On machine pages, this first tries the machine-specific clear action.
-- `Shift+M` on the Sequence page: mute/unmute the current sequence. When unmuting, it also clears mute on the routed machine stack if that stack is muted, clearing both layers when necessary. On Mixer, it mutes/unmutes the selected master output, AUX return, or stack.
-- `Shift+S` on the Sequence page: solo/unsolo the current sequence; on Mixer, solo/unsolo the selected stack. It does nothing while master or AUX return strips are selected.
-- `Shift+E` on the Sequence page: explode the current sequence into one note per step, growing or shrinking the sequence to fit the collected notes.
-- `Shift+G` on the Sequence page: implode the current sequence's notes into evenly distributed, pitch-sorted chord steps.
-- `Shift+I` on the Sequence page: insert a blank eight-step control-mode sequence to the right of the current sequence, using the same machine stack.
-- `Shift+K` on the Sequence page: delete the current sequence and shift later sequences left.
-- `Shift+H` on the Sequence page: cycle the selected sequence through normal, half-tick, and quarter-tick performance gates. Green and purple outlines respectively identify the shortened modes; stored step durations are unchanged.
-- `Shift+A` on the Sequence page: toggle global computer-key note/chord entry. It is off by default; when armed, the cursor is yellow and piano/chord keys write to the selected step. When disarmed, those keys audition only while stopped.
-- `Shift+1` through `Shift+8` on the Sequence page: set TPS to 1–8 for every read head on the selected sequence. Changes retain the normal locked quarter-beat resynchronisation.
-- `{` / `}` on the Step page: decrease/increase the selected parameter for every row in the current step, using each row command's normal parameter range and increment. For example, on `D`, it adjusts every note duration together.
-- `Ctrl+H`: toggle the Help page.
-- `r`: rewind transport.
-- `-`: remove a row or entry where supported.
-- `=`: add a row or entry where supported.
-- `[` / `]`: decrement/increment the current value. On the Mixer master gain or fader rows this changes master gain by 1 dB.
-- `,` / `.`: octave down / octave up for note entry.
-- `<` / `>` on the Sequence page: transpose every playable note in the current sequence down / up one octave. Notes that cannot make the full move while staying in MIDI range 1–127 are left unchanged.
-- On the Song page, select a row's `BPM` cell and use `[` / `]` to decrease / increase that sequence set's tempo by 1 BPM.
-- Piano note keys: enter notes using the current octave on Sequence and Step pages; elsewhere they audition without changing tracker data while stopped. While stopped, a held computer key starts one held audition and releases it on key-up; keyboard auto-repeat never retriggers it. The same applies to held chord shortcuts.
-- Control-mode sequence keys: when the current sequence is in `SEQ:CON` mode, `z` enters `TAUX1`, `x` enters `TAUX2`, and `c` enters `COFF` (default `2000` Hz) on the Sequence and Step pages. Piano note keys and Step-page chord shortcuts are suppressed in that mode.
-- Chord shortcut keys on Sequence and Step pages (and audition-only on other non-transient pages) select a chord family. Release and press the same key again to cycle its six voicings; holding a key never advances due to keyboard auto-repeat. Chords use the last piano-key root, falling back to the first playable note in the focused step. A family/root/step/sequence/page change restarts at variation 1. Negative/drop voicings are octave-folded as a complete chord into MIDI notes `1–127`.
-
-  | Key | Family | Variations |
-  | --- | --- | --- |
-  | `Q` | `MAJ` | major, inversions, open, major 6, add 9 |
-  | `W` | `MIN` | minor, inversions, open, minor 6, minor add 9 |
-  | `E` | `DOM` | dominant 7 inversions, dominant 9, dominant 13 |
-  | `R` | `DIM` | diminished inversions, diminished 7, open diminished, half-diminished |
-  | `T` | `AUG` | augmented inversions, open, augmented 7, augmented major 7 |
-  | `Y` | `SUS` | sus 4, sus 2, inversion/open sus, 7 sus 4, 9 sus 4 |
-  | `U` | `MAJX` | major 7, 9, 6/9, 11, drop-2, open major 9 |
-  | `I` | `MINX` | minor 7, 9, 11, 6/9, drop-2, open minor 9 |
-  | `O` | `ALT` | flat/sharp 5, flat/sharp 9, altered dominant voicings |
-  | `P` | `QRTL` | quartal, extended quartal, lowered/open quartal, quintal |
-
-  The right HUD briefly shows the active family and variation, such as `MAJ 3/6`. In Sequence ARM mode and on the Step page the focused step is replaced; otherwise the chord is auditioned while stopped.
-- `Shift+C`: toggle the internal clock on/off.
-- `Ctrl+C` / `Ctrl+V`: copy and replace a complete sequence's event data and
-  playback length while retaining the destination machine stack and timing.
-- `Shift+Up` / `Shift+Down` on the Sequence page: select a highlighted range
-  of steps. `Ctrl+C` copies that range; `Ctrl+V` pastes it beginning at the
-  target sequence's current step cursor. Range pastes retain routing and timing.
-- `Ctrl+=` / `Ctrl+-`: rotate the current sequence down / up by one step, with
-  the displaced end step wrapping around. This rotates all events and active
-  state, while retaining routing, timing, and cursor position.
-- `Ctrl+R`: open tracker reset confirmation.
-- `Ctrl+S` / `Ctrl+L`: open the tracker-state save/load flow. Save offers `WITH AUDIO`, `STATE ONLY`, or `CANCEL`; `WITH AUDIO` creates one portable ZIP-based `.myktracker` containing the normal state plus 24-bit lossless FLAC copies of loaded sampler buffers. It is available only while stopped and not recording, and shows `SAVING AUDIO` while the archive is written. `STATE ONLY`, plug-in host state, and standalone preferences remain lightweight, path-based state. Load automatically recognises both formats and prefers embedded audio, falling back to saved sample paths when an embedded entry is unavailable. The in-grid browser shows eight folder entries at a time and scrolls with Up/Down; the save name and SAVE control remain fixed, and Right jumps to SAVE. Save names default to a timestamped `.myktracker` filename and can be edited. Existing files require an in-grid replacement confirmation.
-- Standalone only:
-  - `Ctrl+Q`: open quit confirmation.
-  - `Ctrl+P`: open advanced audio/MIDI device settings (including backend and MIDI choices).
+https://github.com/yeeking/myk-tracker/blob/main/doc/MYK_Tracker_cheat_sheet.svg
 
 ## Developer Build
 
