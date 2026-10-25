@@ -7,6 +7,7 @@
 #include <cmath>
 #include <sstream>
 #include <thread>
+#include <utility>
 
 namespace
 {
@@ -48,12 +49,6 @@ bool isSearchableBrowserCharacter(char character)
     return character >= 32 && character <= 126;
 }
 
-float vuDbToGlow(float db)
-{
-    const float gain = juce::Decibels::decibelsToGain(db, -60.0f);
-    return juce::jlimit(0.0f, 1.0f, gain);
-}
-
 bool isBrowsableAudioFile(const juce::File& file)
 {
     if (!file.existsAsFile())
@@ -74,6 +69,38 @@ bool isPreviewableAudioFile(const juce::File& file)
 {
     return file.existsAsFile() && file.hasFileExtension(".wav");
 }
+
+bool isBrowsableSampleSetFile(const juce::File& file)
+{
+    return file.existsAsFile() && file.hasFileExtension(".xml");
+}
+
+struct SampleSetLayer { juce::File file; int note; int low; int high; };
+
+bool parseSampleSet(const juce::File& file, std::vector<SampleSetLayer>& layers, juce::String& error)
+{
+    const auto xml = juce::parseXML(file);
+    if (xml == nullptr || !xml->hasTagName("DrumSampleSet") || xml->getIntAttribute("version", 0) != 1)
+    { error = "INVALID SAMPLESET XML"; return false; }
+    const auto rootFolder = juce::File(xml->getStringAttribute("rootFolder"));
+    forEachXmlChildElementWithTagName(*xml, sound, "Sound")
+    {
+        const int note = sound->getIntAttribute("midiNote", -1);
+        if (note < 0 || note > 127) { error = "INVALID SOUND NOTE"; return false; }
+        forEachXmlChildElementWithTagName(*sound, layer, "Layer")
+        {
+            const auto path = layer->getStringAttribute("path");
+            const int low = layer->getIntAttribute("velocityLow", -1), high = layer->getIntAttribute("velocityHigh", -1);
+            if (path.isEmpty() || low < 0 || high < low || high > 127) { error = "INVALID LAYER RANGE"; return false; }
+            juce::File sample(path);
+            if (!juce::File::isAbsolutePath(path)) { const auto relative = file.getParentDirectory().getChildFile(path); sample = relative.existsAsFile() ? relative : rootFolder.getChildFile(path); }
+            if (!sample.existsAsFile() || !sample.hasReadAccess()) { error = "MISSING SAMPLE " + path; return false; }
+            layers.push_back({ sample, note, low, high });
+        }
+    }
+    if (layers.empty()) { error = "EMPTY SAMPLESET"; return false; }
+    return true;
+}
 } // namespace
 
 //==============================================================================
@@ -93,6 +120,8 @@ SuperSamplerProcessor::SuperSamplerProcessor()
 
 SuperSamplerProcessor::~SuperSamplerProcessor()
 {
+    sampleSetLoadGeneration.fetch_add(1, std::memory_order_acq_rel);
+    if (sampleSetLoadFuture.valid()) sampleSetLoadFuture.wait();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout SuperSamplerProcessor::createParameterLayout()
@@ -255,30 +284,18 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
 
     const auto samplerState = getSamplerState();
     if (!samplerState.isObject())
-    {
-        uiPlayers.clear();
-        uiGlowLevels.clear();
         return { { UIBox{} } };
-    }
 
     const auto playersVar = samplerState.getProperty("players", juce::var());
     if (!playersVar.isArray())
-    {
-        uiPlayers.clear();
-        uiGlowLevels.clear();
         return { { UIBox{} } };
-    }
 
     const auto* playersArray = playersVar.getArray();
     if (playersArray == nullptr)
-    {
-        uiPlayers.clear();
-        uiGlowLevels.clear();
         return { { UIBox{} } };
-    }
 
-    std::vector<UiPlayerState> nextPlayers;
-    nextPlayers.reserve(static_cast<std::size_t>(playersArray->size()));
+    std::vector<UiPlayerState> players;
+    players.reserve(static_cast<std::size_t>(playersArray->size()));
     for (const auto& entry : *playersArray)
     {
         auto* playerObj = entry.getDynamicObject();
@@ -289,44 +306,22 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
         st.id = static_cast<int>(playerObj->getProperty("id"));
         st.midiLow = static_cast<int>(playerObj->getProperty("midiLow"));
         st.midiHigh = static_cast<int>(playerObj->getProperty("midiHigh"));
+        const auto velocityLow = playerObj->getProperty("velocityLow");
+        const auto velocityHigh = playerObj->getProperty("velocityHigh");
+        st.velocityLow = velocityLow.isVoid() ? 0 : static_cast<int>(velocityLow);
+        st.velocityHigh = velocityHigh.isVoid() ? 127 : static_cast<int>(velocityHigh);
         st.gain = static_cast<float>(double(playerObj->getProperty("gain")));
         const auto coarseTune = playerObj->getProperty("coarseTuneSemitones");
         const auto fineTune = playerObj->getProperty("fineTuneCents");
         st.coarseTuneSemitones = coarseTune.isVoid() ? 0 : static_cast<int>(coarseTune);
         st.fineTuneCents = fineTune.isVoid() ? 0 : static_cast<int>(fineTune);
-        st.isPlaying = static_cast<bool>(playerObj->getProperty("isPlaying"));
-        const auto vuVar = playerObj->getProperty("vuDb");
-        st.vuDb = vuVar.isVoid() ? -60.0f : static_cast<float>(double(vuVar));
         st.status = playerObj->getProperty("status").toString().toStdString();
         st.fileName = playerObj->getProperty("fileName").toString().toStdString();
-        nextPlayers.push_back(st);
+        players.push_back(st);
     }
 
-    std::vector<float> nextGlow;
-    nextGlow.reserve(nextPlayers.size());
-    for (const auto& player : nextPlayers)
-    {
-        float glow = 0.0f;
-        for (std::size_t i = 0; i < uiPlayers.size(); ++i)
-        {
-            if (uiPlayers[i].id == player.id && i < uiGlowLevels.size())
-            {
-                glow = uiGlowLevels[i];
-                break;
-            }
-        }
-        const float targetGlow = vuDbToGlow(player.vuDb);
-        glow = std::max(targetGlow, glow * 0.85f);
-        if (glow < 0.02f)
-            glow = 0.0f;
-        nextGlow.push_back(glow);
-    }
-
-    uiPlayers = std::move(nextPlayers);
-    uiGlowLevels = std::move(nextGlow);
-
-    const std::size_t rows = uiPlayers.size() + 1;
-    const std::size_t cols = 8;
+    const std::size_t rows = players.size() + 1;
+    const std::size_t cols = 10;
     if (rows == 0 || cols == 0)
         return { { UIBox{} } };
 
@@ -350,15 +345,21 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                 else
                 {
                     cell.kind = UIBox::Kind::TrackerCell;
-                    static constexpr std::array<const char*, 8> headings {
-                        "ADD", "TRIG", "LOW", "HIGH", "GAIN", "CRS", "FINE", "SAMP"
+                    static constexpr std::array<const char*, 10> headings {
+                        "ADD", "LOAD SET", "LOW", "HIGH", "GAIN", "CRS", "FINE", "VLOW", "VHIGH", "SAMP"
                     };
                     cell.text = headings[col];
+                    if (col == 1)
+                    {
+                        cell.kind = UIBox::Kind::SamplerAction;
+                        cell.width = 2.0f;
+                        cell.onActivate = [this]() { openFileBrowserForSampleSet(); };
+                    }
                 }
             }
             else
             {
-                const auto& player = uiPlayers[row - 1];
+                const auto& player = players[row - 1];
                 const int playerId = player.id;
                 switch (col)
                 {
@@ -372,8 +373,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                     break;
                 case 1:
                     cell.kind = UIBox::Kind::SamplerAction;
-                    cell.text = player.isPlaying ? "PLAY" : "TRIG";
-                    cell.isActive = player.isPlaying;
+                    cell.text = "TRIG";
                     cell.onActivate = [this, playerId]()
                     {
                         triggerFromWeb(playerId);
@@ -447,6 +447,18 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                     };
                     break;
                 case 7:
+                    cell.kind = UIBox::Kind::SamplerValue;
+                    cell.text = sanitizeLabel(juce::String(player.velocityLow), 4);
+                    cell.onAdjust = [this, playerId, low = player.velocityLow, high = player.velocityHigh](int direction) { setSampleVelocityRangeFromWeb(playerId, low + direction, high); };
+                    cell.onInsert = [this, playerId, high = player.velocityHigh](double value) { setSampleVelocityRangeFromWeb(playerId, static_cast<int>(value), high); };
+                    break;
+                case 8:
+                    cell.kind = UIBox::Kind::SamplerValue;
+                    cell.text = sanitizeLabel(juce::String(player.velocityHigh), 4);
+                    cell.onAdjust = [this, playerId, low = player.velocityLow, high = player.velocityHigh](int direction) { setSampleVelocityRangeFromWeb(playerId, low, high + direction); };
+                    cell.onInsert = [this, playerId, low = player.velocityLow](double value) { setSampleVelocityRangeFromWeb(playerId, low, static_cast<int>(value)); };
+                    break;
+                case 9:
                     cell.kind = UIBox::Kind::SamplerWaveform;
                     if (!player.fileName.empty())
                         cell.text = sanitizeLabel(juce::String(player.fileName), 18);
@@ -457,12 +469,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                     cell.kind = UIBox::Kind::None;
                     break;
                 }
-                if (col == 1)
-                    cell.isActive = player.isPlaying;
             }
-
-            if (row > 0 && row - 1 < uiGlowLevels.size())
-                cell.glow = uiGlowLevels[row - 1];
 
             if (cell.kind == UIBox::Kind::None)
                 cell.isDisabled = true;
@@ -492,9 +499,25 @@ void SuperSamplerProcessor::removeEntry(int entryIndex)
 {
     if (entryIndex < 0)
         return;
-    if (static_cast<std::size_t>(entryIndex) >= uiPlayers.size())
-        return;
-    removeSamplePlayer(uiPlayers[static_cast<std::size_t>(entryIndex)].id);
+
+    int playerIdToRemove = -1;
+    {
+        const std::lock_guard<std::mutex> lock(playerMutex);
+        int visibleIndex = -1;
+        for (const auto& player : players)
+        {
+            if (player == nullptr)
+                continue;
+            if (++visibleIndex == entryIndex)
+            {
+                playerIdToRemove = player->getId();
+                break;
+            }
+        }
+    }
+
+    if (playerIdToRemove >= 0)
+        removeSamplePlayer(playerIdToRemove);
 }
 
 bool SuperSamplerProcessor::dismissTransientUi()
@@ -529,7 +552,7 @@ bool SuperSamplerProcessor::handleTextInput(char character)
         return false;
 
     const std::lock_guard<std::mutex> lock(playerMutex);
-    if (browsingPlayerId < 0)
+    if (browserMode == BrowserMode::none)
         return false;
 
     fileBrowser.appendSearch(character);
@@ -542,7 +565,7 @@ bool SuperSamplerProcessor::handleTextInput(char character)
 bool SuperSamplerProcessor::handleTextBackspace()
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
-    if (browsingPlayerId < 0)
+    if (browserMode == BrowserMode::none)
         return false;
 
     fileBrowser.backspaceSearch();
@@ -648,6 +671,11 @@ void SuperSamplerProcessor::setSampleRangeFromWeb (int playerId, int low, int hi
         broadcastMessage ("Failed to set range for player " + juce::String (playerId));
 }
 
+void SuperSamplerProcessor::setSampleVelocityRangeFromWeb (int playerId, int low, int high)
+{
+    if (setVelocityRange(playerId, low, high)) sendSamplerStateToUI();
+}
+
 void SuperSamplerProcessor::triggerFromWeb (int playerId)
 {
     trigger (playerId);
@@ -715,7 +743,7 @@ std::string SuperSamplerProcessor::describeNoteForSequencer (int midiNote) const
 bool SuperSamplerProcessor::isBrowsingFiles() const
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
-    return browsingPlayerId >= 0;
+    return browserMode != BrowserMode::none;
 }
 
 std::string SuperSamplerProcessor::getVuStateJson() const
@@ -793,7 +821,7 @@ void SuperSamplerProcessor::processSamplerBlock (juce::AudioBuffer<float>& buffe
             const NoteOnEvent event = pendingNoteOns[cursor];
             for (auto& player : players)
             {
-                if (player->acceptsNote (event.note))
+                if (event.velocity < 0 ? player->acceptsNote(event.note) : player->acceptsTrigger(event.note, event.velocity))
                 {
                     if (event.velocity < 0) player->gateRelease();
                     else player->triggerNote (event.note, event.velocity);
@@ -864,6 +892,9 @@ juce::var SuperSamplerProcessor::toVar() const
         obj->setProperty ("id", st.id);
         obj->setProperty ("midiLow", st.midiLow);
         obj->setProperty ("midiHigh", st.midiHigh);
+        obj->setProperty ("velocityLow", st.velocityLow);
+        obj->setProperty ("velocityHigh", st.velocityHigh);
+        obj->setProperty ("velocityScalesGain", st.velocityScalesGain);
         obj->setProperty ("gain", st.gain);
         obj->setProperty ("coarseTuneSemitones", st.coarseTuneSemitones);
         obj->setProperty ("fineTuneCents", st.fineTuneCents);
@@ -872,7 +903,6 @@ juce::var SuperSamplerProcessor::toVar() const
         obj->setProperty ("status", st.status);
         obj->setProperty ("fileName", st.fileName);
         obj->setProperty ("filePath", st.filePath);
-        obj->setProperty ("waveformSVG", st.waveformSVG);
         arr.add (juce::var (obj));
     }
 
@@ -887,13 +917,14 @@ void SuperSamplerProcessor::loadSampleFromControl (int playerId, const juce::Fil
     loadSampleAsync(playerId, file, std::move(onComplete));
 }
 
-int SuperSamplerProcessor::addSamplePlayerForControl (int lowNote, int highNote)
+int SuperSamplerProcessor::addSamplePlayerForControl (int lowNote, int highNote, int lowVelocity, int highVelocity)
 {
     const std::lock_guard<std::mutex> lock (playerMutex);
     const auto id = nextId++;
     auto player = std::make_unique<SuperSamplePlayer> (id);
     player->prepareToPlay (currentOutputSampleRate, currentBlockSize);
     player->setMidiRange (lowNote, highNote);
+    player->setVelocityRange (lowVelocity, highVelocity);
     players.push_back (std::move (player));
     return id;
 }
@@ -955,6 +986,13 @@ bool SuperSamplerProcessor::setMidiRange (int playerId, int low, int high)
         player->setMidiRange (low, high);
         return true;
     }
+    return false;
+}
+
+bool SuperSamplerProcessor::setVelocityRange (int playerId, int low, int high)
+{
+    const std::lock_guard<std::mutex> lock (playerMutex);
+    if (auto* player = getPlayer(playerId)) { player->setVelocityRange(low, high); return true; }
     return false;
 }
 
@@ -1031,6 +1069,9 @@ juce::ValueTree SuperSamplerProcessor::exportToValueTree() const
         child.setProperty ("id", st.id, nullptr);
         child.setProperty ("midiLow", st.midiLow, nullptr);
         child.setProperty ("midiHigh", st.midiHigh, nullptr);
+        child.setProperty ("velocityLow", st.velocityLow, nullptr);
+        child.setProperty ("velocityHigh", st.velocityHigh, nullptr);
+        child.setProperty ("velocityScalesGain", st.velocityScalesGain, nullptr);
         child.setProperty ("gain", st.gain, nullptr);
         child.setProperty ("coarseTuneSemitones", st.coarseTuneSemitones, nullptr);
         child.setProperty ("fineTuneCents", st.fineTuneCents, nullptr);
@@ -1066,6 +1107,9 @@ void SuperSamplerProcessor::importFromValueTree (const juce::ValueTree& tree)
         p.state.id = (int) child.getProperty ("id", nextId);
         p.state.midiLow = (int) child.getProperty ("midiLow", 36);
         p.state.midiHigh = (int) child.getProperty ("midiHigh", 60);
+        p.state.velocityLow = (int) child.getProperty ("velocityLow", 0);
+        p.state.velocityHigh = (int) child.getProperty ("velocityHigh", 127);
+        p.state.velocityScalesGain = static_cast<bool>(child.getProperty("velocityScalesGain", true));
         p.state.gain = (float) child.getProperty ("gain", 1.0f);
         p.state.coarseTuneSemitones = (int) child.getProperty ("coarseTuneSemitones", 0);
         p.state.fineTuneCents = (int) child.getProperty ("fineTuneCents", 0);
@@ -1086,6 +1130,8 @@ void SuperSamplerProcessor::importFromValueTree (const juce::ValueTree& tree)
         {
             auto player = std::make_unique<SuperSamplePlayer> (p.state.id);
             player->setMidiRange (p.state.midiLow, p.state.midiHigh);
+            player->setVelocityRange (p.state.velocityLow, p.state.velocityHigh);
+            player->setVelocityScalesGain (p.state.velocityScalesGain);
             player->setGain (p.state.gain);
             player->setTuning (p.state.coarseTuneSemitones, p.state.fineTuneCents);
             player->setFilePathAndStatus (p.path, p.path.isNotEmpty() ? "pending" : "empty");
@@ -1170,7 +1216,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
 
-    if (browsingPlayerId < 0)
+    if (browserMode == BrowserMode::none)
         return { { UIBox{} } };
 
     if (!browserUiDirty && !cachedBrowserUi.empty())
@@ -1193,6 +1239,16 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
     pathCell.onActivate = [this]() { closeFileBrowser(); };
     pushRow(std::move(pathCell));
 
+    if (browserMode == BrowserMode::sampleSet && sampleSetBrowserStatus.isNotEmpty())
+    {
+        UIBox statusCell;
+        statusCell.kind = UIBox::Kind::SamplerAction;
+        statusCell.text = sanitizeLabel(sampleSetBrowserStatus, 36);
+        statusCell.width = 6.0f;
+        statusCell.isDisabled = true;
+        pushRow(std::move(statusCell));
+    }
+
     UIBox searchCell;
     searchCell.kind = UIBox::Kind::SamplerAction;
     searchCell.text = fileBrowser.getSearchQuery().isEmpty()
@@ -1208,7 +1264,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
     upCell.onActivate = [this]() { browseUp(); };
     pushRow(std::move(upCell));
 
-    const auto entries = fileBrowser.getEntries(isBrowsableAudioFile);
+    const auto entries = fileBrowser.getEntries(browserMode == BrowserMode::sample ? isBrowsableAudioFile : isBrowsableSampleSetFile);
 
     auto addEntry = [this, &pushRow](const juce::File& file, bool isDirectory)
     {
@@ -1220,8 +1276,10 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
         {
             if (isDirectory)
                 browseInto(file);
-            else
-                previewBrowsedFile(file);
+                else if (browserMode == BrowserMode::sampleSet)
+                    loadSampleSetAsync(file);
+                else
+                    previewBrowsedFile(file);
         };
 
         UIBox actionCell;
@@ -1231,7 +1289,7 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::buildBrowserUi()
         if (!isDirectory)
         {
             actionCell.text = "LOAD";
-            actionCell.onActivate = [this, file]() { loadBrowsedFile(file); };
+            actionCell.onActivate = [this, file]() { if (browserMode == BrowserMode::sampleSet) loadSampleSetAsync(file); else loadBrowsedFile(file); };
         }
 
         pushRow(std::move(nameCell), std::move(actionCell));
@@ -1259,6 +1317,7 @@ void SuperSamplerProcessor::openFileBrowserForPlayer(int playerId)
     const std::lock_guard<std::mutex> lock(playerMutex);
     stopPreviewPlayback();
     browsingPlayerId = playerId;
+    browserMode = BrowserMode::sample;
     cachedBrowserUi.clear();
     browserUiDirty = true;
     if (lastSampleDirectory.exists() && lastSampleDirectory.isDirectory())
@@ -1267,11 +1326,27 @@ void SuperSamplerProcessor::openFileBrowserForPlayer(int playerId)
         fileBrowser.open(juce::File::getSpecialLocation(juce::File::userHomeDirectory));
 }
 
+void SuperSamplerProcessor::openFileBrowserForSampleSet()
+{
+    const std::lock_guard<std::mutex> lock(playerMutex);
+    if (browserMode != BrowserMode::none)
+        return;
+    browsingPlayerId = -1;
+    browserMode = BrowserMode::sampleSet;
+    sampleSetBrowserStatus.clear();
+    cachedBrowserUi.clear();
+    browserUiDirty = true;
+    fileBrowser.open(lastSampleDirectory.exists() && lastSampleDirectory.isDirectory()
+        ? lastSampleDirectory : juce::File::getSpecialLocation(juce::File::userHomeDirectory));
+}
+
 void SuperSamplerProcessor::closeFileBrowser()
 {
     const std::lock_guard<std::mutex> lock(playerMutex);
     stopPreviewPlayback();
     browsingPlayerId = -1;
+    browserMode = BrowserMode::none;
+    sampleSetLoadGeneration.fetch_add(1, std::memory_order_acq_rel);
     fileBrowser.close();
     cachedBrowserUi.clear();
     browserUiDirty = true;
@@ -1371,4 +1446,64 @@ void SuperSamplerProcessor::stopPreviewPlayback()
     previewRequestGeneration.fetch_add(1, std::memory_order_acq_rel);
     if (previewPlayer != nullptr)
         previewPlayer->stop();
+}
+
+void SuperSamplerProcessor::loadSampleSetAsync(const juce::File& file)
+{
+    const auto generation = sampleSetLoadGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+    double outputRate = 44100.0; int blockSize = 512;
+    {
+        const std::lock_guard<std::mutex> lock(playerMutex);
+        if (browserMode != BrowserMode::sampleSet) return;
+        if (sampleSetBrowserStatus == "LOADING") return;
+        sampleSetBrowserStatus = "LOADING";
+        browserUiDirty = true;
+        outputRate = currentOutputSampleRate; blockSize = currentBlockSize;
+    }
+    if (sampleSetLoadFuture.valid()) sampleSetLoadFuture.wait();
+    sampleSetLoadFuture = std::async(std::launch::async, [this, file, generation, outputRate, blockSize]()
+    {
+        std::vector<SampleSetLayer> layers; juce::String error;
+        if (!parseSampleSet(file, layers, error))
+        {
+            std::lock_guard<std::mutex> lock(playerMutex);
+            if (sampleSetLoadGeneration.load(std::memory_order_acquire) == generation) { sampleSetBrowserStatus = error; browserUiDirty = true; }
+            return;
+        }
+        juce::AudioFormatManager formats; formats.registerBasicFormats();
+        std::vector<std::unique_ptr<SuperSamplePlayer>> replacement; replacement.reserve(layers.size());
+        for (std::size_t index = 0; index < layers.size(); ++index)
+        {
+            if (sampleSetLoadGeneration.load(std::memory_order_acquire) != generation) return;
+            const auto& layer = layers[index];
+            std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(layer.file));
+            if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0) { error = "UNSUPPORTED SAMPLE " + layer.file.getFileName(); break; }
+            const auto channels = static_cast<int>(juce::jmin<juce::int64>(reader->numChannels, 2));
+            juce::AudioBuffer<float> audio(channels, static_cast<int>(reader->lengthInSamples));
+            reader->read(&audio, 0, audio.getNumSamples(), 0, true, true);
+            auto player = std::make_unique<SuperSamplePlayer>(static_cast<int>(index) + 1);
+            player->prepareToPlay(outputRate, blockSize);
+            player->setMidiRange(layer.note, layer.note);
+            player->setVelocityRange(layer.low, layer.high);
+            player->setVelocityScalesGain(false);
+            player->setFilePathAndStatus(layer.file.getFullPathName(), "loading", layer.file.getFileName());
+            player->setLoadedBuffer(std::move(audio), layer.file.getFileName(), reader->sampleRate);
+            replacement.push_back(std::move(player));
+        }
+        if (error.isNotEmpty() || replacement.size() != layers.size())
+        {
+            std::lock_guard<std::mutex> lock(playerMutex);
+            if (sampleSetLoadGeneration.load(std::memory_order_acquire) == generation) { sampleSetBrowserStatus = error.isNotEmpty() ? error : "LOAD FAILED"; browserUiDirty = true; }
+            return;
+        }
+        std::vector<std::unique_ptr<SuperSamplePlayer>> old;
+        {
+            const std::lock_guard<std::mutex> lock(playerMutex);
+            if (sampleSetLoadGeneration.load(std::memory_order_acquire) != generation) return;
+            old = std::move(players); players = std::move(replacement); nextId = static_cast<int>(players.size()) + 1;
+            lastSampleDirectory = file.getParentDirectory(); browsingPlayerId = -1; browserMode = BrowserMode::none;
+            sampleSetBrowserStatus.clear(); cachedBrowserUi.clear(); browserUiDirty = true;
+        }
+        sendSamplerStateToUI();
+    });
 }

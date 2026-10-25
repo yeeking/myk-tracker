@@ -152,6 +152,21 @@ int main()
     require(clampedState.coarseTuneSemitones == 36, "coarse tuning clamps at +36");
     require(clampedState.fineTuneCents == -99, "fine tuning clamps at -99");
 
+    player.setVelocityRange(100, 20);
+    require(player.getState().velocityLow == 20 && player.getState().velocityHigh == 100,
+            "velocity range clamps and orders endpoints");
+    require(player.acceptsTrigger(60, 20) && player.acceptsTrigger(60, 100) && !player.acceptsTrigger(60, 101),
+            "velocity routing includes both endpoints");
+    player.setVelocityScalesGain(false);
+    player.setVelocityRange(0, 127);
+    player.setTuning(0, 0);
+    player.prepareToPlay(44100.0, 16);
+    require(player.setLoadedBuffer(makeRamp(128), "ramp", 44100.0), "unity velocity test sample loads");
+    player.triggerNote(60, 1);
+    output.clear();
+    player.renderToBuffer(output, 0, output.getNumSamples());
+    requireNear(output.getSample(0, 1), 0.001, 1.0e-6, "unity velocity mode does not attenuate sampleset layers");
+
     player.prepareToPlay(44100.0, 16);
     require(player.setLoadedBuffer(makeRamp(128), "ramp", 22050.0), "a differently rated ramp sample loads");
     player.setTuning(12, 0);
@@ -192,10 +207,12 @@ int main()
             "restored tuning values clamp to the supported range");
 
     const auto cells = restored.getUIBoxes({});
-    require(cells.size() == 8, "sampler UI exposes eight columns");
+    require(cells.size() == 10, "sampler UI exposes ten columns");
     require(cells[5].size() > 1 && cells[6].size() > 1, "sampler UI exposes coarse and fine controls");
     require(cells[5][1].onAdjust != nullptr && cells[6][1].onInsert != nullptr,
             "sampler tuning cells support adjustment and numeric entry");
+    require(cells[7][1].onAdjust != nullptr && cells[8][1].onInsert != nullptr,
+            "sampler velocity cells support adjustment and numeric entry");
     cells[5][1].onInsert(999.0);
     auto uiTuning = firstPlayerTuning(restored);
     require(uiTuning.first == 36 && uiTuning.second == 75,

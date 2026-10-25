@@ -66,12 +66,24 @@ struct TestMachineHost final : MachineHost
     MachineInterface* getMachine(CommandType, std::size_t) override { return nullptr; }
     const MachineInterface* getMachine(CommandType, std::size_t) const override { return nullptr; }
     std::size_t getMachineStackCount() const override { return muted.size(); }
-    std::vector<CommandType> getMachineStackTypes(std::size_t) const override { return {}; }
+    std::vector<CommandType> getMachineStackTypes(std::size_t stack) const override
+    {
+        for (const auto s : enabledSamplerStacks)
+            if (s == stack)
+                return { CommandType::Sampler };
+        return {};
+    }
     void addMachineToStack(std::size_t) override {}
     void removeMachineFromStack(std::size_t, std::size_t) override {}
     void cycleMachineTypeInStack(std::size_t, std::size_t, int) override {}
     void moveMachineInStack(std::size_t, std::size_t, int) override {}
-    bool isMachineEnabledInStack(std::size_t, std::size_t) const override { return false; }
+    bool isMachineEnabledInStack(std::size_t stack, std::size_t slot) const override
+    {
+        for (const auto s : enabledSamplerStacks)
+            if (s == stack)
+                return slot == 0;
+        return false;
+    }
     void toggleMachineEnabledInStack(std::size_t, std::size_t) override {}
     float getMachineSendLevelDbInStack(std::size_t, std::size_t) const override { return 0.0f; }
     void adjustMachineSendLevelDbInStack(std::size_t, std::size_t, int) override {}
@@ -119,6 +131,11 @@ struct TestMachineHost final : MachineHost
     bool masterMuted = false;
     std::array<bool, 2> auxMuted { false, false };
     std::vector<std::size_t> silencedStacks;
+
+    // Stacks marked here report a single enabled Sampler slot (slot 0), so the
+    // editor's GM-drum keymap path can be exercised without a real processor.
+    std::vector<std::size_t> enabledSamplerStacks;
+    void enableSamplerInStack(std::size_t stack) { enabledSamplerStacks.push_back(stack); }
 };
 
 struct TestAudioConfigurationHost final : AudioConfigurationHost
@@ -660,6 +677,93 @@ int main()
     require(machines.notes.empty(), "preview remains suppressed while playing");
     keyboardEditor.resetCursor();
     require(!keyboardEditor.isSequenceEntryArmed(), "reset clears transient Sequence keyboard entry ARM");
+
+    // --- GM drum keymap while the current sequence's stack has an enabled sampler ---
+    machines.notes.clear();
+    Sequencer drumSequencer(1, 4);
+    drumSequencer.stop();
+    drumSequencer.getSequence(0)->setMachineId(1.0);
+    SequencerEditor drumEditor(&drumSequencer);
+    TestMachineHost drumHost;
+    drumHost.enableSamplerInStack(1);
+    drumEditor.setMachineHost(&drumHost);
+    require(drumEditor.getDrumOctaveOffset() == 0, "drum octave offset starts at zero");
+    require(drumEditor.getCurrentOctave() == 6.0, "drum entry inherits the default piano octave");
+    drumEditor.gotoStepPage();
+    drumEditor.setStepCursor(0, Step::noteInd);
+    const auto pianoOctaveBeforeDrum = drumEditor.getCurrentOctave();
+    require(drumEditor.handleNoteKey('z'), "drum key is handled with an enabled sampler");
+    auto drumEntry = drumSequencer.getStepData(0, 0);
+    require(!drumEntry.empty()
+        && drumEntry[0][Step::cmdInd] == static_cast<double>(CommandType::MidiNote)
+        && drumEntry[0][Step::noteInd] == 36.0,
+            "drum key stores its absolute GM note without piano-octave transpose");
+    require(drumEditor.getCurrentOctave() == pianoOctaveBeforeDrum,
+            "drum entry does not sync the piano octave from the GM note");
+    drumEditor.releaseKeyboardAuditionKey('z');
+    drumEditor.setCurrentStep(1);
+    require(drumEditor.handleNoteKey('z'), "repeated drum key is handled");
+    require(drumSequencer.getStepData(0, 1)[0][Step::noteInd] == 36.0,
+            "repeated drum entry stays on the same absolute GM note");
+    drumEditor.releaseKeyboardAuditionKey('z');
+    require(drumEditor.getOctaveHudLabel() == "GM OCT 0", "drum entry flashes the GM octave HUD");
+    require(drumEditor.getOctaveHudExpiryMs() > 0.0, "drum HUD expiry is refreshed on entry");
+
+    // '.' / ',' shift the whole GM row; the note under the cursor is left alone.
+    const auto beforeDrumShiftRow = drumSequencer.getStepData(0, 0);
+    drumEditor.incrementOctave();
+    require(drumEditor.getDrumOctaveOffset() == 1, "octave up raises the drum row by one");
+    require(drumSequencer.getStepData(0, 0) == beforeDrumShiftRow,
+            "drum octave shift does not rewrite the note under the cursor");
+    require(drumEditor.getOctaveHudLabel() == "GM OCT +1", "drum octave up flashes a positive HUD");
+    drumEditor.setCurrentStep(2);
+    require(drumEditor.handleNoteKey('z'), "drum key after a row shift is handled");
+    require(drumSequencer.getStepData(0, 2)[0][Step::noteInd] == 48.0,
+            "drum entry follows the whole-row octave shift");
+    drumEditor.releaseKeyboardAuditionKey('z');
+    drumEditor.decrementOctave();
+    require(drumEditor.getDrumOctaveOffset() == 0, "octave down restores the drum row");
+
+    // High clamp: the top mapped key (59) may not be pushed past MIDI 127.
+    for (int i = 0; i < 12; ++i) drumEditor.incrementOctave();
+    require(drumEditor.getDrumOctaveOffset() == 5, "drum octave up clamps at +5");
+    drumEditor.decrementOctave();
+    require(drumEditor.getDrumOctaveOffset() == 4, "drum octave down steps back below the high clamp");
+    // Low clamp: the bottom mapped key (22) may not be pushed below MIDI 1.
+    for (int i = 0; i < 12; ++i) drumEditor.decrementOctave();
+    require(drumEditor.getDrumOctaveOffset() == -1, "drum octave down clamps at -1");
+    drumEditor.incrementOctave();
+    require(drumEditor.getDrumOctaveOffset() == 0, "drum octave up steps back above the low clamp");
+
+    // Without an enabled sampler the same octave keys keep the piano behaviour,
+    // and the Sequence-page note rewrite is gated on the transient ARM.
+    Sequencer pianoSequencer(1, 4);
+    pianoSequencer.stop();
+    pianoSequencer.getSequence(0)->setMachineId(1.0);
+    SequencerEditor pianoEditor(&pianoSequencer);
+    TestMachineHost pianoHost;
+    pianoEditor.setMachineHost(&pianoHost);
+    pianoEditor.gotoSequencePage();
+    putNote(*pianoSequencer.getSequence(0), 0, 60.0);
+    pianoEditor.setCurrentStep(0);
+    const auto pianoNoteBefore = pianoSequencer.getStepData(0, 0)[0][Step::noteInd];
+    pianoEditor.incrementOctave();
+    require(pianoSequencer.getStepData(0, 0)[0][Step::noteInd] == pianoNoteBefore,
+            "disarmed Sequence-page octave up does not rewrite the note");
+    require(pianoEditor.getOctaveHudLabel() == "OCT 7", "piano octave up flashes the piano HUD");
+    pianoEditor.setSequenceEntryArmed(true);
+    pianoEditor.decrementOctave();
+    require(pianoSequencer.getStepData(0, 0)[0][Step::noteInd] == pianoNoteBefore - 12.0,
+            "armed Sequence-page octave down rewrites the note under the cursor");
+    // The Step page keeps its historical unconditional note-edit behaviour.
+    pianoEditor.gotoStepPage();
+    putNote(*pianoSequencer.getSequence(0), 1, 72.0);
+    pianoEditor.setCurrentStep(1);
+    pianoEditor.setStepCursor(0, Step::noteInd);
+    pianoEditor.setSequenceEntryArmed(false);
+    pianoEditor.incrementOctave();
+    require(pianoSequencer.getStepData(0, 1)[0][Step::noteInd] == 84.0,
+            "Step-page octave up still rewrites the note while Sequence ARM is off");
 
     Sequencer tpsSequencer(1, 4);
     SequencerEditor tpsEditor(&tpsSequencer);

@@ -244,7 +244,7 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
         return std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId)
             + "\n" + std::to_string(stepIndex + 1) + "/" + std::to_string(sequenceLength);
     };
-    const auto appendChordStatus = [&ui](std::string text)
+    const auto appendEntryStatus = [&ui](std::string text)
     {
         const auto label = ui.getProperty("chordHudLabel", "").toString().toStdString();
         const auto variation = static_cast<int>(ui.getProperty("chordHudVariation", 0));
@@ -253,20 +253,25 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
         if (!label.empty() && variation >= 0 && count > 0
             && juce::Time::getMillisecondCounterHiRes() < expiry)
             text += "\n" + label + " " + std::to_string(variation + 1) + "/" + std::to_string(count);
+
+        const auto octaveLabel = ui.getProperty("octaveHudLabel", "").toString().toStdString();
+        const auto octaveExpiry = static_cast<double>(ui.getProperty("octaveHudExpiryMs", 0.0));
+        if (!octaveLabel.empty() && juce::Time::getMillisecondCounterHiRes() < octaveExpiry)
+            text += "\n" + octaveLabel;
         return text;
     };
 
     switch (mode)
     {
         case SequencerEditorMode::selectingSeqAndStep:
-            return appendChordStatus("SEQ\n" + sequenceAndStep());
+            return appendEntryStatus("SEQ\n" + sequenceAndStep());
 
         case SequencerEditorMode::editingStep:
-            return appendChordStatus("STEP\n" + std::to_string(sequenceIndex + 1)
+            return appendEntryStatus("STEP\n" + std::to_string(sequenceIndex + 1)
                 + "\n" + std::to_string(stepIndex + 1) + "/" + std::to_string(sequenceLength));
 
         case SequencerEditorMode::configuringSequence:
-            return appendChordStatus("CONF\n" + std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId));
+            return appendEntryStatus("CONF\n" + std::to_string(sequenceIndex + 1) + "->" + std::to_string(machineId));
 
         case SequencerEditorMode::machineConfig:
             break;
@@ -276,7 +281,7 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
         case SequencerEditorMode::audioConfig:
         case SequencerEditorMode::help:
         case SequencerEditorMode::resetConfirmation:
-            return appendChordStatus(compactPageLabel(mode));
+            return appendEntryStatus(compactPageLabel(mode));
     }
 
     int selectedMachineId = machineId;
@@ -304,9 +309,9 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
     });
 
     if (!detailType.has_value())
-        return appendChordStatus("MACH\n" + std::to_string(selectedMachineId));
+        return appendEntryStatus("MACH\n" + std::to_string(selectedMachineId));
 
-    return appendChordStatus("MACH\n" + std::to_string(selectedMachineId)
+    return appendEntryStatus("MACH\n" + std::to_string(selectedMachineId)
         + "\n" + machineTraits(detailType.value()).shortLabel
         + "\n" + (detailEnabled ? "ON" : "OFF"));
 }
@@ -996,10 +1001,10 @@ void TrackerMainUI::prepareMachineConfigView()
     samplerColumnWidths.clear();
 
     int machineId = 0;
-    std::vector<std::vector<UIBox>> machineBoxes;
     std::optional<CommandType> detailType;
     std::string selectedStackAction;
     std::size_t scopeStackIndex = 0;
+    bool needsScope = true;
     audioProcessor.withAudioThreadExclusive([&]()
     {
         auto* seq = audioProcessor.getSequencer();
@@ -1008,19 +1013,22 @@ void TrackerMainUI::prepareMachineConfigView()
             machineId = static_cast<int>(sequence->getMachineId());
         }
         scopeStackIndex = seqEditor->getActiveMachineIndex(CommandType::Sampler);
-        machineBoxes = seqEditor->getMachineCells();
         detailType = seqEditor->getFocusedMachineDetailType();
-        for (const auto& column : machineBoxes)
+        needsScope = !detailType.has_value() || detailType.value() != CommandType::Sampler;
+        const auto& machineCells = seqEditor->getMachineCells();
+        for (const auto& column : machineCells)
             for (const auto& cell : column)
                 if (cell.isSelected)
                     selectedStackAction = describeStackCursorAction(cell.text);
     });
     // copyStackScope takes the audio lock itself, so snapshot outside the block above.
     std::vector<float> scopeSamples;
-    audioProcessor.copyStackScope(scopeStackIndex, scopeSamples);
+    if (needsScope)
+        audioProcessor.copyStackScope(scopeStackIndex, scopeSamples);
 
     if (detailType.has_value() && detailType.value() == CommandType::Sampler)
     {
+        const auto& machineBoxes = seqEditor->getMachineCells();
         samplerViewActive = true;
         customMachineColumnWidthsActive = true;
         bool browserActive = false;
@@ -1037,8 +1045,8 @@ void TrackerMainUI::prepareMachineConfigView()
             samplerColumnWidths[col] = columnWidth;
             hasCustomWidths = hasCustomWidths || columnWidth > 1.0f;
         }
-        if (!hasCustomWidths && samplerColumnWidths.size() == 8)
-            samplerColumnWidths = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
+        if (!hasCustomWidths && samplerColumnWidths.size() == 10)
+            samplerColumnWidths = { 1.0f, 2.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f };
 
         TrackerUIComponent::Style style;
         style.background = samplerPalette.background;
@@ -1051,11 +1059,14 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        // The band (and its trace) are hidden while the file browser clamps
-        // the visible rows.
-        if (!browserActive)
-            appendScopeBand(machineBoxes, rows, scopeStackIndex, scopeSamples);
-        updateCellStates(machineBoxes, browserActive ? std::min<std::size_t>(rows, 8) : rows + 2, cols);
+        // Keep the sampler at the same compact height as the tracker pages.
+        // updateCellStates follows the selected machine cell, so cursor
+        // navigation scrolls long samplesets through this fixed row window.
+        constexpr std::size_t kSamplerVisibleRows = 9;
+        updateCellStates(machineBoxes,
+                         browserActive ? std::min<std::size_t>(rows, 8)
+                                       : std::min<std::size_t>(rows, kSamplerVisibleRows),
+                         cols);
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [sampler]";
         overlayState.color = samplerPalette.textPrimary;
         overlayState.glowColor = samplerPalette.glowActive;
@@ -1064,6 +1075,7 @@ void TrackerMainUI::prepareMachineConfigView()
     }
     if (detailType.has_value() && detailType.value() == CommandType::WavetableSynth)
     {
+        auto machineBoxes = seqEditor->getMachineCells();
         customMachineColumnWidthsActive = true;
         samplerColumnWidths.assign(machineBoxes.size(), 1.0f);
         for (std::size_t col = 0; col < machineBoxes.size(); ++col)
@@ -1201,6 +1213,7 @@ void TrackerMainUI::prepareMachineConfigView()
     }
     if (detailType.has_value() && detailType.value() == CommandType::ModulationMatrix)
     {
+        const auto& machineBoxes = seqEditor->getMachineCells();
         TrackerUIComponent::Style style;
         style.background = palette.background;
         style.lightColor = palette.lightColor;
@@ -1255,6 +1268,7 @@ void TrackerMainUI::prepareMachineConfigView()
     }
     if (detailType.has_value() && isSimpleMachineDetail(detailType.value()))
     {
+        auto machineBoxes = seqEditor->getMachineCells();
         TrackerUIComponent::Style style;
         style.background = palette.background;
         style.lightColor = palette.lightColor;
@@ -1332,6 +1346,7 @@ void TrackerMainUI::prepareMachineConfigView()
         return;
     }
 
+    auto machineBoxes = seqEditor->getMachineCells();
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;

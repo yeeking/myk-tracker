@@ -249,6 +249,9 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("chordHudVariation", static_cast<int>(seqEditor.getChordHudVariation()));
     state->setProperty("chordHudVariationCount", static_cast<int>(seqEditor.getChordHudVariationCount()));
     state->setProperty("chordHudExpiryMs", seqEditor.getChordHudExpiryMs());
+    state->setProperty("octaveHudLabel", juce::String(seqEditor.getOctaveHudLabel()));
+    state->setProperty("octaveHudExpiryMs", seqEditor.getOctaveHudExpiryMs());
+    state->setProperty("drumOctaveOffset", seqEditor.getDrumOctaveOffset());
     state->setProperty("currentSeqParam", static_cast<int>(seqEditor.getCurrentSeqParam()));
     state->setProperty("mixerColumn", static_cast<int>(seqEditor.getMixerColumn()));
     const auto selectedMixerStack = seqEditor.getSelectedMixerStack();

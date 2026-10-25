@@ -61,6 +61,19 @@ class MachineUtilsAbs{
         };
         return key_to_note;
     }
+    /** Maps the computer piano keys to the General MIDI drum layout used by
+        DrumSampleSet XML files, in their document Sound order. */
+    static std::map<char, double> getKeyboardToGmDrumNotes()
+    {
+        return {
+            { 'z', 36 }, { 's', 38 }, { 'x', 40 }, { 'd', 37 },
+            { 'c', 48 }, { 'v', 50 }, { 'g', 45 }, { 'b', 47 },
+            { 'h', 43 }, { 'n', 58 }, { 'j', 46 }, { 'm', 26 },
+            { 'q', 42 }, { 'w', 22 }, { 'e', 44 }, { 'r', 49 },
+            { 't', 55 }, { 'y', 57 }, { 'u', 52 }, { 'i', 51 },
+            { 'o', 59 }, { 'p', 53 }
+        };
+    }
      /** maps from integer values, i.e. midi notes modded on 12
    * to note names, getIntToDrumMap()[0] == 'c' as c is note 0/12/24 etc.
    */

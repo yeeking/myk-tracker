@@ -265,7 +265,8 @@ juce::var TrackerControlService::serialiseMachineCells(std::size_t stackIndex, c
 juce::var TrackerControlService::makeMachineCellsNow()
 {
     auto& editor = processor.seqEditor;
-    editor.refreshMachineStateForCurrentSequence();
+    if (editor.machineStateRefreshNeeded())
+        editor.refreshMachineStateForCurrentSequence();
 
     std::size_t stackIndex = 0;
     if (auto* viewedSequencer = processor.getSequencer(); viewedSequencer != nullptr)
@@ -340,7 +341,8 @@ juce::var TrackerControlService::makeUiNow()
 
 juce::var TrackerControlService::makeUiForPageNow()
 {
-    if (processor.seqEditor.getEditMode() == SequencerEditorMode::machineConfig)
+    if (processor.seqEditor.getEditMode() == SequencerEditorMode::machineConfig
+        && processor.seqEditor.machineStateRefreshNeeded())
         processor.seqEditor.refreshMachineStateForCurrentSequence();
     auto ui = processor.getUiStateForCurrentPage();
     if (sequenceSelection.active && ui.getDynamicObject() != nullptr)
@@ -1052,9 +1054,12 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 if (sampler == nullptr) return fail("not_found", "Sampler stack does not exist");
 
                 const bool hasRange = hasArg(args, "startNote") || hasArg(args, "endNote");
+                const bool hasVelocityRange = hasArg(args, "startVelocity") || hasArg(args, "endVelocity");
                 int playerId = intArg(args, "playerId", -1);
                 int startNote = 0;
                 int endNote = 127;
+                int startVelocity = 0;
+                int endVelocity = 127;
                 bool createdPlayer = false;
                 if (hasRange)
                 {
@@ -1064,7 +1069,13 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     endNote = intArg(args, "endNote");
                     if (startNote < 0 || startNote > 127 || endNote < 0 || endNote > 127 || startNote > endNote)
                         return fail("invalid_argument", "Sample note range must be within MIDI notes 0 through 127, with startNote <= endNote");
-                    playerId = sampler->addSamplePlayerForControl(startNote, endNote);
+                    if (hasVelocityRange)
+                    {
+                        if (!hasArg(args, "startVelocity") || !hasArg(args, "endVelocity")) return fail("invalid_argument", "startVelocity and endVelocity must be supplied together");
+                        startVelocity = intArg(args, "startVelocity"); endVelocity = intArg(args, "endVelocity");
+                        if (startVelocity < 0 || startVelocity > 127 || endVelocity < 0 || endVelocity > 127 || startVelocity > endVelocity) return fail("invalid_argument", "Sample velocity range must be within 0 through 127, with startVelocity <= endVelocity");
+                    }
+                    playerId = sampler->addSamplePlayerForControl(startNote, endNote, startVelocity, endVelocity);
                     createdPlayer = true;
                 }
                 else if (playerId < 0)
@@ -1471,8 +1482,12 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 return fail("unsupported", "Screenshots must use the dedicated capture path");
             default: return fail("unsupported", "Unsupported command");
         }
+        if (contentChanged)
+            editor.requestMachineStateRefresh();
         changed(contentChanged, viewChanged);
-        return success(makeViewNow());
+        const bool includeMachineCells = contentChanged
+            && editor.getEditMode() == SequencerEditorMode::machineConfig;
+        return success(makeViewNow(includeMachineCells, true));
     });
 }
 

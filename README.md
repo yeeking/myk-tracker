@@ -47,6 +47,33 @@ memory; MYK Tracker does not migrate older project layouts.
 This clean-slate rule applies to project and plug-in state. It does not affect
 the optional legacy MCP client handshake described below.
 
+## Sampler samplesets
+
+The sampler machine's `LOAD SET` control imports a version-1 `DrumSampleSet`
+XML document. Each `Sound` contributes its `midiNote`, and each child `Layer`
+becomes one sampler row using its inclusive `velocityLow` and `velocityHigh`
+range. Relative layer paths are resolved beside the XML first, then against
+its optional `rootFolder`. Import decodes and validates the complete set in
+the background and replaces the sampler only when every layer succeeds.
+
+Sampleset layers use velocity to select the appropriate recording without a
+second velocity-gain multiplier. Manually loaded samples keep the existing
+velocity-gain behavior. `STATE ONLY` saves preserve layer paths and ranges;
+`WITH AUDIO` additionally embeds every layer as portable FLAC audio.
+
+Computer-key audition automatically changes with the current sequence's stack.
+Without an enabled sampler it uses the normal lower-row chromatic piano map.
+With an enabled sampler it uses the 22-key GM-drum map in the same order as
+the sampleset XML `Sound` entries: `Z S X D C V G B H N J M Q W E R T Y U I O P`.
+Each drum key emits its fixed GM note; `.` and `,` shift the entire GM row up
+or down one octave so a pattern can be re-keyed into another octave. The shift
+is clamped so every mapped key stays inside MIDI 1-127, and it never rewrites
+the note under the cursor. A right-HUD badge shows the active entry octave for
+both maps (e.g. `GM OCT +1` or `OCT 7`) while a key is being entered or the
+octave is adjusted. On the Sequence page, piano-mode octave keys rewrite the
+note under the cursor only while note entry is ARMed; the Step page keeps its
+always-editable behaviour.
+
 ## Local MCP control
 
 The standalone application starts a local-only MCP Streamable HTTP server at
