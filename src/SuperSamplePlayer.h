@@ -16,6 +16,11 @@ public:
         int midiLow { 36 };   // default C2
         /** Highest MIDI note accepted by this player. */
         int midiHigh { 60 };  // default C4
+        /** Inclusive MIDI velocity range accepted by this player. */
+        int velocityLow { 0 };
+        int velocityHigh { 127 };
+        /** Whether incoming velocity also scales this player's output gain. */
+        bool velocityScalesGain { true };
         /** Static gain applied to playback from this player. */
         float gain { 1.0f };
         /** Fixed playback offset in semitones, clamped to -36 through +36. */
@@ -32,8 +37,6 @@ public:
         juce::String fileName;
         /** Full path to the loaded sample file. */
         juce::String filePath;
-        /** Cached waveform preview SVG string. */
-        juce::String waveformSVG;
     };
 
     /** Creates a sample player with a fixed player id. */
@@ -44,6 +47,10 @@ public:
 
     /** Sets the MIDI note range that will trigger this player. */
     void setMidiRange (int low, int high) noexcept;
+    /** Sets the inclusive velocity range that will trigger this player. */
+    void setVelocityRange (int low, int high) noexcept;
+    /** Selects whether trigger velocity is also applied as output gain. */
+    void setVelocityScalesGain (bool enabled) noexcept;
     /** Sets the static gain multiplier for this player. */
     void setGain (float g) noexcept;
     /** Sets the fixed coarse/fine playback tuning for this player. */
@@ -55,6 +62,8 @@ public:
 
     /** Returns true when the player should respond to the given MIDI note. */
     bool acceptsNote (int midiNote) const noexcept;
+    /** Returns true when both note and velocity select this player. */
+    bool acceptsTrigger (int midiNote, int velocity) const noexcept;
     /** Starts playback from the start of the buffer. */
     void trigger();
     /** Starts playback and applies the note velocity as gain. */
@@ -75,7 +84,7 @@ public:
     /** Marks the player as having failed to load a sample. */
     void markError (const juce::String& path, const juce::String& message);
     /** Returns the cached waveform SVG string. */
-    juce::String getWaveformSVG() const noexcept { return state.waveformSVG; }
+    juce::String getWaveformSVG() const noexcept { return waveformSVG; }
     /** Returns the cached waveform points used by the UI. */
     const std::vector<float>& getWaveformPoints() const noexcept { return waveformPoints; }
     /** Starts VU accumulation for the next audio block. */
@@ -97,6 +106,8 @@ private:
 
     /** UI-facing player state. */
     State state;
+    /** Cached waveform preview SVG string, kept out of `State` to avoid copying it into UI snapshots. */
+    juce::String waveformSVG;
     /** Loaded sample audio buffer. */
     juce::AudioBuffer<float> sampleBuffer;
     /** Original sample rate of the loaded file. */

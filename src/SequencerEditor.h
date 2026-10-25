@@ -335,6 +335,9 @@ public:
   void requestApplicationQuit();
 
   void refreshMachineStateForCurrentSequence();
+  /** Marks the cached machine grid stale so the next page frame can rebuild it. */
+  void requestMachineStateRefresh() noexcept { machineStateDirty = true; }
+  bool machineStateRefreshNeeded() const noexcept { return machineStateDirty; }
   const std::vector<std::vector<UIBox>> &getMachineCells() const;
   /** Machine stack index the current sequence's machineId maps onto for `type`. */
   std::size_t getActiveMachineIndex(CommandType type) const;
@@ -409,6 +412,11 @@ public:
   void setSelectedSongCursor(std::size_t row, std::size_t col);
   /** returns the current edit octave */
   double getCurrentOctave() const;
+  /** Returns the transient GM drum row octave shift (sampler stacks only). */
+  int getDrumOctaveOffset() const;
+  /** Transient HUD label shown while entering notes or adjusting the octave. */
+  std::string getOctaveHudLabel() const;
+  double getOctaveHudExpiryMs() const;
   /** move the cursor to a specific sequence*/
   void setCurrentSequence(int seq);
   /** move the cursor to a specific step*/
@@ -436,6 +444,8 @@ private:
   Sequencer* getSequencerImpl() const;
   void requestStringRefresh();
   std::optional<double> lookupKeyboardMidiNote(char key) const;
+  /** True when the current sequence's stack has an enabled sampler slot. */
+  bool currentStackHasEnabledSampler() const;
   bool currentSequenceControlMode() const;
   bool currentStepIsControlCommand() const;
   void enterControlCommand(CommandType command);
@@ -443,6 +453,8 @@ private:
   void beginKeyboardAudition(char physicalKey, const std::vector<std::vector<double>>& rows,
                              const SequenceReadOnly& context);
   void syncOctaveFromMidiNote(double midiNote);
+  /** Refreshes the transient right-HUD octave label with a fresh expiry. */
+  void flashOctaveHud(const std::string& label);
   void clampStepCursorToCurrentStep();
   bool applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals,
                                const std::string& familyLabel, std::size_t variationIndex,
@@ -555,6 +567,13 @@ private:
   SequencerEditorSubMode editSubMode;
   double stepIncrement;
   double octave;
+  /** Transient GM drum row shift, in octaves, applied while the current
+   * sequence's stack has an enabled sampler. Clamped so every mapped key
+   * stays within MIDI 1..127. */
+  int drumOctaveOffset = 0;
+  /** Transient right-HUD label describing the active entry octave. */
+  std::string octaveHudLabel;
+  double octaveHudExpiryMs = 0.0;
   /** Last computer-piano root, independent of generated chord voicings. */
   std::optional<double> chordRootMidiNote;
   char activeChordFamilyKey = '\0';
@@ -583,6 +602,7 @@ private:
   std::size_t machineEditRow = 0;
   bool machineStackDetailMode = false;
   std::size_t machineSelectedStackSlot = 0;
+  bool machineStateDirty = true;
   static constexpr std::size_t kModulationMatrixStackEntry = std::numeric_limits<std::size_t>::max();
   bool resetConfirmationYesSelected = true;
   ConfirmationAction pendingConfirmationAction = ConfirmationAction::resetTracker;

@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -89,6 +90,8 @@ public:
     std::string getVuStateJson() const;
     /** Sets the MIDI note range for a player. */
     void setSampleRangeFromWeb (int playerId, int low, int high);
+    /** Sets the MIDI velocity range for a player. */
+    void setSampleVelocityRangeFromWeb (int playerId, int low, int high);
     /** Triggers a player immediately by id. */
     void triggerFromWeb (int playerId);
     /** Sets the static gain of a player. */
@@ -102,7 +105,7 @@ public:
     /** Starts an asynchronous local-file load for the shared control API. */
     void loadSampleFromControl (int playerId, const juce::File& file, std::function<void (bool, juce::String)> onComplete);
     /** Creates a sampler player with an inclusive MIDI range for control/API use. */
-    int addSamplePlayerForControl (int lowNote, int highNote);
+    int addSamplePlayerForControl (int lowNote, int highNote, int lowVelocity = 0, int highVelocity = 127);
     /** Captures every loaded player for an explicit portable state save. */
     std::vector<PortableSampleAsset> exportPortableSamples(int stackId) const;
     /** Restores one embedded sample, retaining its original path metadata. */
@@ -145,16 +148,14 @@ private:
         int midiLow = 0;
         /** Highest MIDI note accepted by the player. */
         int midiHigh = 127;
+        int velocityLow = 0;
+        int velocityHigh = 127;
         /** Player gain displayed in the UI. */
         float gain = 1.0f;
         /** Fixed playback offset in semitones. */
         int coarseTuneSemitones = 0;
         /** Fixed playback offset in cents. */
         int fineTuneCents = 0;
-        /** True when the player is currently active. */
-        bool isPlaying = false;
-        /** Player VU level in decibels. */
-        float vuDb = -60.0f;
         /** Short UI status string. */
         std::string status;
         /** Display name of the loaded sample file. */
@@ -183,6 +184,7 @@ private:
     void loadSampleAsync (int playerId, const juce::File& file, std::function<void (bool, juce::String)> onComplete);
     /** Sets the MIDI range for a player. */
     bool setMidiRange (int playerId, int low, int high);
+    bool setVelocityRange (int playerId, int low, int high);
     /** Sets the gain for a player. */
     bool setGain (int playerId, float gain);
     /** Sets the fixed coarse and fine playback tuning for a player. */
@@ -207,6 +209,8 @@ private:
     std::vector<std::vector<UIBox>> buildBrowserUi();
     /** Opens the integrated file browser for a player. */
     void openFileBrowserForPlayer(int playerId);
+    /** Opens the browser in DrumSampleSet XML selection mode. */
+    void openFileBrowserForSampleSet();
     /** Closes the integrated file browser. */
     void closeFileBrowser();
     /** Moves the browser up one directory. */
@@ -219,6 +223,8 @@ private:
     void previewBrowsedFile(const juce::File& file);
     /** Stops the preview player immediately. */
     void stopPreviewPlayback();
+    /** Starts a transactional background sampleset import. */
+    void loadSampleSetAsync(const juce::File& file);
 
     /** Owned sample players for normal sampler playback. */
     std::vector<std::unique_ptr<SuperSamplePlayer>> players;
@@ -249,12 +255,13 @@ private:
     /** Spin lock protecting the cached VU JSON string. */
     mutable juce::SpinLock vuLock;
 
-    /** UI snapshot of each player. */
-    std::vector<UiPlayerState> uiPlayers;
-    /** Per-player glow levels used by the machine UI. */
-    std::vector<float> uiGlowLevels;
+    enum class BrowserMode { none, sample, sampleSet };
     /** Player currently associated with the open browser. */
     int browsingPlayerId { -1 };
+    BrowserMode browserMode { BrowserMode::none };
+    juce::String sampleSetBrowserStatus;
+    std::atomic<std::uint64_t> sampleSetLoadGeneration { 0 };
+    std::future<void> sampleSetLoadFuture;
     /** Shared directory/search state for the integrated browser. */
     TrackerFileBrowser fileBrowser;
     /** Cached browser UI cells. */

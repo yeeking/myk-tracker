@@ -96,7 +96,7 @@ juce::var schema(const juce::StringArray& operations = {}, bool revisions = true
     };
     for (const auto* name : { "scope", "command", "playMode", "mode", "rhythm", "slotId", "controlId", "text", "filename", "path", "loadId" })
         addTyped(name, "string");
-    for (const auto* name : { "setId", "sequenceId", "stepId", "row", "column", "length", "headCount", "headIndex", "ticksPerStep", "polyphony", "machineStackId", "stackId", "direction", "playerId", "startNote", "endNote" })
+    for (const auto* name : { "setId", "sequenceId", "stepId", "row", "column", "length", "headCount", "headIndex", "ticksPerStep", "polyphony", "machineStackId", "stackId", "direction", "playerId", "startNote", "endNote", "startVelocity", "endVelocity" })
         addTyped(name, "integer");
     for (const auto* name : { "note", "velocity", "durationTicks", "bpm", "headProbability", "gainDb", "cutoffHz" })
         addTyped(name, "number");

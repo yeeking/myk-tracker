@@ -275,6 +275,7 @@ void SequencerEditor::leaveMachineDetail()
 
 void SequencerEditor::refreshMachineStateForCurrentSequence()
 {
+  machineStateDirty = false;
   const std::size_t previousRows = (machineCells.empty() || machineCells[0].empty()) ? 0 : machineCells[0].size();
   // In the stack table the last two rows are the scope band, so the row the
   // cursor follows when rows are added is the last slot row (or the ADD row
@@ -358,12 +359,11 @@ void SequencerEditor::machineAddEntry()
   {
     if (machineHost != nullptr)
       machineHost->addMachineToStack(getActiveMachineIndex(CommandType::Sampler));
-    return;
   }
-  const auto selectedType = getSelectedStackMachineType();
-  if (selectedType.has_value())
+  else if (const auto selectedType = getSelectedStackMachineType(); selectedType.has_value())
     if (auto* machine = getActiveMachine(selectedType.value()))
       machine->addEntry();
+  requestMachineStateRefresh();
 }
 
 void SequencerEditor::machineRemoveEntry()
@@ -372,16 +372,13 @@ void SequencerEditor::machineRemoveEntry()
     return;
   if (!machineStackDetailMode)
   {
-    if (machineCursorRow <= 1)
-      return;
-    if (machineHost != nullptr)
+    if (machineCursorRow > 1 && machineHost != nullptr)
       machineHost->removeMachineFromStack(getActiveMachineIndex(CommandType::Sampler), machineCursorRow - 2);
-    return;
   }
-  const auto selectedType = getSelectedStackMachineType();
-  if (selectedType.has_value())
+  else if (const auto selectedType = getSelectedStackMachineType(); selectedType.has_value())
     if (auto* machine = getActiveMachine(selectedType.value()))
       machine->removeEntry(static_cast<int>(machineCursorRow - 1));
+  requestMachineStateRefresh();
 }
 
 void SequencerEditor::machineActivateCurrentCell()
@@ -392,7 +389,10 @@ void SequencerEditor::machineActivateCurrentCell()
   if (cell == nullptr)
     return;
   if (cell->onActivate)
+  {
     cell->onActivate();
+    requestMachineStateRefresh();
+  }
 }
 
 bool SequencerEditor::machineInsertCurrentCell(double value)
@@ -406,6 +406,7 @@ bool SequencerEditor::machineInsertCurrentCell(double value)
   machineEditCol = machineCursorCol;
   machineEditRow = machineCursorRow;
   cell->onInsert(value);
+  requestMachineStateRefresh();
   return true;
 }
 
@@ -417,6 +418,7 @@ bool SequencerEditor::machinePreviewCurrentCell()
   if (cell == nullptr || !cell->onPreview)
     return false;
   cell->onPreview();
+  requestMachineStateRefresh();
   return true;
 }
 
@@ -428,6 +430,7 @@ bool SequencerEditor::machineResetCurrentCell()
   if (cell == nullptr || !cell->onReset)
     return false;
   cell->onReset();
+  requestMachineStateRefresh();
   return true;
 }
 
@@ -444,7 +447,7 @@ bool SequencerEditor::machineHandleTextInput(char character)
   {
     if (machine->handleTextInput(character))
     {
-      refreshMachineStateForCurrentSequence();
+      requestMachineStateRefresh();
       if (!machineCells.empty() && !machineCells[0].empty())
       {
         machineCursorRow = std::min<std::size_t>(1, machineCells[0].size() - 1);
@@ -476,7 +479,7 @@ bool SequencerEditor::machineHandleTextBackspace()
 
     if (machine->clearCell(row, col) || machine->handleTextBackspace())
     {
-      refreshMachineStateForCurrentSequence();
+      requestMachineStateRefresh();
       rebuildMachineCells();
       machineEditRow = machineCursorRow;
       machineEditCol = machineCursorCol;
@@ -502,7 +505,7 @@ bool SequencerEditor::machineShiftNoteCurrentCell(int semitones)
     const int col = static_cast<int>(machineCursorCol);
     if (machine->shiftNoteAtCell(row, col, semitones))
     {
-      refreshMachineStateForCurrentSequence();
+      requestMachineStateRefresh();
       rebuildMachineCells();
       machineEditRow = machineCursorRow;
       machineEditCol = machineCursorCol;
@@ -525,7 +528,7 @@ bool SequencerEditor::dismissCurrentTransientUi()
     if (auto* machine = getActiveMachine(selectedType.value()))
       if (machine->dismissTransientUi())
       {
-        refreshMachineStateForCurrentSequence();
+        requestMachineStateRefresh();
         return true;
       }
   }
@@ -543,6 +546,7 @@ void SequencerEditor::machineAdjustCurrentCell(int direction)
   machineEditCol = machineCursorCol;
   machineEditRow = machineCursorRow;
   cell->onAdjust(direction);
+  requestMachineStateRefresh();
 }
 
 bool SequencerEditor::enterSelectedMachineDetail()

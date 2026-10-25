@@ -32,6 +32,43 @@ enum class ChordShortcutKind
   tonnetzCycle
 };
 
+struct DrumOctaveBounds
+{
+  int min = 0;
+  int max = 0;
+};
+
+/** The GM drum row shift is bounded so the entire 22-key map stays inside
+ * MIDI 1..127, derived from the map so it tracks any future layout change. */
+DrumOctaveBounds drumOctaveBounds()
+{
+  const auto drumMap = MachineUtilsAbs::getKeyboardToGmDrumNotes();
+  int minNote = 127;
+  int maxNote = 0;
+  for (const auto& entry : drumMap)
+  {
+    const auto note = static_cast<int>(std::lround(entry.second));
+    minNote = std::min(minNote, note);
+    maxNote = std::max(maxNote, note);
+  }
+  DrumOctaveBounds bounds;
+  bounds.min = static_cast<int>(std::ceil((1.0 - minNote) / 12.0));
+  bounds.max = static_cast<int>(std::floor((127.0 - maxNote) / 12.0));
+  return bounds;
+}
+
+std::string formatPianoOctaveHud(double octave)
+{
+  return "OCT " + std::to_string(static_cast<int>(std::lround(octave)));
+}
+
+std::string formatDrumOctaveHud(int offset)
+{
+  if (offset > 0)
+    return "GM OCT +" + std::to_string(offset);
+    return "GM OCT " + std::to_string(offset);
+}
+
 struct ChordShortcut
 {
   char key;
@@ -409,6 +446,7 @@ void SequencerEditor::resetCursor()
   mixerRow = 0;
   machineStackDetailMode = false;
   machineSelectedStackSlot = 0;
+  machineStateDirty = true;
 }
 
 SequencerEditorMode SequencerEditor::getEditMode() const
@@ -748,7 +786,12 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
     data[currentStepRow][static_cast<std::size_t>(column)] = value;
     writeStepData(std::move(data));
     if (column == Step::noteInd)
-      syncOctaveFromMidiNote(value);
+    {
+      // GM drum entries are absolute row notes; syncing the piano octave from
+      // them would silently move the octave later piano entry lands in.
+      if (!currentStackHasEnabledSampler())
+        syncOctaveFromMidiNote(value);
+    }
     // move to the next step down
     // moveCursorDown();
   }
@@ -757,8 +800,25 @@ void SequencerEditor::enterStepData(double value, int column, bool applyOctave)
 /** Increase the octave offset applied when entering notes  */
 void SequencerEditor::incrementOctave()
 {
+  if (currentStackHasEnabledSampler())
+  {
+    // Sampler mode shifts the whole GM drum row instead of editing the note
+    // under the cursor, so a pattern can be re-keyed into another octave.
+    const auto bounds = drumOctaveBounds();
+    const int next = std::min(bounds.max, drumOctaveOffset + 1);
+    if (next != drumOctaveOffset)
+    {
+      drumOctaveOffset = next;
+      flashOctaveHud(formatDrumOctaveHud(drumOctaveOffset));
+    }
+    return;
+  }
+
   if (octave < 9)
+  {
     octave++;
+    flashOctaveHud(formatPianoOctaveHud(octave));
+  }
 
   if (machineShiftNoteCurrentCell(12))
     return;
@@ -774,7 +834,10 @@ void SequencerEditor::incrementOctave()
   }
   case SequencerEditorMode::selectingSeqAndStep:
   {
-    // default to row 0
+    // default to row 0. Rewriting the note follows the same ARM gate as
+    // piano-key entry on this page.
+    if (!sequenceEntryArmed)
+      break;
     double note = sequencer->getStepDataAt(currentSequence, currentStep, 0, Step::noteInd);
     if (note > 0)
     { // there is a note here - put it up an octave
@@ -815,8 +878,23 @@ void SequencerEditor::incrementOctave()
 /** decrease the octave offset applied when entering notes  */
 void SequencerEditor::decrementOctave()
 {
+  if (currentStackHasEnabledSampler())
+  {
+    const auto bounds = drumOctaveBounds();
+    const int next = std::max(bounds.min, drumOctaveOffset - 1);
+    if (next != drumOctaveOffset)
+    {
+      drumOctaveOffset = next;
+      flashOctaveHud(formatDrumOctaveHud(drumOctaveOffset));
+    }
+    return;
+  }
+
   if (octave > 1)
+  {
     octave--;
+    flashOctaveHud(formatPianoOctaveHud(octave));
+  }
 
   if (machineShiftNoteCurrentCell(-12))
     return;
@@ -830,6 +908,8 @@ void SequencerEditor::decrementOctave()
   case SequencerEditorMode::selectingSeqAndStep:
   {
     // this will automatically apply the octave shift  to the note
+    if (!sequenceEntryArmed)
+      break;
     double note = sequencer->getStepDataAt(currentSequence, currentStep, 0, Step::noteInd);
     if (note > 0 && note - 12 > 0)
     { // there is a note here - put it up an octave
@@ -1645,7 +1725,28 @@ void SequencerEditor::setSelectedSongCursor(std::size_t row, std::size_t col)
 
 double SequencerEditor::getCurrentOctave() const
 {
-  return octave; 
+  return octave;
+}
+
+int SequencerEditor::getDrumOctaveOffset() const
+{
+  return drumOctaveOffset;
+}
+
+std::string SequencerEditor::getOctaveHudLabel() const
+{
+  return octaveHudLabel;
+}
+
+double SequencerEditor::getOctaveHudExpiryMs() const
+{
+  return octaveHudExpiryMs;
+}
+
+void SequencerEditor::flashOctaveHud(const std::string& label)
+{
+  octaveHudLabel = label;
+  octaveHudExpiryMs = juce::Time::getMillisecondCounterHiRes() + 1200.0;
 }
 
 void SequencerEditor::moveCursorLeftOnSongPage()
@@ -1737,7 +1838,7 @@ void SequencerEditor::moveCursorLeftOnMachinePage()
       if (auto* machine = getActiveMachine(selectedType.value()))
         if (machine->navigateLeft())
         {
-          refreshMachineStateForCurrentSequence();
+          requestMachineStateRefresh();
           rebuildMachineCells();
           return;
         }
@@ -1790,7 +1891,7 @@ void SequencerEditor::moveCursorRightOnMachinePage()
     if (selectedType.has_value())
       if (auto* machine = getActiveMachine(*selectedType); machine != nullptr && machine->navigateRight())
       {
-        refreshMachineStateForCurrentSequence();
+        requestMachineStateRefresh();
         rebuildMachineCells();
       }
   }
@@ -2135,7 +2236,10 @@ void SequencerEditor::setCurrentSequence(int seq)
   else
     currentSequence = static_cast<std::size_t>(seq);
   if (currentSequence != sequenceBefore)
+  {
     resetChordCycle();
+    machineStateDirty = true;
+  }
 }
 /** move the cursor to a specific step*/
 void SequencerEditor::setCurrentStep(int step)
@@ -2192,11 +2296,30 @@ void SequencerEditor::requestStringRefresh()
 
 std::optional<double> SequencerEditor::lookupKeyboardMidiNote(char key) const
 {
-  const auto noteMap = MachineUtilsAbs::getKeyboardToMidiNotes(0);
+  const auto noteMap = currentStackHasEnabledSampler()
+      ? MachineUtilsAbs::getKeyboardToGmDrumNotes()
+      : MachineUtilsAbs::getKeyboardToMidiNotes(0);
   const auto it = noteMap.find(key);
   if (it == noteMap.end())
     return std::nullopt;
   return it->second;
+}
+
+bool SequencerEditor::currentStackHasEnabledSampler() const
+{
+  if (machineHost == nullptr || sequencer == nullptr)
+    return false;
+  const auto* sequence = sequencer->getSequence(currentSequence);
+  if (sequence == nullptr)
+    return false;
+  const auto stackIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(sequence->getMachineId())));
+  if (stackIndex >= machineHost->getMachineStackCount())
+    return false;
+  const auto types = machineHost->getMachineStackTypes(stackIndex);
+  for (std::size_t slot = 0; slot < types.size(); ++slot)
+    if (types[slot] == CommandType::Sampler && machineHost->isMachineEnabledInStack(stackIndex, slot))
+      return true;
+  return false;
 }
 
 void SequencerEditor::beginKeyboardAudition(char physicalKey,
@@ -2363,6 +2486,7 @@ void SequencerEditor::gotoMachineConfigPage()
   setEditMode(SequencerEditorMode::machineConfig);
   machineEditMode = false;
   machineStackDetailMode = false;
+  machineStateDirty = true;
 }
 
 void SequencerEditor::gotoMixerPage()
@@ -2980,6 +3104,7 @@ bool SequencerEditor::handleNoteKey(char key)
   if (page == SequencerEditorPage::resetConfirmation)
     return false;
 
+  const bool drumMap = currentStackHasEnabledSampler();
   const auto midiNote = lookupKeyboardMidiNote(key);
   if (!midiNote.has_value())
     return false;
@@ -2988,7 +3113,11 @@ bool SequencerEditor::handleNoteKey(char key)
       && currentSequenceControlMode())
     return true;
 
-  const double note = midiNote.value() + (12 * getCurrentOctave());
+  // In sampler mode the GM drum row is absolute; only its whole-row octave
+  // shift applies. The stored note must equal the auditioned note.
+  const double note = drumMap
+      ? midiNote.value() + (12 * drumOctaveOffset)
+      : midiNote.value() + (12 * getCurrentOctave());
   // LOW/HIGH are the deliberate machine-page exception: piano keys set the
   // selected sampler player's MIDI range instead of merely auditioning.
   if (page == SequencerEditorPage::machine && isCurrentSamplerRangeCell())
@@ -3001,11 +3130,13 @@ bool SequencerEditor::handleNoteKey(char key)
     return true;
   setChordRoot(note);
   previewEnteredNote(note, key);
+  flashOctaveHud(drumMap ? formatDrumOctaveHud(drumOctaveOffset)
+                         : formatPianoOctaveHud(getCurrentOctave()));
 
   if (page == SequencerEditorPage::step
       || (page == SequencerEditorPage::sequence && sequenceEntryArmed))
   {
-    enterStepData(midiNote.value(), Step::noteInd);
+    enterStepData(note, Step::noteInd, false);
     lastMusicalKeyChangedContent = true;
   }
   return true;
