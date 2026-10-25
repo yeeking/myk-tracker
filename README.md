@@ -10,6 +10,34 @@ You can find most of the commands in the cheat sheet poster in the docs folder:
 
 https://github.com/yeeking/myk-tracker/blob/main/doc/MYK_Tracker_cheat_sheet.svg
 
+### Chord keys
+
+Play a computer-piano key first to select a chord root. Plain `Q–P` retain the
+original chord-family map: `MAJ`, `MIN`, `DOM`, `DIM`, `AUG`, `SUS`, `MAJX`,
+`MINX`, `ALT`, and `QRTL`.
+
+`Alt+Q–P` enter voice-led tone-network cycles. Release and press the same
+shortcut again to advance that cycle. In an armed Sequence page or the Step
+page, each entered Tonnetz chord advances to the next playback step and wraps
+at the sequence end. They stay audition-only on a disarmed Sequence page and
+other performance pages.
+
+| Key | Cycle |
+| --- | --- |
+| `Alt+Q` | `3PHX` Eulerian 3p hexacycle |
+| `Alt+W` | `2PHX` Eulerian 2p hexacycle |
+| `Alt+E` | `4POC` Eulerian octacycle |
+| `Alt+R` | `2PDC` Eulerian decacycle |
+| `Alt+T` | `ARCH` Archimedean hexacycle |
+| `Alt+Y` | `TRST` Tristan hexacycle |
+| `Alt+U` | `3PRV` reverse Eulerian 3p hexacycle |
+| `Alt+I` | `2PRV` reverse Eulerian 2p hexacycle |
+| `Alt+O` | `TR2P` alternate Tristan 2p hexacycle |
+| `Alt+P` | `ARCR` reverse Archimedean hexacycle |
+
+The tracker chooses compact, ascending inversions for the complete cycle,
+minimizing voice movement and returning to the original voicing at the wrap.
+
 ## Developer Build
 
 Clone the tracker repo, clone JUCE into `libs/JUCE`, then configure and build with CMake.
@@ -38,14 +66,15 @@ under GDB. The Microsoft C/C++ extension is required for the `cppdbg` debugger.
 
 ## Project state compatibility
 
-Tracker projects use an exact current schema version. Both lightweight
+Tracker projects write the current schema version. Both lightweight
 `STATE ONLY` XML files and portable `WITH AUDIO` ZIP/FLAC files contain the
-same versioned tracker document. Unversioned projects and projects written by
-another schema version are rejected without changing the song currently in
-memory; MYK Tracker does not migrate older project layouts.
+same tracker document. Loading is deliberately permissive: a missing or
+different version is treated as the current version-1 layout and MYK Tracker
+attempts to restore the available fields. Malformed XML or JSON is still
+rejected safely. There are no older-layout migration branches.
 
-This clean-slate rule applies to project and plug-in state. It does not affect
-the optional legacy MCP client handshake described below.
+This permissive current-layout policy applies to project and plug-in state. It
+is independent of the optional legacy MCP client handshake described below.
 
 ## Local MCP control
 

@@ -354,7 +354,7 @@ void FilterFxMachine::getStateInformation(juce::MemoryBlock& destData)
 void FilterFxMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kFilterStateVersion))
+    if (parsed.isVoid())
         return;
 
     {

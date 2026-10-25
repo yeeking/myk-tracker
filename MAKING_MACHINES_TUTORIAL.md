@@ -388,9 +388,9 @@ Use semantic defaults, not whatever value happens to be left in a reused
 machine. `setStateInformation()` is not called when the top-level machine blob
 is absent, so also provide a parameter-default reset and invoke it in processor
 restore before decoding the optional new entry (DRUM demonstrates this pattern).
-A malformed current song must not inherit tremolo settings from the song that
-was open before it. Machine state versions are exact: reject mismatched blobs
-rather than migrating them.
+A malformed song must not inherit tremolo settings from the song that was open
+before it. Machine version fields are advisory: readable blobs are interpreted
+with the current layout, while malformed values still need safe handling.
 
 ### 4. Add the source to CMake
 
@@ -636,18 +636,17 @@ embed sample buffers in ordinary plug-in state.
 
 Current-format rules:
 
-- the top-level tracker JSON must contain the exact current `stateVersion`;
-- each machine blob must contain its exact current version;
-- reject unversioned or mismatched state without partially mutating the song;
-- change the schema version when persisted enum values or layouts change;
+- write the current `stateVersion` in top-level tracker JSON and machine blobs;
+- treat missing or mismatched versions as the current version-1 layout;
+- do not maintain alternate older-layout migration branches;
 - clamp restored numbers and reject non-finite values;
 - validate external data in Release, not only with `jassert`;
 - reset transient DSP separately from parameters;
 - do not serialize phases, meter values, UI glows, or other transient state
   unless the feature specifically requires it.
 
-Test a current-version round trip, malformed current data, and rejection of an
-unversioned document.
+Test current-version, unversioned, and mismatched-version loads plus malformed
+data handling.
 
 ## Real-time and concurrency checklist
 
@@ -709,7 +708,7 @@ Good machine tests cover:
 - note-on/off/retrigger/all-notes-off where applicable;
 - sample-rate and block-size changes;
 - bypass/idle behavior and tails;
-- current-version state round trip, schema rejection, and malformed input;
+- current-version and unversioned state round trips, plus malformed input;
 - modulation application and inactive fast path;
 - no callback allocation where the harness can observe it.
 
@@ -736,7 +735,7 @@ At minimum:
 3. Edit every parameter while stopped and playing.
 4. Try more than one sample rate and buffer size.
 5. Exercise note-off, retrigger, route changes, transport reset, and tails.
-6. Save/reload current state and confirm an unversioned state is rejected.
+6. Save/reload current state and confirm an unversioned state is attempted.
 7. Switch pages repeatedly, resize, zoom, and scroll wide grids.
 8. Confirm the machine costs little while disabled/idle and does not spike when
    its detail page opens.
@@ -819,7 +818,7 @@ MCP, or unsafe during live edits. Perform the relevant focused and manual checks
 - [ ] Parameters safe between UI and audio threads
 - [ ] Transient resources prepared and reset correctly
 - [ ] Column-major `UIBox` grid with normal controls
-- [ ] Exact-version, validated state with clean rejection on mismatch
+- [ ] Versioned, validated state with permissive current-layout loading
 - [ ] Production `.cpp` listed in CMake
 - [ ] Stable `CommandType` appended
 - [ ] Traits and slot cycle updated

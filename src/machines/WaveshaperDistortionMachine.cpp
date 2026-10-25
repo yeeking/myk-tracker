@@ -90,7 +90,7 @@ void WaveshaperDistortionMachine::getStateInformation(juce::MemoryBlock& destDat
 void WaveshaperDistortionMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kDistortionStateVersion))
+    if (parsed.isVoid())
         return;
 
     const float driveValue = getFloatProperty(parsed, "drive", drive.load(std::memory_order_relaxed), kMinDrive, kMaxDrive);

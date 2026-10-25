@@ -29,11 +29,6 @@ bool decodeCurrentTrackerState(const void* data, std::size_t size,
         if (error != nullptr) *error = "INVALID TRACKER STATE";
         return false;
     }
-    if (static_cast<int>(state.getProperty("stateVersion", 0)) != kTrackerStateVersion)
-    {
-        if (error != nullptr) *error = "UNSUPPORTED TRACKER STATE";
-        return false;
-    }
     return true;
 }
 
@@ -718,8 +713,7 @@ std::size_t TrackerMainProcessor::getStepCountForSequenceSet(std::size_t setInde
 
 void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
 {
-    if (!stateVar.isObject()
-        || static_cast<int>(stateVar.getProperty("stateVersion", 0)) != kTrackerStateVersion)
+    if (!stateVar.isObject())
         return;
 
     // This is a live-performance safety state, deliberately not part of a

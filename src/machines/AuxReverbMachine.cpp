@@ -81,7 +81,7 @@ void AuxReverbMachine::getStateInformation(juce::MemoryBlock& destData)
 void AuxReverbMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kStateVersion))
+    if (parsed.isVoid())
         return;
 
     roomSize.store(getFloatProperty(parsed, "roomSize", roomSize.load(std::memory_order_relaxed), 0.0f, 1.0f), std::memory_order_relaxed);

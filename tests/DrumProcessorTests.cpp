@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 
+#include "PortableTrackerState.h"
 #include "TrackerMainProcessor.h"
 
 #include <algorithm>
@@ -34,8 +35,17 @@ std::size_t findSlot(const TrackerMainProcessor& processor, CommandType type)
     return found == types.end() ? types.size() : static_cast<std::size_t>(found - types.begin());
 }
 
-void requireProjectSchemaGate()
+void requirePermissiveProjectVersionLoading()
 {
+    require(static_cast<std::size_t>(CommandType::MidiNote) == 0
+                && static_cast<std::size_t>(CommandType::Sampler) == 2
+                && static_cast<std::size_t>(CommandType::WavetableSynth) == 4
+                && static_cast<std::size_t>(CommandType::DistortionFx) == 6
+                && static_cast<std::size_t>(CommandType::FilterFx) == 11
+                && static_cast<std::size_t>(CommandType::ModulationMatrix) == 15
+                && static_cast<std::size_t>(CommandType::DrumSynth) == 16,
+            "persisted command IDs retain their historical numeric values");
+
     TrackerMainProcessor source;
     source.setMasterGainDb(-12.0f);
     juce::MemoryBlock stateData;
@@ -47,8 +57,8 @@ void requireProjectSchemaGate()
             "current tracker schema restores normally");
 
     const auto directory = juce::File::getSpecialLocation(juce::File::tempDirectory)
-        .getNonexistentChildFile("myk-schema-gate-test", "", false);
-    require(directory.createDirectory().wasOk(), "create tracker schema test directory");
+        .getNonexistentChildFile("myk-project-load-test", "", false);
+    require(directory.createDirectory().wasOk(), "create tracker loading test directory");
     const auto stateOnlyFile = directory.getChildFile("current-state.myktracker");
     require(stateOnlyFile.replaceWithData(stateData.getData(), stateData.getSize()),
             "write current state-only tracker file");
@@ -82,25 +92,43 @@ void requireProjectSchemaGate()
 
     currentRestored.setMasterGainDb(-6.0f);
     currentRestored.setStateInformation(unversionedState.getData(), static_cast<int>(unversionedState.getSize()));
-    require(std::abs(currentRestored.getMasterGainDb() + 6.0f) < 0.001f,
-            "unversioned tracker state is rejected without mutating live state");
+    require(std::abs(currentRestored.getMasterGainDb() + 30.0f) < 0.001f,
+            "unversioned tracker state is interpreted as the current layout");
 
     const auto unversionedFile = directory.getChildFile("unversioned.myktracker");
     require(unversionedFile.replaceWithData(unversionedState.getData(), unversionedState.getSize()),
             "write unversioned tracker fixture");
+    currentRestored.setMasterGainDb(-6.0f);
     error.clear();
-    require(!currentRestored.loadTrackerStateFile(unversionedFile, error)
-                && error == "UNSUPPORTED TRACKER STATE"
-                && std::abs(currentRestored.getMasterGainDb() + 6.0f) < 0.001f,
-            "file loader reports and safely rejects an unversioned project");
-    require(directory.deleteRecursively(), "remove tracker schema test directory");
+    require(currentRestored.loadTrackerStateFile(unversionedFile, error)
+                && std::abs(currentRestored.getMasterGainDb() + 30.0f) < 0.001f,
+            "file loader accepts an unversioned project as the current layout");
+
+    const auto unversionedPortableFile = directory.getChildFile("unversioned-portable.myktracker");
+    require(portable_tracker_state::write(unversionedPortableFile, unversionedState, {}, error),
+            "write unversioned portable tracker fixture");
+    currentRestored.setMasterGainDb(-6.0f);
+    require(currentRestored.loadTrackerStateFile(unversionedPortableFile, error)
+                && std::abs(currentRestored.getMasterGainDb() + 30.0f) < 0.001f,
+            "portable loader accepts an unversioned project as the current layout");
+
+    state.getDynamicObject()->setProperty("stateVersion", 999);
+    state.getDynamicObject()->setProperty("masterGainDb", -18.0f);
+    stateTree.setProperty("json", juce::JSON::toString(state), nullptr);
+    juce::MemoryBlock mismatchedState;
+    juce::MemoryOutputStream mismatchedOutput(mismatchedState, false);
+    stateTree.createXml()->writeTo(mismatchedOutput);
+    currentRestored.setStateInformation(mismatchedState.getData(), static_cast<int>(mismatchedState.getSize()));
+    require(std::abs(currentRestored.getMasterGainDb() + 18.0f) < 0.001f,
+            "mismatched tracker version is interpreted as the current layout");
+    require(directory.deleteRecursively(), "remove tracker loading test directory");
 }
 }
 
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
-    requireProjectSchemaGate();
+    requirePermissiveProjectVersionLoading();
 
     TrackerMainProcessor processor;
     processor.prepareToPlay(48000.0, 256);

@@ -208,7 +208,8 @@ Important distinctions:
 ## Machine registration and state
 
 - `CommandType` numeric values are persisted inside the current tracker schema.
-  Update the canonical `kLastCommandType` endpoint when adding a type.
+  Never renumber or reuse them; removed values leave gaps. Update the canonical
+  `kLastCommandType` endpoint when adding a type.
   `machineTraits()` is the shared classification table used by processor,
   editor, UI, and control service.
 - A new stack-owned machine normally needs ownership/construction, inclusion in
@@ -221,18 +222,19 @@ Important distinctions:
   `getUIBoxes()` is also the generic MCP control surface, so labels and layout
   affect generated control IDs. Preserve stable labels/coordinates when
   possible.
-- Machine blobs use exact-version JSON and `MachineStateCodec.h` helpers.
-  Malformed, non-finite, and out-of-range values must be rejected or clamped
-  safely in Release builds; assertions are not validation.
+- Machine blobs use versioned JSON and `MachineStateCodec.h` helpers. Loaders
+  interpret readable blobs using the current layout regardless of a missing or
+  different version. Malformed, non-finite, and out-of-range values must be
+  rejected or clamped safely in Release builds; assertions are not validation.
 - Top-level plug-in state is JSON stored in the APVTS `ValueTree`, then written
-  as XML by `getStateInformation`. The JSON carries an exact `stateVersion`;
-  unversioned or mismatched projects are rejected without mutating live state.
+  as XML by `getStateInformation`. The JSON carries `stateVersion`, but loading
+  treats unversioned or mismatched documents as the current version-1 layout.
   Machine blobs are Base64 properties inside that document. Host state and
   automatic preferences remain path-based.
 - Explicit `WITH AUDIO` saves use `PortableTrackerState`: a ZIP container with
   the same `.myktracker` extension, `state.xml`, `manifest.json`, and per-player
   24-bit FLAC. `STATE ONLY` files use the current lightweight XML container.
-  Loading detects both containers, then requires the current tracker schema.
+  Loading detects both containers, then attempts the current tracker layout.
   Keep portable save/load off the audio thread and preserve atomic replacement.
 
 ## UI, renderer, and control boundary

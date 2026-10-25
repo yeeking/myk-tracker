@@ -71,20 +71,20 @@ enum class CommandType : std::size_t {
     MidiNote = 0,
     Log = 1,
     Sampler = 2,
-    WavetableSynth = 3,
-    DistortionFx = 4,
-    DelayFx = 5,
-    ChannelStripFx = 6,
-    AuxSend1Fx = 7,
-    AuxSend2Fx = 8,
-    FilterFx = 9,
-    ToggleAux1 = 10,
-    ToggleAux2 = 11,
-    FilterCutoff = 12,
+    WavetableSynth = 4,
+    DistortionFx = 6,
+    DelayFx = 7,
+    ChannelStripFx = 8,
+    AuxSend1Fx = 9,
+    AuxSend2Fx = 10,
+    FilterFx = 11,
+    ToggleAux1 = 12,
+    ToggleAux2 = 13,
+    FilterCutoff = 14,
     /** Fixed per-stack modulation block; never a serial slot or step command. */
-    ModulationMatrix = 13,
+    ModulationMatrix = 15,
     /** Six-part internal drum synthesizer. */
-    DrumSynth = 14,
+    DrumSynth = 16,
 };
 
 /** Canonical command range. */
@@ -93,7 +93,26 @@ inline constexpr std::size_t kCommandTypeCount = static_cast<std::size_t>(kLastC
 
 constexpr bool isValidCommandTypeValue(std::size_t value)
 {
-    return value < kCommandTypeCount;
+    switch (static_cast<CommandType>(value))
+    {
+        case CommandType::MidiNote:
+        case CommandType::Log:
+        case CommandType::Sampler:
+        case CommandType::WavetableSynth:
+        case CommandType::DistortionFx:
+        case CommandType::DelayFx:
+        case CommandType::ChannelStripFx:
+        case CommandType::AuxSend1Fx:
+        case CommandType::AuxSend2Fx:
+        case CommandType::FilterFx:
+        case CommandType::ToggleAux1:
+        case CommandType::ToggleAux2:
+        case CommandType::FilterCutoff:
+        case CommandType::ModulationMatrix:
+        case CommandType::DrumSynth:
+            return true;
+    }
+    return false;
 }
 
 /** Shared behaviour table for machine types so the processor, editor, UI and

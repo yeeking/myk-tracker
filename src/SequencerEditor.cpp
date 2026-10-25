@@ -8,6 +8,8 @@
 #include <array>
 #include <cmath> // fmod
 #include <limits>
+#include <numeric>
+#include <tuple>
 #include <assert.h>
 
 namespace
@@ -24,37 +26,259 @@ bool isSequencerPlaying(SequencerAbs *sequencer)
   return false;
 }
 
+enum class ChordShortcutKind
+{
+  explicitVoicings,
+  tonnetzCycle
+};
+
 struct ChordShortcut
 {
   char key;
+  bool alternate;
   const char* label;
-  std::array<std::vector<int>, 6> variations;
+  ChordShortcutKind kind;
+  std::vector<std::vector<int>> variations;
 };
 
-const std::array<ChordShortcut, 10> kChordShortcuts = {{
-  {'q', "MAJ",  {{{0, 4, 7}, {4, 7, 12}, {7, 12, 16}, {0, 7, 16}, {0, 4, 7, 9}, {0, 4, 7, 14}}}},
-  {'w', "MIN",  {{{0, 3, 7}, {3, 7, 12}, {7, 12, 15}, {0, 7, 15}, {0, 3, 7, 9}, {0, 3, 7, 14}}}},
-  {'e', "DOM",  {{{0, 4, 7, 10}, {4, 7, 10, 12}, {7, 10, 12, 16}, {10, 12, 16, 19}, {0, 4, 7, 10, 14}, {0, 4, 10, 14, 21}}}},
-  {'r', "DIM",  {{{0, 3, 6}, {3, 6, 12}, {6, 12, 15}, {0, 3, 6, 9}, {-3, 0, 6, 15}, {0, 3, 6, 10}}}},
-  {'t', "AUG",  {{{0, 4, 8}, {4, 8, 12}, {8, 12, 16}, {0, 8, 16}, {0, 4, 8, 10}, {0, 4, 8, 11}}}},
-  {'y', "SUS",  {{{0, 5, 7}, {0, 2, 7}, {5, 7, 12}, {0, 7, 17}, {0, 5, 7, 10}, {0, 5, 7, 10, 14}}}},
-  {'u', "MAJX", {{{0, 4, 7, 11}, {0, 4, 7, 11, 14}, {0, 4, 9, 14}, {0, 4, 7, 11, 17}, {-5, 0, 4, 11}, {-5, 0, 4, 11, 14}}}},
-  {'i', "MINX", {{{0, 3, 7, 10}, {0, 3, 7, 10, 14}, {0, 3, 7, 10, 17}, {0, 3, 9, 14}, {-5, 0, 3, 10}, {-5, 0, 3, 10, 14}}}},
-  {'o', "ALT",  {{{0, 4, 6, 10}, {0, 4, 8, 10}, {0, 4, 7, 10, 13}, {0, 4, 7, 10, 15}, {0, 4, 8, 10, 13}, {0, 4, 10, 13, 15}}}},
-  {'p', "QRTL", {{{0, 5, 10}, {0, 5, 10, 15}, {0, 5, 10, 15, 20}, {-5, 0, 5, 10}, {0, 10, 17}, {0, 7, 14}}}}
+// Tonnetz cycles are pitch-class sets relative to the selected keyboard root.
+// The solver below chooses the concrete inversions; explicit families retain
+// their deliberately authored, extended voicings.
+const std::array<ChordShortcut, 20> kChordShortcuts = {{
+  {'q', false, "MAJ",  ChordShortcutKind::explicitVoicings, {{0,4,7}, {4,7,12}, {7,12,16}, {0,7,16}, {0,4,7,9}, {0,4,7,14}}},
+  {'w', false, "MIN",  ChordShortcutKind::explicitVoicings, {{0,3,7}, {3,7,12}, {7,12,15}, {0,7,15}, {0,3,7,9}, {0,3,7,14}}},
+  {'e', false, "DOM",  ChordShortcutKind::explicitVoicings, {{0,4,7,10}, {4,7,10,12}, {7,10,12,16}, {10,12,16,19}, {0,4,7,10,14}, {0,4,10,14,21}}},
+  {'r', false, "DIM",  ChordShortcutKind::explicitVoicings, {{0,3,6}, {3,6,12}, {6,12,15}, {0,3,6,9}, {-3,0,6,15}, {0,3,6,10}}},
+  {'t', false, "AUG",  ChordShortcutKind::explicitVoicings, {{0,4,8}, {4,8,12}, {8,12,16}, {0,8,16}, {0,4,8,10}, {0,4,8,11}}},
+  {'y', false, "SUS",  ChordShortcutKind::explicitVoicings, {{0,5,7}, {0,2,7}, {5,7,12}, {0,7,17}, {0,5,7,10}, {0,5,7,10,14}}},
+  {'u', false, "MAJX", ChordShortcutKind::explicitVoicings, {{0,4,7,11}, {0,4,7,11,14}, {0,4,9,14}, {0,4,7,11,17}, {-5,0,4,11}, {-5,0,4,11,14}}},
+  {'i', false, "MINX", ChordShortcutKind::explicitVoicings, {{0,3,7,10}, {0,3,7,10,14}, {0,3,7,10,17}, {0,3,9,14}, {-5,0,3,10}, {-5,0,3,10,14}}},
+  {'o', false, "ALT",  ChordShortcutKind::explicitVoicings, {{0,4,6,10}, {0,4,8,10}, {0,4,7,10,13}, {0,4,7,10,15}, {0,4,8,10,13}, {0,4,10,13,15}}},
+  {'p', false, "QRTL", ChordShortcutKind::explicitVoicings, {{0,5,10}, {0,5,10,15}, {0,5,10,15,20}, {-5,0,5,10}, {0,10,17}, {0,7,14}}},
+  {'q', true, "3PHX", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {0,3,7}, {0,3,8}, {3,8,11}, {4,8,11}, {4,7,11}}},
+  {'w', true, "2PHX", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {0,4,9}, {0,5,9}, {0,5,8}, {0,3,8}, {0,3,7}}},
+  {'e', true, "4POC", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {0,4,9}, {1,4,9}, {1,6,9}, {1,6,10}, {3,6,10}, {3,7,10}, {0,3,7}}},
+  {'r', true, "2PDC", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {0,4,9}, {0,5,9}, {2,5,9}, {2,5,10}, {1,5,10}, {3,7,10}, {0,5,8}, {0,3,8}, {0,3,7}}},
+  {'t', true, "ARCH", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {1,4,8}, {0,3,8}, {0,4,9}, {4,8,11}, {0,5,8}}},
+  {'y', true, "TRST", ChordShortcutKind::tonnetzCycle, {{0,4,7,10}, {0,3,6,10}, {0,3,5,9}, {3,5,8,11}, {2,5,8,10}, {1,4,8,10}}},
+  {'u', true, "3PRV", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {4,7,11}, {4,8,11}, {3,8,11}, {0,3,8}, {0,3,7}}},
+  {'i', true, "2PRV", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {0,3,7}, {0,3,8}, {0,5,8}, {0,5,9}, {0,4,9}}},
+  {'o', true, "TR2P", ChordShortcutKind::tonnetzCycle, {{0,4,7,10}, {0,3,6,10}, {0,3,5,9}, {1,3,6,9}, {1,3,6,10}, {1,4,8,10}}},
+  {'p', true, "ARCR", ChordShortcutKind::tonnetzCycle, {{0,4,7}, {0,5,8}, {4,8,11}, {0,4,9}, {0,3,8}, {1,4,8}}}
 }};
 
-const ChordShortcut* findChordShortcut(char key)
+int positiveModulo(int value, int modulus)
+{
+  const int result = value % modulus;
+  return result < 0 ? result + modulus : result;
+}
+
+std::vector<int> foldWholeVoicingToMidiRange(std::vector<int> notes)
+{
+  if (notes.empty())
+    return notes;
+  const auto [minimum, maximum] = std::minmax_element(notes.begin(), notes.end());
+  const int minimumOctaveShift = static_cast<int>(std::ceil((1.0 - *minimum) / 12.0));
+  const int maximumOctaveShift = static_cast<int>(std::floor((127.0 - *maximum) / 12.0));
+  const int octaveShift = minimumOctaveShift <= maximumOctaveShift
+      ? juce::jlimit(minimumOctaveShift, maximumOctaveShift, 0)
+      : 0;
+  for (auto& note : notes)
+    note += octaveShift * 12;
+  return notes;
+}
+
+std::pair<int, int> voiceLeadingDistance(const std::vector<int>& from, const std::vector<int>& to)
+{
+  jassert(from.size() == to.size());
+  int total = 0;
+  int maximum = 0;
+  for (std::size_t i = 0; i < from.size(); ++i)
+  {
+    const int distance = std::abs(from[i] - to[i]);
+    total += distance;
+    maximum = std::max(maximum, distance);
+  }
+  return { total, maximum };
+}
+
+std::vector<std::vector<int>> makeTonnetzCandidates(const std::vector<int>& pitchClasses,
+                                                     int root, int anchorSum,
+                                                     bool constrainRegister)
+{
+  std::vector<int> sortedPitchClasses = pitchClasses;
+  for (auto& pitchClass : sortedPitchClasses)
+    pitchClass = positiveModulo(pitchClass, 12);
+  std::sort(sortedPitchClasses.begin(), sortedPitchClasses.end());
+  sortedPitchClasses.erase(std::unique(sortedPitchClasses.begin(), sortedPitchClasses.end()),
+                           sortedPitchClasses.end());
+
+  std::vector<std::vector<int>> candidates;
+  const auto noteCount = sortedPitchClasses.size();
+  if (noteCount == 0)
+    return candidates;
+
+  for (std::size_t start = 0; start < noteCount; ++start)
+  {
+    std::vector<int> orderedPitchClasses;
+    orderedPitchClasses.reserve(noteCount);
+    for (std::size_t index = 0; index < noteCount; ++index)
+      orderedPitchClasses.push_back(sortedPitchClasses[(start + index) % noteCount]);
+
+    for (int lowest = 1; lowest <= 127; ++lowest)
+    {
+      if (positiveModulo(lowest - root, 12) != orderedPitchClasses.front())
+        continue;
+
+      std::vector<int> candidate { lowest };
+      const auto appendNotes = [&](auto&& self, std::size_t index) -> void
+      {
+        if (index == orderedPitchClasses.size())
+        {
+          const int sum = std::accumulate(candidate.begin(), candidate.end(), 0);
+          if (!constrainRegister || std::abs(sum - anchorSum) <= 24 * static_cast<int>(noteCount))
+            candidates.push_back(candidate);
+          return;
+        }
+
+        int note = lowest + positiveModulo(orderedPitchClasses[index] - orderedPitchClasses.front(), 12);
+        while (note <= candidate.back())
+          note += 12;
+        while (note <= 127 && note - lowest <= 24)
+        {
+          candidate.push_back(note);
+          self(self, index + 1);
+          candidate.pop_back();
+          note += 12;
+        }
+      };
+      appendNotes(appendNotes, 1);
+    }
+  }
+
+  std::sort(candidates.begin(), candidates.end());
+  candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+  return candidates;
+}
+
+std::vector<std::vector<int>> buildTonnetzVoicings(const std::vector<std::vector<int>>& pitchClassCycle,
+                                                    int root)
+{
+  if (pitchClassCycle.empty())
+    return {};
+
+  std::vector<int> anchor;
+  anchor.reserve(pitchClassCycle.front().size());
+  for (const int pitchClass : pitchClassCycle.front())
+    anchor.push_back(root + positiveModulo(pitchClass, 12));
+  std::sort(anchor.begin(), anchor.end());
+  anchor = foldWholeVoicingToMidiRange(std::move(anchor));
+  const int anchorSum = std::accumulate(anchor.begin(), anchor.end(), 0);
+
+  std::vector<std::vector<std::vector<int>>> candidates(pitchClassCycle.size());
+  candidates.front().push_back(anchor);
+  for (std::size_t cycleIndex = 1; cycleIndex < pitchClassCycle.size(); ++cycleIndex)
+  {
+    candidates[cycleIndex] = makeTonnetzCandidates(pitchClassCycle[cycleIndex], root, anchorSum, true);
+    if (candidates[cycleIndex].empty())
+      candidates[cycleIndex] = makeTonnetzCandidates(pitchClassCycle[cycleIndex], root, anchorSum, false);
+    if (candidates[cycleIndex].empty())
+    {
+      std::vector<int> fallback;
+      for (const int pitchClass : pitchClassCycle[cycleIndex])
+        fallback.push_back(root + positiveModulo(pitchClass, 12));
+      std::sort(fallback.begin(), fallback.end());
+      candidates[cycleIndex].push_back(foldWholeVoicingToMidiRange(std::move(fallback)));
+    }
+  }
+
+  struct Cost
+  {
+    int total = std::numeric_limits<int>::max();
+    int maximumLeap = std::numeric_limits<int>::max();
+    int registerDistance = std::numeric_limits<int>::max();
+  };
+  const auto isBetter = [](const Cost& candidate, const Cost& current)
+  {
+    return std::tie(candidate.total, candidate.maximumLeap, candidate.registerDistance)
+        < std::tie(current.total, current.maximumLeap, current.registerDistance);
+  };
+
+  std::vector<std::vector<Cost>> costs(pitchClassCycle.size());
+  std::vector<std::vector<std::size_t>> predecessors(pitchClassCycle.size());
+  for (std::size_t cycleIndex = 1; cycleIndex < pitchClassCycle.size(); ++cycleIndex)
+  {
+    costs[cycleIndex].resize(candidates[cycleIndex].size());
+    predecessors[cycleIndex].assign(candidates[cycleIndex].size(), 0);
+    for (std::size_t candidateIndex = 0; candidateIndex < candidates[cycleIndex].size(); ++candidateIndex)
+    {
+      const int registerDistance = std::abs(
+          std::accumulate(candidates[cycleIndex][candidateIndex].begin(),
+                          candidates[cycleIndex][candidateIndex].end(), 0) - anchorSum);
+      if (cycleIndex == 1)
+      {
+        const auto [total, maximumLeap] = voiceLeadingDistance(anchor, candidates[cycleIndex][candidateIndex]);
+        costs[cycleIndex][candidateIndex] = { total, maximumLeap, registerDistance };
+        continue;
+      }
+
+      for (std::size_t previousIndex = 0; previousIndex < candidates[cycleIndex - 1].size(); ++previousIndex)
+      {
+        const auto& previousCost = costs[cycleIndex - 1][previousIndex];
+        const auto [distance, maximumLeap] = voiceLeadingDistance(
+            candidates[cycleIndex - 1][previousIndex], candidates[cycleIndex][candidateIndex]);
+        const Cost proposed { previousCost.total + distance,
+                              std::max(previousCost.maximumLeap, maximumLeap),
+                              previousCost.registerDistance + registerDistance };
+        if (isBetter(proposed, costs[cycleIndex][candidateIndex]))
+        {
+          costs[cycleIndex][candidateIndex] = proposed;
+          predecessors[cycleIndex][candidateIndex] = previousIndex;
+        }
+      }
+    }
+  }
+
+  if (pitchClassCycle.size() == 1)
+    return { anchor };
+
+  std::size_t bestFinal = 0;
+  Cost bestCost;
+  for (std::size_t candidateIndex = 0; candidateIndex < candidates.back().size(); ++candidateIndex)
+  {
+    const auto [distance, maximumLeap] = voiceLeadingDistance(candidates.back()[candidateIndex], anchor);
+    Cost proposed = costs.back()[candidateIndex];
+    proposed.total += distance;
+    proposed.maximumLeap = std::max(proposed.maximumLeap, maximumLeap);
+    if (isBetter(proposed, bestCost))
+    {
+      bestCost = proposed;
+      bestFinal = candidateIndex;
+    }
+  }
+
+  std::vector<std::vector<int>> result(pitchClassCycle.size());
+  result.front() = anchor;
+  std::size_t selected = bestFinal;
+  for (std::size_t cycleIndex = pitchClassCycle.size(); cycleIndex-- > 1;)
+  {
+    result[cycleIndex] = candidates[cycleIndex][selected];
+    selected = predecessors[cycleIndex][selected];
+  }
+  return result;
+}
+
+const ChordShortcut* findChordShortcut(char key, bool alternate)
 {
   for (const auto& shortcut : kChordShortcuts)
-    if (shortcut.key == key)
+    if (shortcut.key == key && shortcut.alternate == alternate)
       return &shortcut;
   return nullptr;
 }
 
-bool isChordShortcutKey(char key)
+bool isChordShortcutKey(char key, bool alternate)
 {
-  return findChordShortcut(key) != nullptr;
+  return findChordShortcut(key, alternate) != nullptr;
 };
 
 
@@ -2483,8 +2707,12 @@ bool SequencerEditor::didLastMusicalKeyChangeContent() const
 void SequencerEditor::resetChordCycle()
 {
   activeChordFamilyKey = '\0';
+  activeChordFamilyAlternate = false;
   activeChordFamilyLabel.clear();
   activeChordVariation = 0;
+  activeChordVariationCount = 0;
+  activeTonnetzRoot.reset();
+  activeTonnetzVoicings.clear();
   chordHudExpiryMs = 0;
 }
 
@@ -2513,7 +2741,7 @@ std::size_t SequencerEditor::getChordHudVariation() const
 
 std::size_t SequencerEditor::getChordHudVariationCount() const
 {
-  return kChordShortcuts.empty() ? 0u : kChordShortcuts.front().variations.size();
+  return activeChordVariationCount;
 }
 
 double SequencerEditor::getChordHudExpiryMs() const
@@ -2661,7 +2889,7 @@ void SequencerEditor::enterControlCommand(CommandType command)
   requestStringRefresh();
 }
 
-bool SequencerEditor::handleChordKey(char key)
+bool SequencerEditor::handleChordKey(char key, bool alternate)
 {
   lastMusicalKeyChangedContent = false;
   const auto page = getCurrentPage();
@@ -2672,10 +2900,10 @@ bool SequencerEditor::handleChordKey(char key)
     return false;
 
   const bool editingSequence = page == SequencerEditorPage::sequence || page == SequencerEditorPage::step;
-  if (editingSequence && isChordShortcutKey(key) && currentSequenceControlMode())
+  if (editingSequence && isChordShortcutKey(key, alternate) && currentSequenceControlMode())
     return true;
 
-  const auto* shortcut = findChordShortcut(key);
+  const auto* shortcut = findChordShortcut(key, alternate);
   if (shortcut == nullptr)
     return false;
 
@@ -2686,11 +2914,32 @@ bool SequencerEditor::handleChordKey(char key)
   heldChordKeys.insert(key);
 
   const auto variationCount = shortcut->variations.size();
-  const auto variationIndex = activeChordFamilyKey == key
+  if (variationCount == 0)
+    return true;
+  const auto variationIndex = activeChordFamilyKey == key && activeChordFamilyAlternate == alternate
       ? (activeChordVariation + 1) % variationCount
       : 0u;
+
+  if (shortcut->kind == ChordShortcutKind::tonnetzCycle)
+  {
+    const auto root = resolveChordRootForCurrentStep();
+    if (!root.has_value())
+      return true;
+
+    if (activeChordFamilyKey != key || activeChordFamilyAlternate != alternate || activeTonnetzRoot != root
+        || activeTonnetzVoicings.size() != variationCount)
+    {
+      activeTonnetzRoot = root;
+      activeTonnetzVoicings = buildTonnetzVoicings(shortcut->variations, *root);
+    }
+    if (variationIndex >= activeTonnetzVoicings.size())
+      return true;
+    return applyChordNotesToCurrentStep(key, activeTonnetzVoicings[variationIndex],
+                                        shortcut->label, variationIndex, variationCount, true, alternate);
+  }
+
   return applyChordToCurrentStep(key, shortcut->variations[variationIndex],
-                                 shortcut->label, variationIndex);
+                                 shortcut->label, variationIndex, false, alternate);
 }
 
 bool SequencerEditor::handleControlKey(char key)
@@ -2802,63 +3051,109 @@ bool SequencerEditor::isCurrentSamplerRangeCell() const
 }
 
 bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals,
-                                              const std::string& familyLabel, std::size_t variationIndex)
+                                              const std::string& familyLabel, std::size_t variationIndex,
+                                              bool advanceAfterWrite, bool alternate)
 {
   if (sequencer == nullptr || intervals.empty())
+    return false;
+
+  const auto root = resolveChordRootForCurrentStep();
+  if (!root.has_value())
+    return true;
+
+  const auto [minimumInterval, maximumInterval] = std::minmax_element(intervals.begin(), intervals.end());
+  const int minimumOctaveShift = static_cast<int>(std::ceil((1.0 - *root - *minimumInterval) / 12.0));
+  const int maximumOctaveShift = static_cast<int>(std::floor((127.0 - *root - *maximumInterval) / 12.0));
+  const int octaveShift = minimumOctaveShift <= maximumOctaveShift
+      ? juce::jlimit(minimumOctaveShift, maximumOctaveShift, 0)
+      : 0;
+
+  std::vector<int> notes;
+  notes.reserve(intervals.size());
+  for (const int interval : intervals)
+    notes.push_back(*root + interval + 12 * octaveShift);
+
+  return applyChordNotesToCurrentStep(physicalKey, notes, familyLabel, variationIndex,
+                                      kChordShortcuts.empty() ? 0u : kChordShortcuts.front().variations.size(),
+                                      advanceAfterWrite, alternate);
+}
+
+std::optional<int> SequencerEditor::resolveChordRootForCurrentStep() const
+{
+  if (sequencer == nullptr)
+    return std::nullopt;
+
+  if (chordRootMidiNote.has_value())
+  {
+    const int root = static_cast<int>(std::lround(*chordRootMidiNote));
+    if (root >= 1 && root <= 127)
+      return root;
+  }
+
+  const auto data = sequencer->getStepData(currentSequence, currentStep);
+  for (const auto& row : data)
+    if (isPlayableNoteRow(row))
+    {
+      const int root = static_cast<int>(std::lround(row[Step::noteInd]));
+      if (root >= 1 && root <= 127)
+        return root;
+    }
+  return std::nullopt;
+}
+
+void SequencerEditor::advanceChordProgressionStep()
+{
+  if (sequencer == nullptr)
+    return;
+  const auto* sequence = sequencer->getSequence(currentSequence);
+  if (sequence == nullptr || sequence->getLength() == 0)
+    return;
+
+  // Progression entry deliberately follows the playback length rather than
+  // the allocated edit buffer, and wraps without resetting its active cycle.
+  currentStep = (currentStep + 1) % sequence->getLength();
+  clampStepCursorToCurrentStep();
+}
+
+bool SequencerEditor::applyChordNotesToCurrentStep(char physicalKey, const std::vector<int>& notes,
+                                                   const std::string& familyLabel,
+                                                   std::size_t variationIndex,
+                                                   std::size_t variationCount,
+                                                   bool advanceAfterWrite,
+                                                   bool alternate)
+{
+  if (sequencer == nullptr || notes.empty()
+      || std::any_of(notes.begin(), notes.end(), [] (int note) { return note < 1 || note > 127; }))
     return false;
 
   auto data = sequencer->getStepData(currentSequence, currentStep);
   if (data.empty())
     data.resize(1, std::vector<double>(Step::maxInd + 1, 0.0));
-
   for (auto& row : data)
-  {
     if (row.size() < Step::maxInd + 1)
       row.resize(Step::maxInd + 1, 0.0);
-  }
 
   const auto baseRowIndex = currentStepRow < data.size() ? currentStepRow : 0u;
   std::vector<double> baseRow = data[baseRowIndex];
-  double rootNote = chordRootMidiNote.value_or(0.0);
-  if (rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
-  {
-    for (const auto& row : data)
-      if (isPlayableNoteRow(row))
-      {
-        rootNote = row[Step::noteInd];
-        break;
-      }
-  }
-
-  if (rootNote <= 0.0 || std::abs(rootNote) < std::numeric_limits<double>::epsilon())
-    return true;
-
   if (std::abs(baseRow[Step::velInd]) < std::numeric_limits<double>::epsilon())
     baseRow[Step::velInd] = 64.0;
   if (std::abs(baseRow[Step::lengthInd]) < std::numeric_limits<double>::epsilon())
     baseRow[Step::lengthInd] = 1.0;
 
-  const int roundedRoot = static_cast<int>(std::lround(rootNote));
-  const auto [minimumInterval, maximumInterval] = std::minmax_element(intervals.begin(), intervals.end());
-  const int minimumOctaveShift = static_cast<int>(std::ceil((1.0 - roundedRoot - *minimumInterval) / 12.0));
-  const int maximumOctaveShift = static_cast<int>(std::floor((127.0 - roundedRoot - *maximumInterval) / 12.0));
-  const int octaveShift = minimumOctaveShift <= maximumOctaveShift
-      ? juce::jlimit(minimumOctaveShift, maximumOctaveShift, 0)
-      : 0;
-
   std::vector<std::vector<double>> chordRows;
-  chordRows.reserve(intervals.size());
-  for (const int interval : intervals)
+  chordRows.reserve(notes.size());
+  for (const int note : notes)
   {
     auto row = baseRow;
-    row[Step::noteInd] = static_cast<double>(juce::jlimit(1, 127,
-        roundedRoot + interval + 12 * octaveShift));
+    row[Step::noteInd] = static_cast<double>(note);
     chordRows.push_back(std::move(row));
   }
 
   activeChordFamilyKey = physicalKey;
+  activeChordFamilyAlternate = alternate;
   activeChordFamilyLabel = familyLabel;
   activeChordVariation = variationIndex;
+  activeChordVariationCount = variationCount;
   chordHudExpiryMs = juce::Time::getMillisecondCounterHiRes() + 1200.0;
 
   const bool writingSequence = editMode == SequencerEditorMode::editingStep
@@ -2876,7 +3171,10 @@ bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vecto
   if (writingSequence)
   {
     writeStepData(std::move(chordRows));
-    clampStepCursorToCurrentStep();
+    if (advanceAfterWrite)
+      advanceChordProgressionStep();
+    else
+      clampStepCursorToCurrentStep();
     requestStringRefresh();
     lastMusicalKeyChangedContent = true;
   }

@@ -16,7 +16,8 @@ bool isExplodableNoteRow(const std::vector<double>& row, double fallbackCommand)
   double command = row[Step::cmdInd];
   if (std::abs(command) < std::numeric_limits<double>::epsilon())
     command = fallbackCommand;
-  if (command < 0.0 || command >= static_cast<double>(kCommandTypeCount))
+  if (command < 0.0
+      || !isValidCommandTypeValue(static_cast<std::size_t>(command)))
     return false;
 
   const auto type = static_cast<CommandType>(static_cast<std::size_t>(command));

@@ -190,7 +190,7 @@ void DelayFxMachine::getStateInformation(juce::MemoryBlock& destData)
 void DelayFxMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kDelayStateVersion))
+    if (parsed.isVoid())
         return;
 
     const std::lock_guard<std::mutex> lock(stateMutex);

@@ -44,6 +44,8 @@ std::string describeStackCursorAction(const std::string& cellText)
     if (cellText.empty()) return "stack";
     for (std::size_t typeValue = 0; typeValue < kCommandTypeCount; ++typeValue)
     {
+        if (!isValidCommandTypeValue(typeValue))
+            continue;
         const auto traits = machineTraits(static_cast<CommandType>(typeValue));
         if (cellText == traits.shortLabel)
             return traits.longName;
@@ -2273,6 +2275,7 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
     arguments.getDynamicObject()->setProperty("text", juce::String::charToString(key.getTextCharacter()));
     arguments.getDynamicObject()->setProperty("ctrl", key.getModifiers().isCtrlDown());
     arguments.getDynamicObject()->setProperty("shift", key.getModifiers().isShiftDown());
+    arguments.getDynamicObject()->setProperty("alt", key.getModifiers().isAltDown());
     TrackerControlService::Command command;
     command.kind = TrackerControlService::CommandKind::uiAction;
     command.arguments = arguments;

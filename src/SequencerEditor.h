@@ -304,7 +304,7 @@ public:
   void toggleSoloCurrentMixerStack();
   void explodeCurrentSequence();
   void implodeCurrentSequence();
-  bool handleChordKey(char key);
+  bool handleChordKey(char key, bool alternate = false);
   bool handleControlKey(char key);
   bool handleNoteKey(char key);
   /** Whether the most recent handled piano/chord/control key changed tracker data. */
@@ -445,7 +445,14 @@ private:
   void syncOctaveFromMidiNote(double midiNote);
   void clampStepCursorToCurrentStep();
   bool applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals,
-                               const std::string& familyLabel, std::size_t variationIndex);
+                               const std::string& familyLabel, std::size_t variationIndex,
+                               bool advanceAfterWrite = false, bool alternate = false);
+  bool applyChordNotesToCurrentStep(char physicalKey, const std::vector<int>& notes,
+                                    const std::string& familyLabel, std::size_t variationIndex,
+                                    std::size_t variationCount, bool advanceAfterWrite,
+                                    bool alternate);
+  std::optional<int> resolveChordRootForCurrentStep() const;
+  void advanceChordProgressionStep();
   void resetChordCycle();
   void setChordRoot(double midiNote);
   std::vector<std::vector<UIBox>> buildMachineStackCells(std::size_t stackIndex);
@@ -551,8 +558,12 @@ private:
   /** Last computer-piano root, independent of generated chord voicings. */
   std::optional<double> chordRootMidiNote;
   char activeChordFamilyKey = '\0';
+  bool activeChordFamilyAlternate = false;
   std::string activeChordFamilyLabel;
   std::size_t activeChordVariation = 0;
+  std::size_t activeChordVariationCount = 0;
+  std::optional<int> activeTonnetzRoot;
+  std::vector<std::vector<int>> activeTonnetzVoicings;
   double chordHudExpiryMs = 0.0;
   bool lastMusicalKeyChangedContent = false;
   struct HeldKeyboardNote

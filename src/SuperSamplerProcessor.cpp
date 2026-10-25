@@ -1044,9 +1044,6 @@ juce::ValueTree SuperSamplerProcessor::exportToValueTree() const
 
 void SuperSamplerProcessor::importFromValueTree (const juce::ValueTree& tree)
 {
-    if ((int) tree.getProperty("version", 0) != 1)
-        return;
-
     struct PendingPlayer
     {
         SuperSamplePlayer::State state;

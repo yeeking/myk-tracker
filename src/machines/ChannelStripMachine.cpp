@@ -218,7 +218,7 @@ void ChannelStripMachine::getStateInformation(juce::MemoryBlock& destData)
 void ChannelStripMachine::setStateInformation(const void* data, int sizeInBytes)
 {
     const juce::var parsed = parseMachineStateJson(data, sizeInBytes);
-    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != static_cast<int>(kStateVersion))
+    if (parsed.isVoid())
         return;
 
     satDriveDb.store(getFloatProperty(parsed, "satDriveDb", satDriveDb.load(), kMinSatDriveDb, kMaxSatDriveDb));

@@ -510,7 +510,7 @@ int main()
         char key;
         std::array<std::vector<int>, 6> variations;
     };
-    const std::array<ChordFamilyExpectation, 10> chordFamilies {{
+    const std::array<ChordFamilyExpectation, 10> explicitChordFamilies {{
         {'q', {{{0,4,7}, {4,7,12}, {7,12,16}, {0,7,16}, {0,4,7,9}, {0,4,7,14}}}},
         {'w', {{{0,3,7}, {3,7,12}, {7,12,15}, {0,7,15}, {0,3,7,9}, {0,3,7,14}}}},
         {'e', {{{0,4,7,10}, {4,7,10,12}, {7,10,12,16}, {10,12,16,19}, {0,4,7,10,14}, {0,4,10,14,21}}}},
@@ -530,12 +530,10 @@ int main()
         return notes;
     };
 
-    // The stored root is 72 from the earlier Z-key press. Every family must
-    // expose its complete six-shape cycle without deriving a new root from a
-    // preceding inversion.
+    // The retained explicit families preserve their authored six-shape cycles.
     keyboardEditor.setCurrentStep(1);
     keyboardEditor.setCurrentStep(0);
-    for (const auto& family : chordFamilies)
+    for (const auto& family : explicitChordFamilies)
     {
         for (std::size_t variation = 0; variation < family.variations.size(); ++variation)
         {
@@ -560,17 +558,85 @@ int main()
             "seventh press wraps a family to variation one");
     keyboardEditor.releaseKeyboardAuditionKey('p');
 
-    keyboardEditor.handleNoteKey('x');
-    keyboardEditor.releaseKeyboardAuditionKey('x');
-    require(keyboardEditor.handleChordKey('q'), "new piano root chord is handled");
-    require(chordNotes(keyboardSequencer.getStepData(0, 0)) == std::vector<int>({74, 78, 81}),
-            "piano root changes reset the family and anchor it to the new note");
-    keyboardEditor.releaseKeyboardAuditionKey('q');
-    keyboardEditor.setCurrentStep(1);
-    require(keyboardEditor.handleChordKey('q'), "step-change chord is handled");
-    require(chordNotes(keyboardSequencer.getStepData(0, 1)) == std::vector<int>({74, 78, 81}),
-            "step changes reset the family while retaining the piano root");
-    keyboardEditor.releaseKeyboardAuditionKey('q');
+    struct TonnetzFamilyExpectation
+    {
+        char key;
+        std::vector<std::vector<int>> pitchClasses;
+    };
+    const std::array<TonnetzFamilyExpectation, 10> tonnetzFamilies {{
+        {'q', {{0,4,7}, {0,3,7}, {0,3,8}, {3,8,11}, {4,8,11}, {4,7,11}}},
+        {'w', {{0,4,7}, {0,4,9}, {0,5,9}, {0,5,8}, {0,3,8}, {0,3,7}}},
+        {'e', {{0,4,7}, {0,4,9}, {1,4,9}, {1,6,9}, {1,6,10}, {3,6,10}, {3,7,10}, {0,3,7}}},
+        {'r', {{0,4,7}, {0,4,9}, {0,5,9}, {2,5,9}, {2,5,10}, {1,5,10}, {3,7,10}, {0,5,8}, {0,3,8}, {0,3,7}}},
+        {'t', {{0,4,7}, {1,4,8}, {0,3,8}, {0,4,9}, {4,8,11}, {0,5,8}}},
+        {'y', {{0,4,7,10}, {0,3,6,10}, {0,3,5,9}, {3,5,8,11}, {2,5,8,10}, {1,4,8,10}}},
+        {'u', {{0,4,7}, {4,7,11}, {4,8,11}, {3,8,11}, {0,3,8}, {0,3,7}}},
+        {'i', {{0,4,7}, {0,3,7}, {0,3,8}, {0,5,8}, {0,5,9}, {0,4,9}}},
+        {'o', {{0,4,7,10}, {0,3,6,10}, {0,3,5,9}, {1,3,6,9}, {1,3,6,10}, {1,4,8,10}}},
+        {'p', {{0,4,7}, {0,5,8}, {4,8,11}, {0,4,9}, {0,3,8}, {1,4,8}}}
+    }};
+    const auto pitchClassesRelativeTo = [] (const std::vector<int>& notes, int root)
+    {
+        std::vector<int> result;
+        for (const auto note : notes)
+            result.push_back((note - root + 120) % 12);
+        std::sort(result.begin(), result.end());
+        return result;
+    };
+
+    Sequencer tonnetzSequencer(1, 4);
+    tonnetzSequencer.stop();
+    SequencerEditor tonnetzEditor(&tonnetzSequencer);
+    tonnetzEditor.setSequenceEntryArmed(true);
+    require(tonnetzEditor.handleNoteKey('z'), "Tonnetz root piano key is handled");
+    tonnetzEditor.releaseKeyboardAuditionKey('z');
+    for (const auto& family : tonnetzFamilies)
+    {
+        tonnetzEditor.setCurrentStep(0);
+        std::vector<int> firstVoicing;
+        for (std::size_t variation = 0; variation < family.pitchClasses.size(); ++variation)
+        {
+            const auto targetStep = tonnetzEditor.getCurrentStep();
+            require(tonnetzEditor.handleChordKey(family.key, true), "Alt+Tonnetz chord key is handled");
+            const auto notes = chordNotes(tonnetzSequencer.getStepData(0, targetStep));
+            require(pitchClassesRelativeTo(notes, 72) == family.pitchClasses[variation],
+                    "Tonnetz chord has the expected transposed pitch classes");
+            require(std::is_sorted(notes.begin(), notes.end())
+                        && std::adjacent_find(notes.begin(), notes.end()) == notes.end(),
+                    "Tonnetz voicings are ascending and contain no duplicate notes");
+            require(tonnetzEditor.getChordHudVariation() == variation
+                        && tonnetzEditor.getChordHudVariationCount() == family.pitchClasses.size(),
+                    "Tonnetz HUD reports the variable cycle length");
+            require(tonnetzEditor.getCurrentStep() == (targetStep + 1) % 4,
+                    "Tonnetz entry advances and wraps within the playback length");
+            if (variation == 0)
+                firstVoicing = notes;
+            const auto heldData = tonnetzSequencer.getStepData(0, targetStep);
+            require(tonnetzEditor.handleChordKey(family.key, true), "held Alt+Tonnetz chord key is swallowed");
+            require(tonnetzSequencer.getStepData(0, targetStep) == heldData,
+                    "held Tonnetz chord key does not advance or rewrite");
+            tonnetzEditor.releaseKeyboardAuditionKey(family.key);
+        }
+        const auto wrapStep = tonnetzEditor.getCurrentStep();
+        require(tonnetzEditor.handleChordKey(family.key, true), "Alt+Tonnetz cycle wrap key is handled");
+        require(chordNotes(tonnetzSequencer.getStepData(0, wrapStep)) == firstVoicing,
+                "Tonnetz cycle returns to its exact opening voicing");
+        tonnetzEditor.releaseKeyboardAuditionKey(family.key);
+    }
+
+    tonnetzEditor.handleNoteKey('x');
+    tonnetzEditor.releaseKeyboardAuditionKey('x');
+    tonnetzEditor.setCurrentStep(0);
+    require(tonnetzEditor.handleChordKey('q', true), "new piano root Alt+Tonnetz chord is handled");
+    require(chordNotes(tonnetzSequencer.getStepData(0, 0)) == std::vector<int>({74, 78, 81}),
+            "piano root changes reset the Tonnetz cycle and anchor it to the new note");
+    tonnetzEditor.releaseKeyboardAuditionKey('q');
+    tonnetzEditor.setCurrentStep(2);
+    tonnetzEditor.setCurrentStep(1);
+    require(tonnetzEditor.handleChordKey('q', true), "manual step-change Alt+Tonnetz chord is handled");
+    require(chordNotes(tonnetzSequencer.getStepData(0, 1)) == std::vector<int>({74, 78, 81}),
+            "manual step changes reset the Tonnetz cycle while retaining the piano root");
+    tonnetzEditor.releaseKeyboardAuditionKey('q');
 
     Sequencer lowBoundarySequencer(1, 4);
     lowBoundarySequencer.stop();
@@ -601,6 +667,34 @@ int main()
     }
     require(chordNotes(highBoundarySequencer.getStepData(0, 0)) == std::vector<int>({107, 114, 121}),
             "high MIDI boundary octave-folds the complete extended voicing");
+
+    for (const bool highBoundary : { false, true })
+    {
+        Sequencer boundaryTonnetzSequencer(1, 4);
+        boundaryTonnetzSequencer.stop();
+        SequencerEditor boundaryTonnetzEditor(&boundaryTonnetzSequencer);
+        const int octaveMoves = highBoundary ? 3 : 6;
+        for (int i = 0; i < octaveMoves; ++i)
+        {
+            if (highBoundary) boundaryTonnetzEditor.incrementOctave();
+            else boundaryTonnetzEditor.decrementOctave();
+        }
+        require(boundaryTonnetzEditor.handleNoteKey(highBoundary ? 'm' : 's'),
+                "boundary Tonnetz root piano key is handled");
+        boundaryTonnetzEditor.releaseKeyboardAuditionKey(highBoundary ? 'm' : 's');
+        boundaryTonnetzEditor.setSequenceEntryArmed(true);
+        for (int variation = 0; variation < 6; ++variation)
+        {
+            const auto targetStep = boundaryTonnetzEditor.getCurrentStep();
+            require(boundaryTonnetzEditor.handleChordKey('q', true), "boundary Alt+Tonnetz chord is handled");
+            const auto notes = chordNotes(boundaryTonnetzSequencer.getStepData(0, targetStep));
+            require(!notes.empty() && std::all_of(notes.begin(), notes.end(), [] (int note)
+                        { return note >= 1 && note <= 127; })
+                        && std::adjacent_find(notes.begin(), notes.end()) == notes.end(),
+                    "boundary Tonnetz chords retain valid, unique MIDI notes");
+            boundaryTonnetzEditor.releaseKeyboardAuditionKey('q');
+        }
+    }
 
     keyboardEditor.gotoMixerPage();
     const auto beforePreview = keyboardSequencer.getStepData(0, 0);

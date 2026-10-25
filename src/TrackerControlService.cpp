@@ -1118,6 +1118,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     const char key = rawText.isNotEmpty() ? static_cast<char>(std::tolower(static_cast<unsigned char>(rawText[0]))) : '\0';
                     const bool ctrl = boolArg(args, "ctrl");
                     const bool shift = boolArg(args, "shift");
+                    const bool alt = boolArg(args, "alt");
                     bool handled = false;
                     const bool machineCapturesKeyboard = editor.machineWantsExclusiveKeyboardInput() && !ctrl;
                     int shiftedSequenceTps = 0;
@@ -1366,7 +1367,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (keyCode == '5') { handled = editor.enterMachineDetailFromAnywhere(); viewChanged = handled; }
                     else if (keyCode == '0') { handled = editor.selectPageShortcut(0); viewChanged = handled; }
                     else if (keyCode >= '1' && keyCode <= '7') { handled = editor.selectPageShortcut(keyCode - '0'); viewChanged = handled; }
-                    else if (editor.handleChordKey(key) || editor.handleControlKey(key) || editor.handleNoteKey(key))
+                    else if (editor.handleChordKey(key, alt) || editor.handleControlKey(key) || editor.handleNoteKey(key))
                     {
                         contentChanged = editor.didLastMusicalKeyChangeContent();
                         handled = true;

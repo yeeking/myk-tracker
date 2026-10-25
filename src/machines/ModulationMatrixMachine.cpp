@@ -357,7 +357,7 @@ void ModulationMatrixMachine::setStateInformation(const void* data, int size)
     // Calling String::fromUTF8 directly here asserts in a Debug build on a
     // corrupt blob.
     const auto parsed = parseMachineStateJson(data, size);
-    if (parsed.isVoid() || static_cast<int>(parsed.getProperty("version", 0)) != 4)
+    if (parsed.isVoid())
         return;
 
     for (auto& row : depths) for (auto& value : row) value = 0;
