@@ -110,6 +110,7 @@ private:
     TrackerMainProcessor& processor;
     std::uint64_t contentRevision = 0;
     std::uint64_t viewRevision = 0;
+    std::uint64_t nextSequenceUpdateId = 1;
     struct AsyncState
     {
         struct Load

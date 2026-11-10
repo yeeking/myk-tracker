@@ -624,8 +624,8 @@ int main()
             require(tonnetzEditor.getChordHudVariation() == variation
                         && tonnetzEditor.getChordHudVariationCount() == family.pitchClasses.size(),
                     "Tonnetz HUD reports the variable cycle length");
-            require(tonnetzEditor.getCurrentStep() == (targetStep + 1) % 4,
-                    "Tonnetz entry advances and wraps within the playback length");
+            require(tonnetzEditor.getCurrentStep() == targetStep,
+                    "Tonnetz entry stays on the armed step");
             if (variation == 0)
                 firstVoicing = notes;
             const auto heldData = tonnetzSequencer.getStepData(0, targetStep);
@@ -1263,6 +1263,34 @@ int main()
         const auto& grid = headSafetySequencer.getSequenceAsGridOfStrings();
         require(!grid.empty() && !grid[0].empty(), "head changes tolerate empty step rows");
     }
+
+    // A bulk replacement is fully prepared off the playback path, has
+    // latest-wins semantics, and becomes visible as one bank at the audio
+    // boundary rather than via one lock per step.
+    Sequencer replacementSequencer(1, 2);
+    std::vector<Sequencer::ReplacementStepData> firstReplacement(3);
+    firstReplacement[0].rows = {{ static_cast<double>(CommandType::MidiNote), 36.0, 100.0, 1.0 }};
+    firstReplacement[1].rows = {{ static_cast<double>(CommandType::MidiNote), 38.0, 90.0, 2.0 }};
+    firstReplacement[2].rows = {{ static_cast<double>(CommandType::MidiNote), 42.0, 80.0, 1.0 }};
+    firstReplacement[2].active = false;
+    auto preparedFirst = replacementSequencer.prepareSequenceReplacement(0, std::move(firstReplacement), 3, 101);
+    require(preparedFirst != nullptr && !replacementSequencer.queuePreparedSequenceReplacement(std::move(preparedFirst)),
+            "first prepared replacement queues without superseding");
+    std::vector<Sequencer::ReplacementStepData> secondReplacement(1);
+    secondReplacement[0].rows = {{ static_cast<double>(CommandType::MidiNote), 60.0, 127.0, 4.0 }};
+    auto preparedSecond = replacementSequencer.prepareSequenceReplacement(0, std::move(secondReplacement), 1, 102);
+    require(preparedSecond != nullptr && replacementSequencer.queuePreparedSequenceReplacement(std::move(preparedSecond)),
+            "newer prepared replacement supersedes an unapplied one");
+    require(replacementSequencer.hasPendingSequenceReplacement(0)
+                && replacementSequencer.latestQueuedSequenceReplacement(0) == 102,
+            "queued replacement exposes pending and accepted update id");
+    replacementSequencer.applyPendingSequenceReplacementsAudioThread();
+    require(!replacementSequencer.hasPendingSequenceReplacement(0)
+                && replacementSequencer.latestAppliedSequenceReplacement(0) == 102
+                && replacementSequencer.howManySteps(0) == 1
+                && replacementSequencer.getStepData(0, 0)[0][Step::noteInd] == 60.0,
+            "audio-boundary replacement applies only the latest complete bank");
+    replacementSequencer.drainRetiredSequenceReplacements();
     return 0;
 }
 

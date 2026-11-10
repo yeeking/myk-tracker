@@ -1104,6 +1104,13 @@ void Sequence::resetForTransportStart()
 
 Sequencer::Sequencer(std::size_t seqCount, std::size_t seqLength) : rw_mutex{std::make_unique<std::shared_mutex>()}, playing{std::make_unique<std::atomic<bool>>(true)}, triggerOnTick{true}, stringUpdateRequested{false}, soloModeActive{std::make_unique<std::atomic<bool>>(false)}
 {
+  for (std::size_t index = 0; index < maxSequences; ++index)
+  {
+    pendingReplacements[index].store(nullptr, std::memory_order_relaxed);
+    latestQueuedReplacementIds[index].store(0, std::memory_order_relaxed);
+    latestAppliedReplacementIds[index].store(0, std::memory_order_relaxed);
+  }
+  retiredReplacements.fill(nullptr);
   for (std::size_t i = 0; i < seqCount; ++i)
   {
     sequences.push_back(Sequence{this, seqLength});
@@ -1134,6 +1141,137 @@ void Sequencer::setDefaultMIDIChannels()
 
 Sequencer::~Sequencer()
 {
+  for (auto& pending : pendingReplacements)
+    delete pending.exchange(nullptr, std::memory_order_acq_rel);
+  drainRetiredSequenceReplacements();
+}
+
+std::unique_ptr<Sequencer::PreparedSequenceReplacement> Sequencer::prepareSequenceReplacement(
+    std::size_t sequence, std::vector<ReplacementStepData> replacementSteps,
+    std::size_t length, std::uint64_t updateId)
+{
+  if (sequence >= sequences.size() || length == 0 || length > maxSequences
+      || replacementSteps.size() != length)
+    return {};
+
+  auto replacement = std::make_unique<PreparedSequenceReplacement>();
+  replacement->sequence = sequence;
+  replacement->length = length;
+  replacement->updateId = updateId;
+  replacement->steps.reserve(length);
+  replacement->displayStrings.reserve(length);
+
+  std::shared_lock<std::shared_mutex> lock(*rw_mutex);
+  const auto machineType = sequences[sequence].getMachineType();
+  const auto context = sequences[sequence].getReadOnlyContext();
+  for (auto& source : replacementSteps)
+  {
+    Step step;
+    for (auto& row : source.rows)
+    {
+      if (row.size() < Step::maxInd + 1)
+        row.resize(Step::maxInd + 1, 0.0);
+      const auto commandIndex = static_cast<std::size_t>(std::max(0.0, row[Step::cmdInd]));
+      if (!isValidCommandTypeValue(commandIndex)
+          || !machineTraits(static_cast<CommandType>(commandIndex)).isStepCommandType)
+        row[Step::cmdInd] = machineType;
+    }
+    step.setData(source.rows);
+    if (source.active)
+      step.activate();
+    else
+      step.deactivate();
+    replacement->displayStrings.push_back(step.toStringFlat(&context));
+    replacement->steps.push_back(std::move(step));
+  }
+  return replacement;
+}
+
+bool Sequencer::queuePreparedSequenceReplacement(std::unique_ptr<PreparedSequenceReplacement> replacement)
+{
+  if (replacement == nullptr || replacement->sequence >= maxSequences)
+    return false;
+  auto* raw = replacement.release();
+  // The message thread owns every pointer returned by exchange, so deleting a
+  // superseded replacement cannot race the callback consumer.
+  auto* superseded = pendingReplacements[raw->sequence].exchange(raw, std::memory_order_acq_rel);
+  latestQueuedReplacementIds[raw->sequence].store(raw->updateId, std::memory_order_release);
+  delete superseded;
+  return superseded != nullptr;
+}
+
+void Sequencer::applyPendingSequenceReplacementsAudioThread()
+{
+  for (std::size_t sequence = 0; sequence < sequences.size(); ++sequence)
+  {
+    const auto read = retiredRead.load(std::memory_order_acquire);
+    const auto write = retiredWrite.load(std::memory_order_relaxed);
+    if ((write + 1) % replacementRetirementCapacity == read)
+      return; // The message thread will drain; never destroy on audio.
+
+    auto* replacement = pendingReplacements[sequence].exchange(nullptr, std::memory_order_acq_rel);
+    if (replacement == nullptr)
+      continue;
+
+    {
+      std::unique_lock<std::shared_mutex> lock(*rw_mutex);
+      auto& destination = sequences[sequence];
+      destination.steps.swap(replacement->steps);
+      destination.currentLength = replacement->length;
+      destination.currentStep %= destination.currentLength;
+      for (auto& head : destination.readHeads)
+      {
+        head.linearStep %= destination.currentLength;
+        for (std::size_t index = 0; index < head.positionCount; ++index)
+          head.positions[index] %= destination.currentLength;
+      }
+      destination.requestQuarterBeatResyncIfPlaying();
+      stringUpdateRequested = true;
+    }
+
+    latestAppliedReplacementIds[sequence].store(replacement->updateId, std::memory_order_release);
+    retiredReplacements[write] = replacement;
+    retiredWrite.store((write + 1) % replacementRetirementCapacity, std::memory_order_release);
+  }
+}
+
+void Sequencer::drainRetiredSequenceReplacements()
+{
+  for (;;)
+  {
+    const auto read = retiredRead.load(std::memory_order_relaxed);
+    const auto write = retiredWrite.load(std::memory_order_acquire);
+    if (read == write)
+      break;
+    delete retiredReplacements[read];
+    retiredReplacements[read] = nullptr;
+    retiredRead.store((read + 1) % replacementRetirementCapacity, std::memory_order_release);
+  }
+}
+
+bool Sequencer::hasPendingSequenceReplacement(std::size_t sequence) const noexcept
+{
+  return sequence < maxSequences
+      && pendingReplacements[sequence].load(std::memory_order_acquire) != nullptr;
+}
+
+std::uint64_t Sequencer::latestQueuedSequenceReplacement(std::size_t sequence) const noexcept
+{
+  return sequence < maxSequences
+      ? latestQueuedReplacementIds[sequence].load(std::memory_order_acquire) : 0;
+}
+
+std::uint64_t Sequencer::latestAppliedSequenceReplacement(std::size_t sequence) const noexcept
+{
+  return sequence < maxSequences
+      ? latestAppliedReplacementIds[sequence].load(std::memory_order_acquire) : 0;
+}
+
+void Sequencer::cancelPendingSequenceReplacementsLocked()
+{
+  for (auto& pending : pendingReplacements)
+    delete pending.exchange(nullptr, std::memory_order_acq_rel);
+  drainRetiredSequenceReplacements();
 }
 
 void Sequencer::copyChannelAndTypeSettings(Sequencer *otherSeq)
@@ -1225,6 +1363,9 @@ void Sequencer::setSequenceLength(std::size_t sequence, std::size_t length)
 {
   std::unique_lock<std::shared_mutex> lock(*rw_mutex);
 
+  if (!assertSequence(sequence))
+    return;
+  sequences[sequence].ensureEnoughStepsForLength(length);
   sequences[sequence].setLength(length);
   stringUpdateRequested = true;
 }
@@ -1252,6 +1393,8 @@ bool Sequencer::insertSequence(std::size_t index, std::size_t length, double mac
   if (sequences.size() >= maxSequences || index > sequences.size())
     return false;
 
+  cancelPendingSequenceReplacementsLocked();
+
   Sequence newSequence(this, std::max<std::size_t>(1, length));
   newSequence.setMachineId(machineId);
   newSequence.setControlMode(controlMode);
@@ -1267,6 +1410,8 @@ bool Sequencer::eraseSequence(std::size_t index)
 
   if (index >= sequences.size() || sequences.size() <= 1)
     return false;
+
+  cancelPendingSequenceReplacementsLocked();
 
   sequences.erase(sequences.begin() + static_cast<std::ptrdiff_t>(index));
   updateSoloModeActiveLocked();

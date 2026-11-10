@@ -7,6 +7,7 @@
 #include "standalone/TrackerStandaloneHost.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -123,6 +124,11 @@ void TrackerControlService::synchroniseAsyncCompletions()
 {
     const auto completed = asyncState->completedSinceRevision.exchange(0);
     contentRevision += completed;
+    // Old step banks are owned by the audio callback until a block-boundary
+    // swap completes. Reclaim them only from this message-thread boundary.
+    for (auto& sequenceSet : processor.sequenceSets)
+        if (sequenceSet != nullptr)
+            sequenceSet->drainRetiredSequenceReplacements();
 }
 
 bool TrackerControlService::revisionsMatch(const Command& command, Result& failure) const
@@ -405,6 +411,11 @@ juce::var TrackerControlService::makeStateNow()
 TrackerControlService::Result TrackerControlService::getStateNow(const juce::String& scope, bool includeSerializedMachineCells, bool pageOnly)
 {
     synchroniseAsyncCompletions();
+    // The editor's regular page refresh only needs message-thread UI state and
+    // Sequencer's own short cache locks. Keeping it out of audioMutex avoids a
+    // string-grid rebuild delaying the next callback after a pattern update.
+    if (scope == "view" && pageOnly)
+        return success(makeViewNow(false, true));
     auto result = processor.withAudioThreadExclusive([&]() -> Result
     {
         if (scope == "view") return success(makeViewNow(includeSerializedMachineCells, pageOnly));
@@ -484,7 +495,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
     if (!revisionsMatch(command, revisionFailure))
         return revisionFailure;
 
-    return processor.withAudioThreadExclusive([&]() -> Result
+    const auto executeCommand = [&]() -> Result
     {
         auto& editor = processor.seqEditor;
         const auto& args = command.arguments;
@@ -498,6 +509,16 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
             editor.setCurrentStep(step);
             if (stepPage) editor.gotoStepPage(); else editor.gotoSequencePage();
             viewChanged = true;
+        };
+
+        // Sequence data is stored per set; addressing it directly is crucial
+        // for remote control.  Editing another set must not browse to it,
+        // change the visible page, or displace the user's cursor.
+        auto sequencerForSet = [&](int setIndex) -> Sequencer*
+        {
+            if (setIndex < 0 || static_cast<std::size_t>(setIndex) >= processor.sequenceSets.size())
+                return nullptr;
+            return processor.sequenceSets[static_cast<std::size_t>(setIndex)].get();
         };
 
         switch (command.kind)
@@ -558,31 +579,125 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 const int setIndex = intArg(args, "setId", static_cast<int>(processor.getViewedSequenceSetIndex()));
                 const int sequenceId = intArg(args, "sequenceId");
                 const auto notesVar = args.getProperty("notes", juce::var());
-                if (setIndex < 0 || sequenceId < 0 || !notesVar.isArray())
-                    return fail("invalid_argument", "setId, sequenceId, and numeric notes array are required");
-                selectAddress(setIndex, sequenceId, 0, true);
-                auto* sequencer = processor.getSequencer();
+                const auto velocitiesVar = args.getProperty("velocities", juce::var());
+                auto* sequencer = sequencerForSet(setIndex);
                 if (sequencer == nullptr || static_cast<std::size_t>(sequenceId) >= sequencer->howManySequences())
                     return fail("not_found", "Sequence does not exist");
+                const auto sequenceIndex = static_cast<std::size_t>(sequenceId);
+                if (stringArg(args, "action", "replace") == "status")
+                {
+                    auto detail = makeObject();
+                    detail.getDynamicObject()->setProperty("status", sequencer->hasPendingSequenceReplacement(sequenceIndex) ? "queued" : "applied");
+                    detail.getDynamicObject()->setProperty("latestAcceptedUpdateId", static_cast<juce::int64>(sequencer->latestQueuedSequenceReplacement(sequenceIndex)));
+                    detail.getDynamicObject()->setProperty("latestAppliedUpdateId", static_cast<juce::int64>(sequencer->latestAppliedSequenceReplacement(sequenceIndex)));
+                    detail.getDynamicObject()->setProperty("pending", sequencer->hasPendingSequenceReplacement(sequenceIndex));
+                    return success(detail);
+                }
+
+                const auto stepsVar = args.getProperty("steps", juce::var());
+                if (notesVar.isArray() == stepsVar.isArray())
+                    return fail("invalid_argument", "supply exactly one of notes or steps");
                 auto stepCount = sequencer->howManySteps(static_cast<std::size_t>(sequenceId));
+                const auto inputCount = notesVar.isArray()
+                    ? static_cast<std::size_t>(notesVar.getArray()->size())
+                    : static_cast<std::size_t>(stepsVar.getArray()->size());
+                if (inputCount > kMaxCompactTrackSteps)
+                    return fail("invalid_argument", "sequence replacements are limited to 128 steps");
+                const int requestedLength = hasArg(args, "length") ? intArg(args, "length")
+                    : static_cast<int>(notesVar.isArray() ? std::max(stepCount, inputCount) : inputCount);
+                if (requestedLength < 1 || requestedLength > static_cast<int>(kMaxCompactTrackSteps)
+                    || (notesVar.isArray() && requestedLength < static_cast<int>(inputCount))
+                    || (stepsVar.isArray() && requestedLength != static_cast<int>(inputCount)))
+                    return fail("invalid_argument", notesVar.isArray()
+                        ? "length must be 1 through 128 and at least the notes array length"
+                        : "full steps replacements require steps.length to equal length");
+
+                if (stepsVar.isArray())
+                {
+                    std::vector<Sequencer::ReplacementStepData> replacementSteps;
+                    replacementSteps.reserve(inputCount);
+                    for (const auto& encodedStep : *stepsVar.getArray())
+                    {
+                        if (encodedStep.getDynamicObject() == nullptr)
+                            return fail("invalid_argument", "every steps item must be an object");
+                        const auto rowsVar = encodedStep.getProperty("rows", juce::var());
+                        if (!rowsVar.isArray() || rowsVar.getArray()->isEmpty())
+                            return fail("invalid_argument", "every steps item requires a non-empty rows array");
+                        Sequencer::ReplacementStepData step;
+                        step.active = boolArg(encodedStep, "active", true);
+                        for (const auto& encodedRow : *rowsVar.getArray())
+                        {
+                            if (!encodedRow.isArray() || encodedRow.getArray()->size() != 4)
+                                return fail("invalid_argument", "each full step row must be [command,note,velocity,duration]");
+                            std::vector<double> row;
+                            row.reserve(4);
+                            for (const auto& value : *encodedRow.getArray())
+                            {
+                                if (!value.isInt() && !value.isInt64() && !value.isDouble())
+                                    return fail("invalid_argument", "full step rows must contain finite numbers");
+                                const auto numeric = static_cast<double>(value);
+                                if (!std::isfinite(numeric))
+                                    return fail("invalid_argument", "full step rows must contain finite numbers");
+                                row.push_back(numeric);
+                            }
+                            step.rows.push_back(std::move(row));
+                        }
+                        replacementSteps.push_back(std::move(step));
+                    }
+                    const auto updateId = nextSequenceUpdateId++;
+                    auto replacement = sequencer->prepareSequenceReplacement(sequenceIndex, std::move(replacementSteps),
+                                                                              static_cast<std::size_t>(requestedLength), updateId);
+                    if (replacement == nullptr)
+                        return fail("invalid_argument", "could not prepare sequence replacement");
+                    const bool superseded = sequencer->queuePreparedSequenceReplacement(std::move(replacement));
+                    changed(true, false);
+                    auto detail = makeObject();
+                    detail.getDynamicObject()->setProperty("status", "queued");
+                    detail.getDynamicObject()->setProperty("updateId", static_cast<juce::int64>(updateId));
+                    detail.getDynamicObject()->setProperty("supersededPrevious", superseded);
+                    detail.getDynamicObject()->setProperty("c", static_cast<int>(inputCount));
+                    return success(detail);
+                }
+
                 const auto& noteSteps = *notesVar.getArray();
-                if (static_cast<std::size_t>(noteSteps.size()) > kMaxCompactTrackSteps)
-                    return fail("invalid_argument", "notes is limited to 128 track steps");
+                const bool hasPerNoteVelocities = velocitiesVar.isArray();
+                if (!velocitiesVar.isVoid() && !velocitiesVar.isUndefined() && !hasPerNoteVelocities)
+                    return fail("invalid_argument", "velocities must be a step-ordered array when supplied");
+                const auto* velocitySteps = hasPerNoteVelocities ? velocitiesVar.getArray() : nullptr;
+                if (velocitySteps != nullptr && velocitySteps->size() != noteSteps.size())
+                    return fail("invalid_argument", "velocities must contain exactly one value for every notes step");
                 const double velocity = juce::jlimit(0.0, 127.0, numberArg(args, "velocity", 100.0));
                 const double duration = juce::jlimit(1.0, 65535.0, numberArg(args, "durationTicks", 1.0));
 
+                const auto isMidiVelocity = [] (const juce::var& value)
+                {
+                    if (!value.isInt() && !value.isInt64() && !value.isDouble()) return false;
+                    const auto numericValue = static_cast<double>(value);
+                    return std::isfinite(numericValue) && numericValue >= 0.0 && numericValue <= 127.0;
+                };
+
                 // Validate the complete compact payload before mutating any
                 // step, so a rejected chord cannot leave a partial pattern.
-                for (const auto& requested : noteSteps)
+                for (int step = 0; step < noteSteps.size(); ++step)
                 {
+                    const auto& requested = noteSteps.getReference(step);
                     if (requested.isVoid() || requested.isUndefined()) continue;
+                    const auto velocityForStep = velocitySteps != nullptr
+                        ? velocitySteps->getReference(step) : juce::var();
                     if (requested.isArray())
                     {
-                        for (const auto& noteValue : *requested.getArray())
+                        const auto& chord = *requested.getArray();
+                        if (velocitySteps != nullptr
+                            && (!velocityForStep.isArray() || velocityForStep.getArray()->size() != chord.size()))
+                            return fail("invalid_argument", "a chord's velocities must be an equally sized array");
+                        for (int rowIndex = 0; rowIndex < chord.size(); ++rowIndex)
                         {
+                            const auto& noteValue = chord.getReference(rowIndex);
                             const auto note = static_cast<double>(noteValue);
                             if (note <= 0.0 || note > 127.0)
                                 return fail("invalid_argument", "notes must be MIDI values 1 through 127; use 0 or null for a rest");
+                            if (velocitySteps != nullptr && !isMidiVelocity(velocityForStep.getArray()->getReference(rowIndex)))
+                                return fail("invalid_argument", "velocities must be finite MIDI values 0 through 127");
                         }
                     }
                     else
@@ -590,24 +705,24 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         const auto note = static_cast<double>(requested);
                         if (note < 0.0 || note > 127.0)
                             return fail("invalid_argument", "notes must be MIDI values 1 through 127; use 0 or null for a rest");
+                        if (note > 0.0 && velocitySteps != nullptr && !isMidiVelocity(velocityForStep))
+                            return fail("invalid_argument", "velocities must be finite MIDI values 0 through 127");
                     }
                 }
 
-                // A compact note list is allowed to extend a pattern, but the
-                // fixed upper bound prevents an external client from creating
-                // unbounded sequences.  Resize only after its whole payload
-                // has validated, so rejected requests leave song content intact.
-                if (static_cast<std::size_t>(noteSteps.size()) > stepCount)
+                std::vector<Sequencer::ReplacementStepData> replacementSteps;
+                replacementSteps.reserve(static_cast<std::size_t>(requestedLength));
+                for (std::size_t step = 0; step < static_cast<std::size_t>(requestedLength); ++step)
                 {
-                    auto* sequence = sequencer->getSequence(static_cast<std::size_t>(sequenceId));
-                    sequence->ensureEnoughStepsForLength(static_cast<std::size_t>(noteSteps.size()));
-                    sequence->setLength(static_cast<std::size_t>(noteSteps.size()));
-                    stepCount = sequencer->howManySteps(static_cast<std::size_t>(sequenceId));
-                }
-
-                for (std::size_t step = 0; step < stepCount; ++step)
-                {
-                    auto data = sequencer->getStepData(static_cast<std::size_t>(sequenceId), step);
+                    Sequencer::ReplacementStepData prepared;
+                    if (step < stepCount)
+                    {
+                        prepared.rows = sequencer->getStepData(sequenceIndex, step);
+                        prepared.active = sequencer->isStepActive(sequenceIndex, step);
+                    }
+                    else
+                        prepared.rows = { { static_cast<double>(CommandType::MidiNote), 0.0, 0.0, 0.0 } };
+                    auto& data = prepared.rows;
                     for (auto& row : data)
                     {
                         if (row.size() < Step::maxInd + 1) row.resize(Step::maxInd + 1, 0.0);
@@ -616,9 +731,14 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
 
                     const juce::var requested = step < static_cast<std::size_t>(noteSteps.size())
                         ? noteSteps.getReference(static_cast<int>(step)) : juce::var();
+                    const juce::var velocityForStep = velocitySteps != nullptr && step < static_cast<std::size_t>(velocitySteps->size())
+                        ? velocitySteps->getReference(static_cast<int>(step)) : juce::var();
                     juce::Array<juce::var> chord;
+                    juce::Array<juce::var> chordVelocities;
                     if (requested.isArray()) chord = *requested.getArray();
                     else if (!requested.isVoid() && !requested.isUndefined() && static_cast<double>(requested) > 0.0) chord.add(requested);
+                    if (hasPerNoteVelocities && velocityForStep.isArray()) chordVelocities = *velocityForStep.getArray();
+                    else if (hasPerNoteVelocities && chord.size() > 0) chordVelocities.add(velocityForStep);
 
                     for (int rowIndex = 0; rowIndex < chord.size(); ++rowIndex)
                     {
@@ -627,15 +747,24 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         auto& row = data[static_cast<std::size_t>(rowIndex)];
                         if (row.size() < Step::maxInd + 1) row.resize(Step::maxInd + 1, 0.0);
                         row[Step::noteInd] = note;
-                        row[Step::velInd] = velocity;
+                        row[Step::velInd] = hasPerNoteVelocities
+                            ? static_cast<double>(chordVelocities.getReference(rowIndex)) : velocity;
                         row[Step::lengthInd] = duration;
                     }
-                    sequencer->setStepData(static_cast<std::size_t>(sequenceId), step, std::move(data));
+                    replacementSteps.push_back(std::move(prepared));
                 }
-                contentChanged = true;
+                const auto updateId = nextSequenceUpdateId++;
+                auto replacement = sequencer->prepareSequenceReplacement(sequenceIndex, std::move(replacementSteps),
+                                                                          static_cast<std::size_t>(requestedLength), updateId);
+                if (replacement == nullptr)
+                    return fail("invalid_argument", "could not prepare sequence replacement");
+                const bool superseded = sequencer->queuePreparedSequenceReplacement(std::move(replacement));
+                changed(true, false);
                 auto detail = makeObject();
+                detail.getDynamicObject()->setProperty("status", "queued");
+                detail.getDynamicObject()->setProperty("updateId", static_cast<juce::int64>(updateId));
+                detail.getDynamicObject()->setProperty("supersededPrevious", superseded);
                 detail.getDynamicObject()->setProperty("c", static_cast<int>(noteSteps.size()));
-                changed(contentChanged, viewChanged);
                 return success(detail);
             }
             case CommandKind::setTrackLengths:
@@ -645,8 +774,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 const auto lengthsVar = args.getProperty("lengths", juce::var());
                 if (setIndex < 0 || sequenceId < 0 || !lengthsVar.isArray())
                     return fail("invalid_argument", "setId, sequenceId, and lengths array are required");
-                selectAddress(setIndex, sequenceId, 0, true);
-                auto* sequencer = processor.getSequencer();
+                auto* sequencer = sequencerForSet(setIndex);
                 if (sequencer == nullptr || static_cast<std::size_t>(sequenceId) >= sequencer->howManySequences())
                     return fail("not_found", "Sequence does not exist");
                 const auto stepCount = sequencer->howManySteps(static_cast<std::size_t>(sequenceId));
@@ -702,8 +830,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 const int step = intArg(args, "stepId");
                 const int row = intArg(args, "row", 0);
                 if (sequence < 0 || step < 0 || row < 0) return fail("invalid_argument", "Step address must be non-negative");
-                selectAddress(setIndex, sequence, step, true);
-                auto* sequencer = processor.getSequencer();
+                auto* sequencer = sequencerForSet(setIndex);
                 if (sequencer == nullptr || static_cast<std::size_t>(sequence) >= sequencer->howManySequences()
                     || static_cast<std::size_t>(step) >= sequencer->howManySteps(static_cast<std::size_t>(sequence)))
                     return fail("not_found", "Step does not exist");
@@ -761,7 +888,6 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     if (hasArg(args, "durationTicks")) event[Step::lengthInd] = juce::jlimit(0.0, 65535.0, numberArg(args, "durationTicks"));
                 }
                 sequencer->setStepData(static_cast<std::size_t>(sequence), static_cast<std::size_t>(step), std::move(data));
-                editor.setStepCursor(static_cast<std::size_t>(row), 0);
                 contentChanged = true;
                 break;
             }
@@ -769,8 +895,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
             {
                 const int setIndex = intArg(args, "setId", static_cast<int>(processor.getViewedSequenceSetIndex()));
                 const int sequenceIndex = intArg(args, "sequenceId");
-                selectAddress(setIndex, sequenceIndex, intArg(args, "stepId", 0), false);
-                auto* sequencer = processor.getSequencer();
+                auto* sequencer = sequencerForSet(setIndex);
                 if (sequencer == nullptr || sequenceIndex < 0 || static_cast<std::size_t>(sequenceIndex) >= sequencer->howManySequences())
                     return fail("not_found", "Sequence does not exist");
                 auto* sequence = sequencer->getSequence(static_cast<std::size_t>(sequenceIndex));
@@ -1458,9 +1583,19 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 else if (action == "arm") editor.toggleSequenceEntryArmed();
                 else if (action == "note") editor.enterDataAtCursor(numberArg(args, "value"));
                 else if (action == "page") editor.selectPageShortcut(intArg(args, "value"));
+                else if (action == "focus_sequence")
+                {
+                    const int setIndex = intArg(args, "setId", static_cast<int>(processor.getViewedSequenceSetIndex()));
+                    const int sequenceIndex = intArg(args, "sequenceId");
+                    const int stepIndex = intArg(args, "stepId", 0);
+                    if (setIndex < 0 || static_cast<std::size_t>(setIndex) >= processor.getSequenceSetCount()
+                        || sequenceIndex < 0 || stepIndex < 0)
+                        return fail("invalid_argument", "focus_sequence requires valid non-negative setId, sequenceId, and stepId");
+                    selectAddress(setIndex, sequenceIndex, stepIndex, false);
+                }
                 else return fail("invalid_argument", "Unknown UI action");
                 contentChanged = action != "up" && action != "down" && action != "left" && action != "right"
-                    && action != "page" && action != "next_step" && action != "arm";
+                    && action != "page" && action != "focus_sequence" && action != "next_step" && action != "arm";
                 viewChanged = true;
                 break;
             }
@@ -1486,10 +1621,27 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
         if (contentChanged)
             editor.requestMachineStateRefresh();
         changed(contentChanged, viewChanged);
+        if (command.kind == CommandKind::uiAction && !boolArg(args, "returnView", true))
+            return success();
         const bool includeMachineCells = contentChanged
             && editor.getEditMode() == SequencerEditorMode::machineConfig;
         return success(makeViewNow(includeMachineCells, true));
-    });
+    };
+
+    // A full-track MCP replacement may copy and normalize up to 128 steps.
+    // Keep that work out of the processor-wide audio mutex: Sequencer's own
+    // read/write lock makes each snapshot/update safe, while processBlock can
+    // continue rendering between those short critical sections.
+    if (command.kind == CommandKind::setTrackNotes)
+        return executeCommand();
+    if (command.kind == CommandKind::uiAction)
+    {
+        const auto action = stringArg(command.arguments, "action");
+        if (action == "up" || action == "down" || action == "left" || action == "right"
+            || action == "next_step" || action == "page" || action == "focus_sequence" || action == "arm")
+            return executeCommand();
+    }
+    return processor.withAudioThreadExclusive(executeCommand);
 }
 
 juce::var TrackerControlService::capabilities() const

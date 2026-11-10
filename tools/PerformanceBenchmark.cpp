@@ -1,5 +1,6 @@
 #include "TrackerMainProcessor.h"
 
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
@@ -31,19 +32,22 @@ void setEnabled(TrackerMainProcessor& processor, std::size_t stack, bool enabled
             processor.toggleMachineEnabledInStack(stack, slot);
 }
 
-void configureScene(TrackerMainProcessor& processor, bool stress, bool effects, bool modulation)
+void configureScene(TrackerMainProcessor& processor, bool stress, bool effects, bool modulation, bool drums)
 {
+    const auto source = drums ? CommandType::DrumSynth : CommandType::WavetableSynth;
     for (std::size_t stack = 0; stack < processor.getMachineStackCount(); ++stack)
     {
         if (stack == 0 || stress)
         {
             addAllMachines(processor, stack);
-            if (!effects)
+            const auto types = processor.getMachineStackTypes(stack);
+            for (std::size_t slot = 0; slot < types.size(); ++slot)
             {
-                const auto types = processor.getMachineStackTypes(stack);
-                for (std::size_t slot = 0; slot < types.size(); ++slot)
-                    if (types[slot] != CommandType::WavetableSynth)
-                        processor.toggleMachineEnabledInStack(stack, slot);
+                const auto type = types[slot];
+                const bool isOtherTerminal = (type == CommandType::Sampler || type == CommandType::WavetableSynth
+                    || type == CommandType::DrumSynth) && type != source;
+                if (isOtherTerminal || (!effects && type != source))
+                    processor.toggleMachineEnabledInStack(stack, slot);
             }
             if (modulation != processor.isModulationEnabledInStack(stack))
                 processor.toggleModulationEnabledInStack(stack);
@@ -69,36 +73,40 @@ void configureScene(TrackerMainProcessor& processor, bool stress, bool effects, 
     }
 }
 
-void scheduleNotes(TrackerMainProcessor& processor, bool stress, int block)
+void scheduleNotes(TrackerMainProcessor& processor, bool stress, bool drums, int block)
 {
     if (block % 32 != 0)
         return;
     const auto stackCount = stress ? processor.getMachineStackCount() : 1u;
     for (std::size_t stack = 0; stack < stackCount; ++stack)
         for (int voice = 0; voice < (stress ? 8 : 3); ++voice)
-            processor.sendMessageToMachine(CommandType::WavetableSynth, static_cast<unsigned short>(stack),
-                                           static_cast<unsigned short>(48 + (voice * 4) + static_cast<int>(stack % 3)), 100, 64);
+        {
+            const auto source = drums ? CommandType::DrumSynth : CommandType::WavetableSynth;
+            const auto note = drums ? static_cast<unsigned short>(72 + (voice % 7))
+                                    : static_cast<unsigned short>(48 + (voice * 4) + static_cast<int>(stack % 3));
+            processor.sendMessageToMachine(source, static_cast<unsigned short>(stack), note, 100, 64);
+        }
 }
 
 struct Result { juce::String scenario; double sampleRate = 0.0; PerformanceMetrics::Snapshot metrics; };
 
-Result runScenario(const juce::String& name, double sampleRate, bool stress, bool effects, bool modulation)
+Result runScenario(const juce::String& name, double sampleRate, bool stress, bool effects, bool modulation, bool drums)
 {
     TrackerMainProcessor processor;
     processor.setInternalClockEnabled(true);
     processor.prepareToPlay(sampleRate, kBlockSize);
-    configureScene(processor, stress, effects, modulation);
+    configureScene(processor, stress, effects, modulation, drums);
     juce::AudioBuffer<float> buffer(2, kBlockSize);
     juce::MidiBuffer midi;
     for (int block = 0; block < kWarmupBlocks; ++block)
     {
-        buffer.clear(); scheduleNotes(processor, stress, block); processor.processBlock(buffer, midi);
+        buffer.clear(); scheduleNotes(processor, stress, drums, block); processor.processBlock(buffer, midi);
     }
     auto& metrics = processor.getPerformanceMetrics();
     metrics.reset(); metrics.setEnabled(true);
     for (int block = 0; block < kBlocks; ++block)
     {
-        buffer.clear(); scheduleNotes(processor, stress, block); processor.processBlock(buffer, midi);
+        buffer.clear(); scheduleNotes(processor, stress, drums, block); processor.processBlock(buffer, midi);
     }
     metrics.setEnabled(false);
     return { name, sampleRate, metrics.snapshot() };
@@ -152,11 +160,17 @@ int main(int argc, char* argv[])
     csv << "scenario,sample_rate,stage,calls,mean_us,max_us,callback_p95_us,callback_p99_us,callback_max_us,deadline_us,mean_deadline_percent\n";
     report << "# MYK Tracker Dynamic Audio Benchmark\n\nThis is a deterministic offline audio-callback benchmark. It measures CPU time, not real device xruns or OpenGL rendering.\n\n";
     json << "{\n \"blockSize\":" << kBlockSize << ",\n \"results\":[\n";
+    const std::array<std::tuple<const char*, bool, bool, bool, bool>, 7> scenarios {{
+        { "wave_only", false, false, false, false }, { "typical_effects", false, true, false, false },
+        { "typical_modulation", false, true, true, false }, { "stress_all_stacks", true, true, true, false },
+        { "drum_only", false, false, false, true }, { "drum_typical_effects", false, true, false, true },
+        { "drum_stress_all_stacks", true, true, true, true }
+    }};
     int resultIndex = 0;
     for (const auto rate : { 44100.0, 48000.0 })
-        for (const auto& scenario : { std::tuple<const char*, bool, bool, bool>{ "wave_only", false, false, false }, { "typical_effects", false, true, false }, { "typical_modulation", false, true, true }, { "stress_all_stacks", true, true, true } })
+        for (const auto& scenario : scenarios)
         {
-            const auto result = runScenario(std::get<0>(scenario), rate, std::get<1>(scenario), std::get<2>(scenario), std::get<3>(scenario));
+            const auto result = runScenario(std::get<0>(scenario), rate, std::get<1>(scenario), std::get<2>(scenario), std::get<3>(scenario), std::get<4>(scenario));
             writeResult(csv, result, true); writeResult(report, result, false);
             writeJsonResult(json, result, resultIndex++ < 7);
             std::cout << result.scenario << " at " << rate << " Hz complete\n";

@@ -316,6 +316,8 @@ class Sequence{
     // void setDefaulyChannel();
   private:
 
+    friend class Sequencer;
+
     /** provides access to the sequencer so this sequence can change things*/
     Sequencer* sequencer;
     /** current length. This is a std::size_tas we apply length adjustments to it that might be negative*/
@@ -416,6 +418,22 @@ class Sequencer : public SequencerAbs {
       Sequencer& operator=(Sequencer&& other) noexcept = default;
 
       static constexpr std::size_t maxSequences{128};
+      /** A complete, already-allocated replacement for one sequence's step bank.
+          It is constructed on the message thread and consumed at an audio-block
+          boundary.  The Step vector is intentionally move-only. */
+      struct PreparedSequenceReplacement
+      {
+          std::size_t sequence = 0;
+          std::size_t length = 1;
+          std::uint64_t updateId = 0;
+          std::vector<Step> steps;
+          std::vector<std::string> displayStrings;
+      };
+      struct ReplacementStepData
+      {
+          std::vector<std::vector<double>> rows;
+          bool active = true;
+      };
       /** set seq channels and seq types of this sequence to the same as the sent sequence*/
       void copyChannelAndTypeSettings(Sequencer* otherSeq);
       std::size_t howManySequences() const ;
@@ -441,6 +459,20 @@ class Sequencer : public SequencerAbs {
        * step
        */
       void setSequenceLength(std::size_t sequence, std::size_t length);
+      /** Build and queue a whole-pattern replacement without touching the
+          playback bank. These methods are message-thread only. */
+      std::unique_ptr<PreparedSequenceReplacement> prepareSequenceReplacement(
+          std::size_t sequence, std::vector<ReplacementStepData> steps,
+          std::size_t length, std::uint64_t updateId);
+      bool queuePreparedSequenceReplacement(std::unique_ptr<PreparedSequenceReplacement> replacement);
+      /** Called only by the audio thread at a block boundary. It swaps already
+          prepared memory and puts the old bank on a lock-free retirement ring. */
+      void applyPendingSequenceReplacementsAudioThread();
+      /** Called by the message thread before commands/views and during teardown. */
+      void drainRetiredSequenceReplacements();
+      bool hasPendingSequenceReplacement(std::size_t sequence) const noexcept;
+      std::uint64_t latestQueuedSequenceReplacement(std::size_t sequence) const noexcept;
+      std::uint64_t latestAppliedSequenceReplacement(std::size_t sequence) const noexcept;
       /** reduce the playback (as opposed to total possible) length of the sequence by 1 */
       void shrinkSequence(std::size_t sequence);
       /** increase the length of the sequence by 1, adding new steps in memory if needed, as per setSequenceLength*/
@@ -555,6 +587,9 @@ class Sequencer : public SequencerAbs {
       void updateSeqStringGridLocked();
       /** recalculates the solo-active flag. caller must hold the rw_mutex write lock */
       void updateSoloModeActiveLocked();
+      /** Structural edits run under the processor's exclusive guard; discard
+          queued banks whose numeric target would otherwise be shifted. */
+      void cancelPendingSequenceReplacementsLocked();
      
       bool assertSeqAndStep(std::size_t sequence, std::size_t step) const;
         
@@ -575,6 +610,17 @@ class Sequencer : public SequencerAbs {
     /** representation of the sequences as a string grid, pulled from the steps' flat string representations */
       std::vector<std::vector<std::string>> seqAsStringGrid;
       std::vector<Parameter> seqConfigSpecs; 
+
+      // One atomic slot per stable sequence index gives latest-wins behaviour
+      // without a producer lock or callback allocation. The message thread is
+      // the sole producer and the audio callback is the sole consumer.
+      std::array<std::atomic<PreparedSequenceReplacement*>, maxSequences> pendingReplacements {};
+      std::array<std::atomic<std::uint64_t>, maxSequences> latestQueuedReplacementIds {};
+      std::array<std::atomic<std::uint64_t>, maxSequences> latestAppliedReplacementIds {};
+      static constexpr std::size_t replacementRetirementCapacity = maxSequences + 1;
+      std::array<PreparedSequenceReplacement*, replacementRetirementCapacity> retiredReplacements {};
+      std::atomic<std::size_t> retiredRead { 0 };
+      std::atomic<std::size_t> retiredWrite { 0 };
 
 
 };

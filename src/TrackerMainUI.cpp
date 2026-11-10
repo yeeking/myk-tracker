@@ -11,6 +11,7 @@
 #include "TrackerMainUI.h"
 #include "SequencerCommands.h"
 #include "machines/CurvedAdsr.h"
+#include "machines/DrumSynthMachine.h"
 #include "machines/ModulationMatrixMachine.h"
 #include <algorithm>
 #include <cmath>
@@ -604,14 +605,9 @@ void TrackerMainUI::timerCallback ()
                             customMachineColumnWidthsActive ? &samplerColumnWidths : nullptr);
 
   waitingForPaint = true;
-  // Edits raise the sequencer's string-update flag directly, so this
-  // periodic request is only a safety net for out-of-band changes.
-  if (framesDrawn % 60 == 0){
-    audioProcessor.withAudioThreadExclusive([&]()
-    {
-        audioProcessor.getSequencer()->requestStrUpdate();
-    });
-  }
+  // Sequence edits explicitly invalidate their display cache. Do not take the
+  // processor-wide audio lock here: this timer runs continuously while audio
+  // is active and used to force expensive grid rebuilds into that lock.
   openGLContext.triggerRepaint();
   if (uiBenchmarkEnabled)
   {
@@ -776,8 +772,8 @@ void TrackerMainUI::prepareSequenceView()
   }
 
   // The sequence page reserves a fixed, non-interactive header cell above its
-  // scrolling step window. Copy the column presentation state so solo/mute
-  // outlines continue to read as one continuous sequence column.
+  // scrolling step window for the oscilloscope. Keep its presentation neutral:
+  // solo, mute, and shortened-note outlines describe sequencer steps only.
   std::vector<UIBox> scopeHeaders(boxes.size());
   for (std::size_t sequenceIndex = 0; sequenceIndex < boxes.size(); ++sequenceIndex)
   {
@@ -786,14 +782,6 @@ void TrackerMainUI::prepareSequenceView()
       header.isDisabled = true;
       header.useCustomFillColour = true;
       header.customFillArgb = 0xFF0A0F14;
-      if (!boxes[sequenceIndex].empty())
-      {
-          const auto& source = boxes[sequenceIndex].front();
-          header.isControlModeSequence = source.isControlModeSequence;
-          header.isSoloChannel = source.isSoloChannel;
-          header.isMutedChannel = source.isMutedChannel;
-          header.noteLengthMode = source.noteLengthMode;
-      }
   }
   updateCellStates(boxes, rowsInUI, 6, &scopeHeaders);
 
@@ -1312,6 +1300,35 @@ void TrackerMainUI::prepareMachineConfigView()
         }
 
         appendScopeBand(machineBoxes, rowsBeforeScope, scopeStackIndex, scopeSamples);
+        if (detail == CommandType::DrumSynth)
+        {
+            if (auto* drum = dynamic_cast<DrumSynthMachine*>(
+                    audioProcessor.getMachine(CommandType::DrumSynth, static_cast<std::size_t>(machineId))))
+            {
+                const auto counts = drum->getTriggerCounts();
+                if (drumTriggerPulseContext != valuePulseContext)
+                {
+                    drumTriggerPulseContext = valuePulseContext;
+                    drumTriggerCounts = counts;
+                }
+                else
+                {
+                    for (std::size_t voice = 0; voice < counts.size(); ++voice)
+                    {
+                        if (counts[voice] > drumTriggerCounts[voice])
+                        {
+                            const std::size_t column = voice * 2;
+                            if (column + 1 < machineBoxes.size() && !machineBoxes[column].empty())
+                            {
+                                machineBoxes[column][0].isHighlighted = true;
+                                machineBoxes[column + 1][0].isHighlighted = true;
+                            }
+                        }
+                        drumTriggerCounts[voice] = counts[voice];
+                    }
+                }
+            }
+        }
         updateCellStates(machineBoxes, rowsBeforeScope + 2, cols);
 
         if (detail == CommandType::DrumSynth)
@@ -2285,12 +2302,23 @@ bool TrackerMainUI::keyPressed(const juce::KeyPress& key, juce::Component* origi
         }
     }
     auto arguments = juce::var(new juce::DynamicObject());
-    arguments.getDynamicObject()->setProperty("action", "key");
+    auto action = juce::String("key");
+    if (!key.getModifiers().isAnyModifierKeyDown())
+    {
+        if (key.getKeyCode() == juce::KeyPress::upKey) action = "up";
+        else if (key.getKeyCode() == juce::KeyPress::downKey) action = "down";
+        else if (key.getKeyCode() == juce::KeyPress::leftKey) action = "left";
+        else if (key.getKeyCode() == juce::KeyPress::rightKey) action = "right";
+    }
+    arguments.getDynamicObject()->setProperty("action", action);
     arguments.getDynamicObject()->setProperty("keyCode", key.getKeyCode());
     arguments.getDynamicObject()->setProperty("text", juce::String::charToString(key.getTextCharacter()));
     arguments.getDynamicObject()->setProperty("ctrl", key.getModifiers().isCtrlDown());
     arguments.getDynamicObject()->setProperty("shift", key.getModifiers().isShiftDown());
     arguments.getDynamicObject()->setProperty("alt", key.getModifiers().isAltDown());
+    // The editor timer owns rendering; avoid serialising a redundant complete
+    // view for every physical key press while the processor lock is held.
+    arguments.getDynamicObject()->setProperty("returnView", false);
     TrackerControlService::Command command;
     command.kind = TrackerControlService::CommandKind::uiAction;
     command.arguments = arguments;

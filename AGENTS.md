@@ -23,16 +23,19 @@ or external interfaces change.
   targets. A new production `.cpp` is not compiled until it appears here.
 - `src/TrackerMainProcessor.*`: top-level processor, transport and clock,
   eight machine stacks, sequence sets and Song state, mixer/aux/master path,
-  recording, OSC, scopes/meters, and tracker-state serialization.
-- `src/TrackerMainUI.*`: JUCE editor, keyboard handling, page preparation,
-  transient save/load overlay, cached traces, and connection to the OpenGL
-  renderer.
+  WAV master recording, OSC, and scopes/meters.
+- `src/TrackerMainProcessorState.cpp`: tracker-state read/write (APVTS JSON in
+  `ValueTree`, XML out, Base64 machine blobs, per-sequence-set slot/MOD recall).
+- `src/TrackerMainUI.*`, `src/TrackerMainUIStateDialog.cpp`: JUCE editor,
+  keyboard handling, page preparation, transient save/load overlay, cached
+  traces, and connection to the OpenGL renderer.
 - `src/TrackerUIComponent.*`, `src/Segment14Geometry.h`, `src/Palette.h`:
   OpenGL grid, text, trace, meter, and highlight rendering.
 - `src/Sequencer.*`, `src/SequencerCommands.*`: sequence data, read heads,
   command registry, timing, and command execution.
-- `src/SequencerEditor.*`, `src/TrackerController.*`: page/cursor state,
-  keyboard-oriented editing, machine-grid assembly, and higher-level actions.
+- `src/SequencerEditor*` (including `SequencerEditorMachine.cpp` for the
+  machine-grid pages), `src/TrackerController.*`: page/cursor state,
+  keyboard-oriented editing, and higher-level actions.
 - `src/MachineInterface.h`, `src/machines/`: machine contract, instruments,
   effects, fixed modulation matrix, DSP helpers, and machine-state helpers.
 - `src/SuperSamplerProcessor.*`, `src/SuperSamplePlayer.*`: sampler UI,
@@ -42,8 +45,8 @@ or external interfaces change.
 - `src/TrackerFileBrowser.*`: reusable message-thread directory model shared by
   sampler and tracker save/load UI.
 - `src/AudioConfiguration.h`, `src/standalone/`: standalone device setup,
-  saved audio preferences, performance statistics, audio/MIDI host, and WAV
-  recording. Plug-in builds receive device settings from the host.
+  saved audio preferences, performance statistics, and audio/MIDI host.
+  Plug-in builds receive device settings from the host.
 - `src/TrackerControlService.*`, `src/McpRouter.*`, `src/HTTPServer.*`:
   revisioned control boundary and standalone-only loopback MCP server.
 - `src/hardware_emulator/`: separately built JUCE OSC emulator application.
@@ -54,8 +57,9 @@ or external interfaces change.
   CMake targets.
 - `doc/`: source artwork and the keyboard cheat sheet. Do not overwrite source
   SVGs with generated bitmaps.
-- `libs/JUCE/`: local JUCE checkout. Do not modify or commit it during normal
-  tracker work.
+- `libs/JUCE/`: local JUCE checkout or symlink to one (`libs/README_libs.md`
+  says clone or link). It is untracked. Do not modify or commit it during
+  normal tracker work.
 - `libs/httplib.h`: vendored HTTP server header. Do not replace or reformat it.
 - `build/`, `build_works/`, `performance-results/`, `releases/`: generated or
   local output. Never hand-edit or stage these unintentionally.
@@ -102,7 +106,9 @@ ctest --test-dir build --output-on-failure
 
 Run the focused target while iterating, then the full suite for a completed
 change. `devices/**/test_*.py` files are hardware utilities, not the tracker
-regression suite.
+regression suite. Five test apps compile only the few machine/sequencer files
+they exercise; `drum-processor-tests` links the whole `myk-tracker-plug`
+target, so building it also builds the plug-in.
 
 For an opt-in profiled build:
 
@@ -112,7 +118,9 @@ cmake -S . -B build-perf -DCMAKE_BUILD_TYPE=RelWithDebInfo \
 cmake --build build-perf --target myk-tracker-performance-benchmark -j2
 ```
 
-Normal builds leave performance instrumentation disabled.
+`tools/run-performance-benchmark.sh` automates that configure/build/run flow
+and writes results under `performance-results/`. Normal builds leave
+performance instrumentation disabled.
 
 ## Threading and real-time invariants
 
@@ -251,8 +259,9 @@ Important distinctions:
   host-controlled. Settings are application preferences, not song state.
 - OSC control is optional. Bind/connect failure must never stop the tracker.
 - The standalone MCP endpoint is IPv4 loopback-only at
-  `http://127.0.0.1:8080/mcp` by default. `TrackerControlService` is shared by
-  MCP and UI-style actions and tracks content/view revisions.
+  `http://127.0.0.1:8080/mcp` by default; set `MYK_TRACKER_MCP_PORT` before
+  launch to use another port. `TrackerControlService` is shared by MCP and
+  UI-style actions and tracks content/view revisions.
 - Prefer extending existing generic resources/actions over adding a bespoke MCP
   operation. Direct machine controls address `stackId`, persisted `slotId`, and
   generated control ID; they must not move the visible cursor. The MOD block

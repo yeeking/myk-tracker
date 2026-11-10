@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 
+#include "DrumSynthMachine.h"
 #include "PortableTrackerState.h"
 #include "TrackerMainProcessor.h"
 
@@ -125,10 +126,104 @@ void requirePermissiveProjectVersionLoading()
 }
 }
 
+// Regression: a song-row switch replaces the playback sequencer mid-callback.
+// The transport-stop detection at the end of processBlock must re-resolve the
+// playback sequencer; using the stale pointer cached at the top of the callback
+// read the old, now-stopped sequencer, took that as a transport stop, and fired
+// an all-notes-off that swallowed the incoming pattern's downbeat (its first
+// note is already queued by then). The user heard the groove "keep time" with
+// the downbeat kick missing.
+void requireSongSwitchPreservesIncomingDownbeat()
+{
+    TrackerMainProcessor processor;
+    processor.prepareToPlay(48000.0, 256);
+
+    while (findSlot(processor, CommandType::DrumSynth) >= processor.getMachineStackTypes(0).size())
+        processor.addMachineToStack(0);
+    const auto types = processor.getMachineStackTypes(0);
+    const auto drumSlot = findSlot(processor, CommandType::DrumSynth);
+    for (std::size_t slot = 0; slot < types.size(); ++slot)
+    {
+        const bool shouldEnable = slot == drumSlot;
+        if (processor.isMachineEnabledInStack(0, slot) != shouldEnable)
+            processor.toggleMachineEnabledInStack(0, slot);
+    }
+
+    auto* drum = static_cast<DrumSynthMachine*>(processor.getMachine(CommandType::DrumSynth, 0));
+    require(drum != nullptr, "DRUM machine is reachable on stack 0");
+
+    // Outgoing set (0): sequence 0 is empty, so it produces no kick.
+    processor.setViewedSequenceSetIndex(0);
+    if (auto* outgoing = processor.getSequencer()->getSequence(0))
+    {
+        outgoing->setMachineId(0);
+        outgoing->ensureEnoughStepsForLength(4);
+        outgoing->setLength(4);
+    }
+    require(processor.getSequencer()->getSequence(0) != nullptr, "outgoing set has sequence 0");
+
+    // Clone the viewed set into a second sequence set and song row.
+    const auto secondRow = processor.addSongRowByCloningViewedSet();
+    require(secondRow == 1, "second song row is appended at index 1");
+
+    // Incoming set (1): a single kick on step 0; the rest of the loop is empty.
+    processor.setViewedSequenceSetIndex(1);
+    if (auto* incoming = processor.getSequencer()->getSequence(0))
+    {
+        incoming->setMachineId(0);
+        incoming->ensureEnoughStepsForLength(4);
+        incoming->setLength(4);
+        incoming->setStepData(0, {{ static_cast<double>(CommandType::MidiNote), 72.0, 120.0, 1.0 }});
+    }
+    require(processor.getSequencer()->getSequence(0) != nullptr, "incoming set has sequence 0");
+
+    // Two short rows: row 0 = outgoing set, row 1 = incoming set.
+    processor.adjustSongRowBeatCount(0, -12);
+    processor.adjustSongRowBeatCount(1, -12);
+    require(processor.getSongRowBeatCount(0) == 4 && processor.getSongRowBeatCount(1) == 4,
+            "both song rows run four beats");
+
+    processor.setSongPlayMode(SongPlayMode::song);
+    processor.setInternalClockEnabled(true);
+
+    const auto baseKick = drum->getTriggerCounts()[0];
+    auto* editor = processor.getSequenceEditor();
+    require(editor != nullptr, "processor exposes its sequence editor");
+    editor->togglePlayback();
+
+    // Drive until the song has looped row 0 -> row 1 -> row 0. The 0 -> 1
+    // boundary is the pattern switch; its downbeat kick must survive.
+    bool sawRowOne = false;
+    bool completedLoop = false;
+    juce::AudioBuffer<float> audio(2, 256);
+    juce::MidiBuffer midi;
+    for (int block = 0; block < 2000 && !completedLoop; ++block)
+    {
+        audio.clear();
+        processor.processBlock(audio, midi);
+        if (!processor.isPlaybackRunningSafely())
+            continue;
+        const auto row = processor.getCurrentPlaybackSongRow();
+        if (row == 1)
+            sawRowOne = true;
+        if (sawRowOne && row == 0)
+            completedLoop = true;
+    }
+    require(sawRowOne && completedLoop, "song advanced row 0 -> row 1 and looped back");
+
+    const auto kickTriggers = drum->getTriggerCounts()[0] - baseKick;
+    require(kickTriggers == 1,
+            "song-row switch preserves the incoming pattern's downbeat (exactly one kick, not zero)");
+
+    editor->togglePlayback();
+    processor.releaseResources();
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     requirePermissiveProjectVersionLoading();
+    requireSongSwitchPreservesIncomingDownbeat();
 
     TrackerMainProcessor processor;
     processor.prepareToPlay(48000.0, 256);
@@ -169,12 +264,12 @@ int main()
     editor->moveCursorDown();
     editor->moveCursorDown();
     require(drumCells.size() > 3 && drumCells[3].size() > 2
-                && drumCells[3][2].isSelected && drumCells[3][2].text == "808",
-            "right/down navigation reaches the snare TYPE value below its enable and MIDI controls");
+                && drumCells[3][2].isSelected && drumCells[3][2].text == "80",
+            "right/down navigation reaches the compact snare LEV value below its enable and MIDI controls");
     editor->incrementAtCursor();
     editor->refreshMachineStateForCurrentSequence();
-    require(editor->getMachineCells()[3][2].text == "909",
-            "bracket adjustment changes the selected snare model");
+    require(editor->getMachineCells()[3][2].text == "90",
+            "bracket adjustment uses the compact snare level step");
 
     auto* sequencer = processor.getSequencer();
     require(sequencer != nullptr && sequencer->getSequence(0) != nullptr,

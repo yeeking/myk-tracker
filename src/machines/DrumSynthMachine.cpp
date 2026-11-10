@@ -9,15 +9,60 @@
 
 namespace
 {
-constexpr int kStateVersion = 1;
-constexpr std::array<float, 6> kMetalFrequencies {{ 245.0f, 306.0f, 365.0f, 415.0f, 437.0f, 619.0f }};
+constexpr int kStateVersion = 4;
+// These are compact, static approximations of the two families' metal
+// generators.  They are intentionally six oscillators so cymbal quality does
+// not come at the cost of a larger per-sample oscillator bank.
+constexpr std::array<float, 6> kLegacyMetalFrequencies {{ 245.0f, 306.0f, 365.0f, 415.0f, 437.0f, 619.0f }};
+constexpr std::array<float, 6> k808MetalFrequencies {{ 205.3f, 304.4f, 369.6f, 522.7f, 540.0f, 800.0f }};
+constexpr std::array<float, 6> k909MetalFrequencies {{ 191.0f, 287.0f, 421.0f, 541.0f, 683.0f, 917.0f }};
 constexpr float kMinimumEnvelope = 0.00001f;
 
-const char* const kWaveNames[] = { "SIN", "TRI", "SAW", "SQR", "ADD1", "ADD2", "ADD10", "EVE5", "ODD5" };
-const char* const kNoiseNames[] = { "WHT", "PNK", "MET" };
-const char* const kSnareNames[] = { "606", "808", "909" };
 const char* const kTriggerModeNames[] = { "GATE", "1SHOT" };
 const char* const kEnabledNames[] = { "OFF", "ON" };
+const char* const kPresetNames[] = { "CUST", "808", "909" };
+const char* const kWaveNames[] = { "SIN", "TRI", "SAW", "SQR", "ADD1", "ADD2", "ADD10", "EVE5", "ODD5" };
+
+float characterAmount(int value) noexcept
+{
+    return static_cast<float>(juce::jlimit(-10, 10, value)) * 0.1f;
+}
+
+float characterValue(float base, float negative, float positive, float character) noexcept
+{
+    if (character < 0.0f)
+        return base + (negative - base) * -character;
+    return base + (positive - base) * character;
+}
+
+float characterExponential(float base, float negative, float positive, float character) noexcept
+{
+    if (std::abs(character) < 0.000001f)
+        return base;
+    const float target = character < 0.0f ? negative : positive;
+    const float amount = std::abs(character);
+    return base * std::pow(std::max(0.001f, target) / std::max(0.001f, base), amount);
+}
+
+int exponentialStep(int current, int minimum, int maximum, int direction) noexcept
+{
+    if (direction == 0)
+        return current;
+    constexpr float kRootTwo = 1.41421356237f;
+    const float scaled = direction > 0 ? static_cast<float>(current) * kRootTwo
+                                       : static_cast<float>(current) / kRootTwo;
+    int next = static_cast<int>(std::lround(scaled));
+    if (next == current)
+        next += direction > 0 ? 1 : -1;
+    return juce::jlimit(minimum, maximum, next);
+}
+
+const std::array<float, 6>& metalFrequenciesForModel(int model) noexcept
+{
+    if (model == 1) return k808MetalFrequencies;
+    if (model == 2) return k909MetalFrequencies;
+    return kLegacyMetalFrequencies;
+}
 
 }
 
@@ -159,6 +204,58 @@ DrumSynthMachine::DrumSynthMachine()
     resetParametersToDefaults();
 }
 
+DrumSynthMachine::KitPreset DrumSynthMachine::getKitPreset() const noexcept
+{
+    return static_cast<KitPreset>(juce::jlimit(0, 2, kitPreset.load(std::memory_order_relaxed)));
+}
+
+void DrumSynthMachine::markPresetCustom() noexcept
+{
+    kitPreset.store(static_cast<int>(KitPreset::custom), std::memory_order_relaxed);
+}
+
+void DrumSynthMachine::applyKitPreset(KitPreset preset)
+{
+    if (preset != KitPreset::tr808 && preset != KitPreset::tr909)
+    {
+        markPresetCustom();
+        return;
+    }
+
+    const bool is909 = preset == KitPreset::tr909;
+    snare.type.store(is909 ? 2 : 1); snare.tune.store(0);
+    snare.body.store(is909 ? 60.0f : 56.0f); snare.snap.store(is909 ? 100.0f : 96.0f);
+    snare.bodyDecayMs.store(is909 ? 260 : 620); snare.noiseDecayMs.store(is909 ? 520 : 760);
+    snare.tone.store(is909 ? 72.0f : 62.0f); snare.level.store(is909 ? 86.0f : 80.0f);
+    snare.ring.store(0);
+
+    hatModel.store(is909 ? 2 : 1); hat.tune.store(0); hat.spread.store(is909 ? 34.0f : 55.0f);
+    hat.highPassHz.store(is909 ? 3800.0f : 5300.0f); hat.bandPassHz.store(is909 ? 7400.0f : 8000.0f);
+    hat.resonance.store(is909 ? 36.0f : 24.0f); hat.closedDecayMs.store(is909 ? 280 : 500);
+    hat.openDecayMs.store(is909 ? 900 : 4300); hat.grit.store(is909 ? 34.0f : 15.0f);
+    hat.level.store(is909 ? 72.0f : 70.0f);
+    hat.metal.store(0);
+
+    crashModel.store(is909 ? 2 : 1); crash.tune.store(0); crash.spread.store(is909 ? 38.0f : 56.0f);
+    crash.metal.store(is909 ? 72.0f : 82.0f); crash.noise.store(is909 ? 42.0f : 24.0f);
+    crash.ring.store(is909 ? 28.0f : 22.0f); crash.tone.store(is909 ? 42.0f : 48.0f);
+    crash.resonance.store(is909 ? 30.0f : 36.0f); crash.attackMs.store(0);
+    crash.decayMs.store(is909 ? 11000 : 8200); crash.level.store(is909 ? 67.0f : 65.0f);
+    crash.edge.store(0);
+
+    rideModel.store(is909 ? 2 : 1); ride.tune.store(0); ride.ratio.store(is909 ? 3.8f : 2.7f);
+    ride.fm.store(is909 ? 3.2f : 2.0f); ride.bell.store(is909 ? 58.0f : 66.0f);
+    ride.wash.store(is909 ? 56.0f : 42.0f); ride.ring.store(is909 ? 24.0f : 18.0f);
+    ride.tone.store(is909 ? 46.0f : 64.0f); ride.decayMs.store(is909 ? 2600 : 1500);
+    ride.level.store(is909 ? 67.0f : 65.0f);
+    ride.bellCharacter.store(0);
+
+    clapModel.store(is909 ? 2 : 1); clap.tone.store(is909 ? 62.0f : 92.0f);
+    clap.decayMs.store(is909 ? 260 : 300); clap.density.store(is909 ? 65.0f : 45.0f);
+    clap.level.store(is909 ? 78.0f : 76.0f); clap.room.store(0);
+    kitPreset.store(static_cast<int>(preset), std::memory_order_relaxed);
+}
+
 const DrumSynthMachine::Tables& DrumSynthMachine::tables()
 {
     static const Tables sharedTables;
@@ -178,6 +275,7 @@ DrumSynthMachine::Drum DrumSynthMachine::drumForNote(int midiNote) const noexcep
     if (midiNote == crash.triggerNote.load(std::memory_order_relaxed)) return Drum::crash;
     if (midiNote == ride.triggerNote.load(std::memory_order_relaxed)) return Drum::ride;
     if (midiNote == tom.triggerNote.load(std::memory_order_relaxed)) return Drum::tom;
+    if (midiNote == clap.triggerNote.load(std::memory_order_relaxed)) return Drum::clap;
     const int openHatNote = hat.triggerNote.load(std::memory_order_relaxed) + 12;
     return midiNote == openHatNote && openHatNote <= 127 ? Drum::openHat : Drum::none;
 }
@@ -192,6 +290,7 @@ const char* DrumSynthMachine::describeNote(int midiNote) const noexcept
         case Drum::ride: return "RIDE";
         case Drum::closedHat: return "CHAT";
         case Drum::tom: return "TOM";
+        case Drum::clap: return "CLAP";
         case Drum::openHat: return "OHAT";
         case Drum::none: break;
     }
@@ -209,9 +308,18 @@ bool DrumSynthMachine::isDrumEnabled(Drum drum) const noexcept
         case Drum::crash: return crash.enabled.load(std::memory_order_relaxed) != 0;
         case Drum::ride: return ride.enabled.load(std::memory_order_relaxed) != 0;
         case Drum::tom: return tom.enabled.load(std::memory_order_relaxed) != 0;
+        case Drum::clap: return clap.enabled.load(std::memory_order_relaxed) != 0;
         case Drum::none: break;
     }
     return false;
+}
+
+std::array<std::uint64_t, 7> DrumSynthMachine::getTriggerCounts() const noexcept
+{
+    std::array<std::uint64_t, 7> result {};
+    for (std::size_t index = 0; index < result.size(); ++index)
+        result[index] = triggerCounts[index].load(std::memory_order_relaxed);
+    return result;
 }
 
 void DrumSynthMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
@@ -232,7 +340,8 @@ void DrumSynthMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
         hat.level.load(std::memory_order_relaxed) * 0.01f,
         crash.level.load(std::memory_order_relaxed) * 0.01f,
         ride.level.load(std::memory_order_relaxed) * 0.01f,
-        tom.level.load(std::memory_order_relaxed) * 0.01f
+        tom.level.load(std::memory_order_relaxed) * 0.01f,
+        clap.level.load(std::memory_order_relaxed) * 0.01f
     }};
     allNotesOff();
 }
@@ -353,7 +462,7 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
     const auto& source = tables();
     const bool wasActive = drum == Drum::openHat || drum == Drum::closedHat
         ? voices[2].active
-        : voices[static_cast<std::size_t>(drum == Drum::kick ? 0 : drum == Drum::crash ? 3 : drum == Drum::snare ? 1 : drum == Drum::ride ? 4 : 5)].active;
+        : voices[static_cast<std::size_t>(drum == Drum::kick ? 0 : drum == Drum::crash ? 3 : drum == Drum::snare ? 1 : drum == Drum::ride ? 4 : drum == Drum::tom ? 5 : 6)].active;
     Voice* voice = nullptr;
     switch (drum)
     {
@@ -364,6 +473,7 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
         case Drum::crash: voice = &voices[3]; break;
         case Drum::ride: voice = &voices[4]; break;
         case Drum::tom: voice = &voices[5]; break;
+        case Drum::clap: voice = &voices[6]; break;
         case Drum::none: return;
     }
 
@@ -374,8 +484,13 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
     }
     if (!wasActive && (drum == Drum::kick || drum == Drum::tom))
         voice->phases.fill(0.0);
-    if (!wasActive && drum != Drum::kick && drum != Drum::tom)
-        configureMetalPhases(*voice, kMetalFrequencies);
+    if (!wasActive && drum != Drum::kick && drum != Drum::tom && drum != Drum::clap)
+    {
+        const int metalModel = (drum == Drum::closedHat || drum == Drum::openHat) ? hatModel.load(std::memory_order_relaxed)
+            : drum == Drum::crash ? crashModel.load(std::memory_order_relaxed)
+            : drum == Drum::ride ? rideModel.load(std::memory_order_relaxed) : 0;
+        configureMetalPhases(*voice, metalFrequenciesForModel(metalModel));
+    }
     if (!wasActive)
         for (auto& filter : voice->filters)
             filter.reset();
@@ -385,7 +500,8 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
         : (drum == Drum::closedHat || drum == Drum::openHat) ? hat.oneShot.load(std::memory_order_relaxed) != 0
         : drum == Drum::crash ? crash.oneShot.load(std::memory_order_relaxed) != 0
         : drum == Drum::ride ? ride.oneShot.load(std::memory_order_relaxed) != 0
-        : tom.oneShot.load(std::memory_order_relaxed) != 0;
+        : drum == Drum::tom ? tom.oneShot.load(std::memory_order_relaxed) != 0
+        : clap.oneShot.load(std::memory_order_relaxed) != 0;
     configureGate(*voice, event, oneShot);
     voice->envelope = wasActive ? voice->envelope + (1.0f - voice->envelope) * 0.85f : 1.0f;
     voice->envelope2 = wasActive ? voice->envelope2 + (1.0f - voice->envelope2) * 0.85f : 1.0f;
@@ -395,32 +511,48 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
     switch (drum)
     {
         case Drum::kick:
+        {
+            const float punch = characterAmount(kick.punch.load(std::memory_order_relaxed));
             voice->envelope2 = 0.0f;
             voice->waveform = kick.wave.load(std::memory_order_relaxed);
             voice->tuneRatio = source.midiHz[static_cast<std::size_t>(juce::jlimit(0, 127, kick.tune.load()))];
-            voice->pitchAmount = static_cast<float>(kick.pitchAmount.load());
+            voice->pitchAmount = characterValue(static_cast<float>(kick.pitchAmount.load()), 0.0f, 96.0f, punch);
             voice->pitchUpSamples = static_cast<int>(currentSampleRate * kick.pitchUpMs.load() * 0.001);
-            voice->pitchDownSamples = juce::jmax(1, static_cast<int>(currentSampleRate * kick.pitchDownMs.load() * 0.001));
-            voice->decayMultiplier = decayMultiplierForMs(static_cast<float>(kick.decayMs.load()));
+            const float pitchDownMs = characterValue(static_cast<float>(kick.pitchDownMs.load()), 2000.0f, 5.0f, punch);
+            voice->pitchDownSamples = juce::jmax(1, static_cast<int>(currentSampleRate * pitchDownMs * 0.001f));
+            const float kickDecayMs = characterExponential(static_cast<float>(kick.decayMs.load()), 80.0f, 8000.0f, punch);
+            voice->decayMultiplier = decayMultiplierForMs(kickDecayMs);
             voice->noiseType = kick.noiseType.load();
             voice->component1 = kick.body.load() * 0.01f;
-            voice->component2 = kick.click.load() * 0.01f;
+            voice->component2 = characterValue(kick.click.load() * 0.01f, 0.0f, 1.0f, punch);
+            voice->tone = characterValue(kick.tone.load(std::memory_order_relaxed) * 0.01f,
+                                         0.05f, 1.0f, punch);
+            if (voice->tone < 0.999f)
+            {
+                const float cutoffHz = 250.0f * std::pow(72.0f, voice->tone);
+                voice->filters[0].setLowPass(cutoffHz, 0.707f, currentSampleRate, source);
+            }
             break;
+        }
         case Drum::snare:
         {
             const int profile = snare.type.load();
+            const float ring = characterAmount(snare.ring.load(std::memory_order_relaxed));
+            const float bodyDecayMs = static_cast<float>(snare.bodyDecayMs.load());
+            voice->ring = 0.0f;
             const float base = profile == 0 ? 170.0f : profile == 1 ? 180.0f : 185.0f;
             voice->profile = profile;
             voice->tuneRatio = base * pitchRatio(source, static_cast<float>(snare.tune.load()));
             voice->fmRatio = profile == 0 ? 1.72f : profile == 1 ? 1.83f : 1.89f;
             voice->waveform = profile == 2 ? 1 : 0;
-            voice->decayMultiplier = decayMultiplierForMs(static_cast<float>(snare.bodyDecayMs.load()));
-            voice->decayMultiplier2 = decayMultiplierForMs(static_cast<float>(snare.noiseDecayMs.load()));
-            voice->bodyDecayMultiplier2 = decayMultiplierForMs(static_cast<float>(snare.bodyDecayMs.load()) * 0.78f);
-            voice->decayMultiplier3 = decayMultiplierForMs(45.0f);
+            voice->decayMultiplier = decayMultiplierForMs(bodyDecayMs);
+            const float noiseDecayMs = characterExponential(static_cast<float>(snare.noiseDecayMs.load()), 15.0f, 6000.0f, ring);
+            voice->decayMultiplier2 = decayMultiplierForMs(noiseDecayMs);
+            voice->bodyDecayMultiplier2 = decayMultiplierForMs(bodyDecayMs * 0.78f);
+            voice->decayMultiplier3 = decayMultiplierForMs(noiseDecayMs * (profile == 2 ? 0.75f : 0.55f));
             voice->pitchAmount = profile == 2 ? 7.0f : 0.0f;
             voice->pitchDownSamples = juce::jmax(1, static_cast<int>(currentSampleRate * 0.020));
-            voice->noiseHoldSamples = profile == 2 ? static_cast<int>(currentSampleRate * 0.024) : 0;
+            voice->noiseHoldSamples = profile == 2 ? static_cast<int>(currentSampleRate * 0.024f) : 0;
             voice->component1 = snare.body.load() * 0.01f;
             voice->component2 = snare.snap.load() * 0.01f;
             voice->tone = snare.tone.load() * 0.01f;
@@ -428,71 +560,140 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
             {
                 // The hardware combines separate low- and high-frequency
                 // snappy paths rather than one bright band-pass signal.
-                voice->filters[0].setLowPass(4200.0f + 3600.0f * voice->tone, 0.72f, currentSampleRate, source);
-                voice->filters[1].setHighPass(1800.0f + 3200.0f * voice->tone, 0.72f, currentSampleRate, source);
+                voice->filters[0].setLowPass(3400.0f + 2600.0f * voice->tone, 0.72f, currentSampleRate, source);
+                voice->filters[1].setHighPass(2400.0f + 3800.0f * voice->tone, 0.72f, currentSampleRate, source);
                 // A 909 trigger establishes the starting phase of both VCOs.
                 voice->phases[0] = 0.0;
                 voice->phases[1] = 0.0;
             }
             else
             {
-                voice->filters[0].setBandPass(900.0f + 8500.0f * voice->tone * (0.9f + 0.1f * voice->accent), profile == 0 ? 0.8f : 1.1f, currentSampleRate, source);
+                voice->filters[0].setBandPass(1500.0f + 9000.0f * voice->tone * (0.9f + 0.1f * voice->accent), profile == 0 ? 0.8f : 1.0f, currentSampleRate, source);
             }
             break;
         }
         case Drum::closedHat:
         case Drum::openHat:
+        {
+            const float metal = characterAmount(hat.metal.load(std::memory_order_relaxed));
             voice->envelope2 = 0.0f;
+            voice->profile = hatModel.load(std::memory_order_relaxed);
             voice->openHat = drum == Drum::openHat;
             voice->tuneRatio = pitchRatio(source, static_cast<float>(hat.tune.load()));
-            voice->spread = hat.spread.load() * 0.01f;
-            voice->resonance = hat.resonance.load() * 0.01f;
-            voice->component1 = hat.grit.load() * 0.01f;
-            voice->decayMultiplier = decayMultiplierForMs(static_cast<float>(voice->openHat ? hat.openDecayMs.load() : hat.closedDecayMs.load()));
-            voice->filters[0].setBandPass(hat.bandPassHz.load() * (0.9f + 0.1f * voice->accent), 0.7f + 5.0f * voice->resonance, currentSampleRate, source);
-            voice->filters[1].setHighPass(hat.highPassHz.load(), 0.707f, currentSampleRate, source);
+            // At the positive endpoint the deliberately exaggerated detune is
+            // still just six existing oscillators, but prevents the 909 bank
+            // from collapsing into a nearly static filtered square wave.
+            voice->spread = characterValue(hat.spread.load() * 0.01f, 0.0f, 4.0f, metal);
+            voice->resonance = characterValue(hat.resonance.load() * 0.01f, 0.0f, 1.0f, metal);
+            voice->component1 = characterValue(hat.grit.load() * 0.01f, 0.0f, 1.0f, metal);
+            voice->ring = juce::jmax(0.0f, metal) * 2.0f;
+            voice->tone = std::abs(metal);
+            voice->tuneRatio *= pitchRatio(source, metal * 48.0f);
+            const float baseHatDecayMs = static_cast<float>(voice->openHat ? hat.openDecayMs.load() : hat.closedDecayMs.load());
+            const float hatDecayMs = characterExponential(baseHatDecayMs, 15.0f,
+                voice->openHat ? 8000.0f : 2000.0f, metal);
+            voice->decayMultiplier = decayMultiplierForMs(hatDecayMs);
+            const float bandPassHz = characterExponential(hat.bandPassHz.load(), 2500.0f, 9500.0f, metal);
+            const float highPassHz = characterExponential(hat.highPassHz.load(), 1200.0f, 4000.0f, metal);
+            voice->filters[0].setBandPass(bandPassHz * (0.88f + 0.12f * voice->accent),
+                (voice->profile == 2 ? 1.1f : 0.7f) + 4.5f * voice->resonance, currentSampleRate, source);
+            voice->filters[1].setHighPass(highPassHz, voice->profile == 2 ? 0.85f : 0.707f, currentSampleRate, source);
             break;
+        }
         case Drum::crash:
+        {
+            const float edge = characterAmount(crash.edge.load(std::memory_order_relaxed));
             voice->envelope2 = 0.0f;
+            voice->profile = crashModel.load(std::memory_order_relaxed);
             voice->tuneRatio = pitchRatio(source, static_cast<float>(crash.tune.load()));
             voice->spread = crash.spread.load() * 0.01f;
-            voice->component1 = crash.metal.load() * 0.01f;
-            voice->component2 = crash.noise.load() * 0.01f;
-            voice->ring = crash.ring.load() * 0.01f;
-            voice->tone = crash.tone.load() * 0.01f;
-            voice->resonance = crash.resonance.load() * 0.01f;
+            voice->component1 = characterValue(crash.metal.load() * 0.01f, 0.20f, 1.0f, edge);
+            voice->component2 = characterValue(crash.noise.load() * 0.01f, 1.0f, 0.0f, edge);
+            voice->ring = characterValue(crash.ring.load() * 0.01f, 0.0f, 1.0f, edge);
+            voice->tone = characterValue(crash.tone.load() * 0.01f, 0.0f, 1.0f, edge);
+            voice->resonance = characterValue(crash.resonance.load() * 0.01f, 0.0f, 1.0f, edge);
             voice->attackSamples = static_cast<int>(currentSampleRate * crash.attackMs.load() * 0.001);
-            voice->decayMultiplier = decayMultiplierForMs(static_cast<float>(crash.decayMs.load()));
+            const float crashDecayMs = characterExponential(static_cast<float>(crash.decayMs.load()), 100.0f, 12000.0f, edge);
+            voice->decayMultiplier = decayMultiplierForMs(crashDecayMs);
+            voice->decayMultiplier2 = decayMultiplierForMs(crashDecayMs * (voice->profile == 2 ? 0.34f : 0.48f));
+            voice->envelope2 = 1.0f;
             for (int band = 0; band < 3; ++band)
-                voice->filters[static_cast<std::size_t>(band)].setBandPass(1800.0f + voice->tone * 2500.0f + band * 2100.0f, 0.8f + 6.0f * voice->resonance, currentSampleRate, source);
-            voice->filters[3].setHighPass(1000.0f + voice->tone * 3500.0f, 0.707f, currentSampleRate, source);
+                voice->filters[static_cast<std::size_t>(band)].setBandPass((voice->profile == 2 ? 950.0f : 1200.0f) + voice->tone * 2200.0f + band * 1500.0f, 0.8f + 5.5f * voice->resonance, currentSampleRate, source);
+            voice->filters[3].setHighPass((voice->profile == 2 ? 550.0f : 700.0f) + voice->tone * 2200.0f, 0.707f, currentSampleRate, source);
             break;
+        }
         case Drum::ride:
+        {
+            const float bellCharacter = characterAmount(ride.bellCharacter.load(std::memory_order_relaxed));
             voice->envelope2 = 0.0f;
+            voice->profile = rideModel.load(std::memory_order_relaxed);
             voice->tuneRatio = pitchRatio(source, static_cast<float>(ride.tune.load()));
-            voice->fmRatio = ride.ratio.load();
-            voice->fmIndex = ride.fm.load();
-            voice->component1 = ride.bell.load() * 0.01f;
-            voice->component2 = ride.wash.load() * 0.01f;
-            voice->ring = ride.ring.load() * 0.01f;
-            voice->tone = ride.tone.load() * 0.01f;
-            voice->decayMultiplier = decayMultiplierForMs(static_cast<float>(ride.decayMs.load()));
-            voice->filters[0].setBandPass(2500.0f + voice->tone * 7000.0f, 1.0f + voice->tone * 6.0f, currentSampleRate, source);
-            voice->filters[1].setHighPass(1800.0f + voice->tone * 2500.0f, 0.707f, currentSampleRate, source);
+            voice->tuneRatio *= pitchRatio(source, bellCharacter * 24.0f);
+            voice->fmRatio = characterValue(ride.ratio.load(), 0.5f, 8.0f, bellCharacter);
+            voice->fmIndex = characterValue(ride.fm.load(), 0.0f, 20.0f, bellCharacter);
+            voice->component1 = characterValue(ride.bell.load() * 0.01f, 0.0f, 1.0f, bellCharacter);
+            voice->component2 = characterValue(ride.wash.load() * 0.01f, 1.0f, 0.0f, bellCharacter);
+            voice->ring = characterValue(ride.ring.load() * 0.01f, 1.0f, 0.0f, bellCharacter);
+            voice->tone = characterValue(ride.tone.load() * 0.01f, 0.05f, 1.0f, bellCharacter);
+            const float rideDecayMs = characterExponential(static_cast<float>(ride.decayMs.load()), 300.0f, 12000.0f, bellCharacter);
+            voice->decayMultiplier = decayMultiplierForMs(rideDecayMs);
+            voice->decayMultiplier2 = decayMultiplierForMs(rideDecayMs * (voice->profile == 2 ? 1.2f : 0.8f));
+            voice->envelope2 = 1.0f;
+            voice->filters[0].setBandPass((voice->profile == 2 ? 1900.0f : 2500.0f) + voice->tone * 7000.0f, 1.0f + voice->tone * 5.0f, currentSampleRate, source);
+            voice->filters[1].setHighPass((voice->profile == 2 ? 1300.0f : 1800.0f) + voice->tone * 2500.0f, 0.707f, currentSampleRate, source);
             break;
+        }
         case Drum::tom:
+        {
+            const float bend = characterAmount(tom.bend.load(std::memory_order_relaxed));
             voice->envelope2 = 0.0f;
             voice->waveform = tom.wave.load();
             voice->tuneRatio = source.midiHz[static_cast<std::size_t>(juce::jlimit(0, 127, tom.tune.load()))];
-            voice->pitchAmount = static_cast<float>(tom.pitchAmount.load());
+            voice->tuneRatio *= pitchRatio(source, bend * 24.0f);
+            voice->pitchAmount = characterValue(static_cast<float>(tom.pitchAmount.load()), 0.0f, 72.0f, bend);
             voice->pitchUpSamples = 0;
-            voice->pitchDownSamples = juce::jmax(1, static_cast<int>(currentSampleRate * tom.pitchDownMs.load() * 0.001));
-            voice->decayMultiplier = decayMultiplierForMs(static_cast<float>(tom.decayMs.load()));
+            const float pitchDownMs = characterValue(static_cast<float>(tom.pitchDownMs.load()), 2000.0f, 5.0f, bend);
+            voice->pitchDownSamples = juce::jmax(1, static_cast<int>(currentSampleRate * pitchDownMs * 0.001f));
+            const float tomDecayMs = characterExponential(static_cast<float>(tom.decayMs.load()), 40.0f, 6000.0f, bend);
+            voice->decayMultiplier = decayMultiplierForMs(tomDecayMs);
             voice->component1 = tom.body.load() * 0.01f;
-            voice->component2 = tom.click.load() * 0.01f;
+            voice->component2 = characterValue(tom.click.load() * 0.01f, 0.0f, 1.0f, bend);
             break;
+        }
+        case Drum::clap:
+        {
+            const float room = characterAmount(clap.room.load(std::memory_order_relaxed));
+            const float density = clap.density.load(std::memory_order_relaxed) * 0.01f;
+            voice->profile = clapModel.load(std::memory_order_relaxed);
+            voice->noiseType = 0;
+            const float basePeriodMs = voice->profile == 2 ? 15.0f : 13.0f;
+            const float periodMs = basePeriodMs + (1.0f - density) * 8.0f - density * 6.0f;
+            const float burstMs = 7.5f - density * 4.5f;
+            voice->burstPeriodSamples = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate * periodMs * 0.001f)));
+            voice->burstLengthSamples = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate * burstMs * 0.001f)));
+            voice->burstCount = 4;
+            voice->burstEndSamples = voice->burstPeriodSamples * (voice->burstCount - 1) + voice->burstLengthSamples;
+            const float tone = clap.tone.load(std::memory_order_relaxed) * 0.01f;
+            const float centreHz = 500.0f * std::pow(12.0f, tone);
+            const float baseQ = voice->profile == 2 ? 1.35f : 1.0f;
+            const float q = characterValue(baseQ, 0.55f, 7.5f, room);
+            voice->filters[0].setBandPass(centreHz, q, currentSampleRate, source);
+            voice->filters[1].setBandPass(centreHz * (voice->profile == 2 ? 0.9f : 0.78f), q * 0.8f, currentSampleRate, source);
+            const float baseTailMs = static_cast<float>(clap.decayMs.load(std::memory_order_relaxed));
+            voice->decayMultiplier = decayMultiplierForMs(characterExponential(baseTailMs, 30.0f, 1600.0f, room));
+            voice->component1 = characterValue(voice->profile == 2 ? 0.78f : 0.88f, 1.0f, 0.18f, room);
+            voice->component2 = characterValue(voice->profile == 2 ? 0.58f : 0.48f, 0.02f, 1.25f, room);
+            voice->ring = juce::jmax(0.0f, room);
+            voice->envelope = 1.0f;
+            voice->envelope2 = 0.0f;
+            break;
+        }
         case Drum::none: break;
     }
+    const std::size_t triggerIndex = drum == Drum::kick ? 0 : drum == Drum::snare ? 1
+        : (drum == Drum::closedHat || drum == Drum::openHat) ? 2 : drum == Drum::crash ? 3
+        : drum == Drum::ride ? 4 : drum == Drum::tom ? 5 : 6;
+    triggerCounts[triggerIndex].fetch_add(1, std::memory_order_relaxed);
 }
 
 void DrumSynthMachine::beginRelease(Voice& voice, int releaseMs) noexcept
@@ -515,6 +716,7 @@ void DrumSynthMachine::release(Drum drum, int note) noexcept
         case Drum::crash: voice = &voices[3]; break;
         case Drum::ride: voice = &voices[4]; break;
         case Drum::tom: voice = &voices[5]; break;
+        case Drum::clap: voice = &voices[6]; break;
         case Drum::none: return;
     }
     if (voice->active && !voice->oneShot && voice->triggerNote == note) beginRelease(*voice);
@@ -550,7 +752,8 @@ void DrumSynthMachine::updateVoiceEnvelope(Voice& voice) noexcept
                 filter.reset();
         }
     }
-    else if (voice.envelope < kMinimumEnvelope && voice.envelope2 < kMinimumEnvelope)
+    else if (voice.age >= voice.burstEndSamples
+             && voice.envelope < kMinimumEnvelope && voice.envelope2 < kMinimumEnvelope)
     {
         voice.active = false;
         for (auto& filter : voice.filters)
@@ -571,7 +774,9 @@ float DrumSynthMachine::renderKick(Voice& voice) noexcept
             pitchSemitones = voice.pitchAmount * (1.0f - static_cast<float>(downAge) / static_cast<float>(voice.pitchDownSamples));
     }
     const float hz = voice.tuneRatio * pitchRatio(tables(), pitchSemitones);
-    const float body = sampleWave(tables(), voice.waveform, voice.phases[0]) * voice.envelope * voice.component1;
+    float body = sampleWave(tables(), voice.waveform, voice.phases[0]) * voice.envelope * voice.component1;
+    if (voice.tone < 0.999f)
+        body = voice.filters[0].process(body);
     voice.phases[0] += hz / currentSampleRate;
     const float clickEnvelope = std::max(0.0f, 1.0f - static_cast<float>(voice.age) / static_cast<float>(std::max(1.0, currentSampleRate * 0.006)));
     const float click = nextNoise(voice) * clickEnvelope * voice.component2 * (0.8f + 0.2f * voice.accent);
@@ -605,8 +810,8 @@ float DrumSynthMachine::renderSnare(Voice& voice) noexcept
         const float rawNoise = nextNoise(voice) >= 0.0f ? 1.0f : -1.0f;
         const float lowNoise = voice.filters[0].process(rawNoise);
         const float highNoise = voice.filters[1].process(rawNoise);
-        const float noise = (lowNoise * 0.72f * voice.envelope2
-            + highNoise * 0.42f * voice.envelope3)
+        const float noise = (lowNoise * 0.34f * voice.envelope2
+            + highNoise * 0.92f * voice.envelope3)
             * voice.component2 * (0.75f + 0.25f * voice.accent);
 
         voice.envelope *= voice.decayMultiplier;
@@ -625,7 +830,8 @@ float DrumSynthMachine::renderSnare(Voice& voice) noexcept
     const float noise = voice.filters[0].process(nextNoise(voice)) * voice.envelope2 * voice.component2 * (0.8f + 0.2f * voice.accent);
     voice.envelope *= voice.decayMultiplier;
     voice.envelope2 *= voice.decayMultiplier2;
-    return (body + noise) * voice.velocityGain * voice.gateGain;
+    const float output = body + noise;
+    return (voice.ring > 0.0001f ? softSaturate(output) : output) * voice.velocityGain * voice.gateGain;
 }
 
 float DrumSynthMachine::renderMetalBank(Voice& voice, const std::array<float, 6>& baseFrequencies) noexcept
@@ -649,28 +855,33 @@ float DrumSynthMachine::renderMetalBank(Voice& voice, const std::array<float, 6>
 
 float DrumSynthMachine::renderHat(Voice& voice) noexcept
 {
-    float metal = renderMetalBank(voice, kMetalFrequencies);
+    float metal = renderMetalBank(voice, metalFrequenciesForModel(voice.profile));
+    if (voice.profile == 2)
+        metal += nextNoise(voice) * (0.025f + 0.075f * voice.component1) * (1.0f - voice.tone);
     metal = voice.filters[1].process(voice.filters[0].process(metal));
     metal = metal * (1.0f - voice.component1) + softSaturate(metal * 1.8f) * voice.component1;
     voice.envelope *= voice.decayMultiplier;
+    if (voice.tone > 0.0001f)
+        metal = softSaturate(metal);
     return metal * voice.envelope * voice.velocityGain * voice.gateGain;
 }
 
 float DrumSynthMachine::renderCrash(Voice& voice) noexcept
 {
-    const float metal = renderMetalBank(voice, kMetalFrequencies) * voice.component1;
-    const float noise = nextNoise(voice) * voice.component2 * (0.8f + 0.2f * voice.accent);
+    const float metal = renderMetalBank(voice, metalFrequenciesForModel(voice.profile)) * voice.component1;
+    const float noise = nextNoise(voice) * voice.component2 * (0.8f + 0.2f * voice.accent) * voice.envelope2;
     const float input = metal + noise;
     float bands = 0.0f;
     for (int index = 0; index < 3; ++index) bands += voice.filters[static_cast<std::size_t>(index)].process(input);
     const float attack = voice.attackSamples <= 0 ? 1.0f : std::min(1.0f, static_cast<float>(voice.age) / static_cast<float>(voice.attackSamples));
     voice.envelope *= voice.decayMultiplier;
+    voice.envelope2 *= voice.decayMultiplier2;
     return voice.filters[3].process(bands * 0.4f) * attack * voice.envelope * voice.velocityGain * voice.gateGain;
 }
 
 float DrumSynthMachine::renderRide(Voice& voice) noexcept
 {
-    constexpr float bellBase = 520.0f;
+    const float bellBase = voice.profile == 2 ? 2200.0f : 3600.0f;
     const float modulator = sampleWave(tables(), 0, voice.phases[7]);
     const double carrierPhase = voice.phases[6] + static_cast<double>(modulator * voice.fmIndex / juce::MathConstants<float>::twoPi);
     const float bell = sampleWave(tables(), 0, carrierPhase) * voice.component1;
@@ -678,9 +889,10 @@ float DrumSynthMachine::renderRide(Voice& voice) noexcept
     voice.phases[6] += frequency / currentSampleRate;
     voice.phases[7] += frequency * voice.fmRatio / currentSampleRate;
     const float wash = voice.filters[1].process(voice.filters[0].process(
-        renderMetalBank(voice, kMetalFrequencies) + nextNoise(voice) * 0.25f)) * voice.component2;
+        renderMetalBank(voice, metalFrequenciesForModel(voice.profile)) + nextNoise(voice) * 0.25f)) * voice.component2 * voice.envelope2;
     voice.envelope *= voice.decayMultiplier;
-    return (bell + wash) * voice.envelope * voice.velocityGain * voice.gateGain;
+    voice.envelope2 *= voice.decayMultiplier2;
+    return (bell * voice.envelope + wash) * voice.velocityGain * voice.gateGain;
 }
 
 float DrumSynthMachine::renderTom(Voice& voice) noexcept
@@ -695,17 +907,38 @@ float DrumSynthMachine::renderTom(Voice& voice) noexcept
     return (body + click) * voice.velocityGain * voice.gateGain;
 }
 
+float DrumSynthMachine::renderClap(Voice& voice) noexcept
+{
+    const int burstIndex = voice.burstPeriodSamples > 0 ? voice.age / voice.burstPeriodSamples : 0;
+    const int burstPhase = voice.burstPeriodSamples > 0 ? voice.age % voice.burstPeriodSamples : 0;
+    const bool inBurst = burstIndex < voice.burstCount && burstPhase < voice.burstLengthSamples;
+    const float burstShape = inBurst
+        ? 1.0f - static_cast<float>(burstPhase) / static_cast<float>(juce::jmax(1, voice.burstLengthSamples))
+        : 0.0f;
+    const float dry = inBurst ? voice.filters[0].process(nextNoise(voice)) * burstShape * voice.component1 : 0.0f;
+    float tail = 0.0f;
+    if (voice.age >= voice.burstEndSamples)
+    {
+        tail = voice.filters[1].process(nextNoise(voice)) * voice.envelope * voice.component2;
+        voice.envelope *= voice.decayMultiplier;
+    }
+    const float output = dry + tail;
+    return (voice.ring > 0.0001f ? softSaturate(output * (1.0f + voice.ring)) : output)
+        * voice.velocityGain * voice.gateGain;
+}
+
 void DrumSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ignoreUnused(midi);
     if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0) return;
-    const std::array<bool, 6> enabled {{
+    const std::array<bool, 7> enabled {{
         kick.enabled.load(std::memory_order_relaxed) != 0,
         snare.enabled.load(std::memory_order_relaxed) != 0,
         hat.enabled.load(std::memory_order_relaxed) != 0,
         crash.enabled.load(std::memory_order_relaxed) != 0,
         ride.enabled.load(std::memory_order_relaxed) != 0,
-        tom.enabled.load(std::memory_order_relaxed) != 0
+        tom.enabled.load(std::memory_order_relaxed) != 0,
+        clap.enabled.load(std::memory_order_relaxed) != 0
     }};
     // Disabling a sound is a hard DSP bypass: discard its transient state at
     // the next callback and do not spend samples finishing its tail.
@@ -730,13 +963,14 @@ void DrumSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
         return;
     }
 
-    const std::array<float, 6> targetOutputLevels {{
+    const std::array<float, 7> targetOutputLevels {{
         kick.level.load(std::memory_order_relaxed) * 0.01f,
         snare.level.load(std::memory_order_relaxed) * 0.01f,
         hat.level.load(std::memory_order_relaxed) * 0.01f,
         crash.level.load(std::memory_order_relaxed) * 0.01f,
         ride.level.load(std::memory_order_relaxed) * 0.01f,
-        tom.level.load(std::memory_order_relaxed) * 0.01f
+        tom.level.load(std::memory_order_relaxed) * 0.01f,
+        clap.level.load(std::memory_order_relaxed) * 0.01f
     }};
     int nextEvent = 0;
     for (int sample = 0; sample < buffer.getNumSamples(); ++sample, ++sampleCounter)
@@ -759,6 +993,7 @@ void DrumSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
         if (voices[3].active) { output += renderCrash(voices[3]) * outputLevels[3]; updateVoiceEnvelope(voices[3]); }
         if (voices[4].active) { output += renderRide(voices[4]) * outputLevels[4]; updateVoiceEnvelope(voices[4]); }
         if (voices[5].active) { output += renderTom(voices[5]) * outputLevels[5]; updateVoiceEnvelope(voices[5]); }
+        if (voices[6].active) { output += renderClap(voices[6]) * outputLevels[6]; updateVoiceEnvelope(voices[6]); }
         if (hatChokeTail.active)
         {
             output += renderHat(hatChokeTail) * outputLevels[2];
@@ -772,29 +1007,32 @@ void DrumSynthMachine::resetParametersToDefaults()
 {
     kick.enabled.store(1); kick.triggerNote.store(72); kick.wave.store(0); kick.tune.store(36); kick.pitchAmount.store(24); kick.pitchUpMs.store(0);
     kick.pitchDownMs.store(60); kick.decayMs.store(1200); kick.noiseType.store(0);
-    kick.click.store(45.0f); kick.body.store(100.0f); kick.level.store(95.0f); kick.oneShot.store(1);
+    kick.click.store(45.0f); kick.body.store(100.0f); kick.tone.store(100.0f); kick.level.store(95.0f); kick.punch.store(0); kick.oneShot.store(1);
     snare.enabled.store(1); snare.triggerNote.store(73); snare.type.store(1); snare.tune.store(0); snare.bodyDecayMs.store(300); snare.noiseDecayMs.store(220);
-    snare.body.store(65.0f); snare.snap.store(70.0f); snare.tone.store(60.0f); snare.level.store(80.0f); snare.oneShot.store(1);
+    snare.body.store(65.0f); snare.snap.store(70.0f); snare.tone.store(60.0f); snare.level.store(80.0f); snare.ring.store(0); snare.oneShot.store(1);
     hat.enabled.store(1); hat.triggerNote.store(74); hat.tune.store(0); hat.closedDecayMs.store(70); hat.openDecayMs.store(700);
     hat.spread.store(50.0f); hat.highPassHz.store(5000.0f); hat.bandPassHz.store(7000.0f);
-    hat.resonance.store(30.0f); hat.grit.store(20.0f); hat.level.store(70.0f); hat.oneShot.store(1);
+    hat.resonance.store(30.0f); hat.grit.store(20.0f); hat.level.store(70.0f); hat.metal.store(0); hat.oneShot.store(1);
     crash.enabled.store(1); crash.triggerNote.store(75); crash.tune.store(0); crash.attackMs.store(2); crash.decayMs.store(1800);
     crash.spread.store(50.0f); crash.metal.store(75.0f); crash.noise.store(35.0f);
-    crash.ring.store(20.0f); crash.tone.store(55.0f); crash.resonance.store(45.0f); crash.level.store(65.0f); crash.oneShot.store(1);
+    crash.ring.store(20.0f); crash.tone.store(55.0f); crash.resonance.store(45.0f); crash.level.store(65.0f); crash.edge.store(0); crash.oneShot.store(1);
     ride.enabled.store(1); ride.triggerNote.store(76); ride.tune.store(0); ride.decayMs.store(2500); ride.ratio.store(3.0f); ride.fm.store(2.5f);
     ride.bell.store(70.0f); ride.wash.store(35.0f); ride.ring.store(15.0f);
-    ride.tone.store(65.0f); ride.level.store(65.0f); ride.oneShot.store(1);
+    ride.tone.store(65.0f); ride.level.store(65.0f); ride.bellCharacter.store(0); ride.oneShot.store(1);
     tom.enabled.store(1); tom.triggerNote.store(77); tom.wave.store(0); tom.tune.store(48); tom.pitchAmount.store(12); tom.pitchDownMs.store(100);
-    tom.decayMs.store(500); tom.click.store(15.0f); tom.body.store(100.0f); tom.level.store(75.0f); tom.oneShot.store(1);
+    tom.decayMs.store(500); tom.click.store(15.0f); tom.body.store(100.0f); tom.level.store(75.0f); tom.bend.store(0); tom.oneShot.store(1);
+    clap.enabled.store(1); clap.triggerNote.store(78); clap.tone.store(55.0f); clap.decayMs.store(220);
+    clap.density.store(50); clap.room.store(0); clap.level.store(75.0f); clap.oneShot.store(1);
+    applyKitPreset(KitPreset::tr808);
 }
 
 std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiContext& context)
 {
     juce::ignoreUnused(context);
-    constexpr int rows = 13;
-    std::vector<std::vector<UIBox>> boxes(12, std::vector<UIBox>(rows));
-    const char* headings[] = { "KICK", "SNAR", "HAT", "CRSH", "RIDE", "TOM" };
-    for (int strip = 0; strip < 6; ++strip)
+    constexpr int rows = 9;
+    std::vector<std::vector<UIBox>> boxes(14, std::vector<UIBox>(rows));
+    const char* headings[] = { "KICK", "SNAR", "HAT", "CRSH", "RIDE", "TOM", "CLAP" };
+    for (int strip = 0; strip < 7; ++strip)
     {
         const int labelColumn = strip * 2;
         boxes[static_cast<std::size_t>(labelColumn)][0] = makeLabelCell(headings[strip]);
@@ -808,25 +1046,42 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
         }
     }
 
-    auto integer = [&boxes](int column, int row, const char* label, std::atomic<int>& target, int minimum, int maximum, int step = 1)
+    auto integer = [&boxes](int column, int row, const char* label, std::atomic<int>& target, int minimum, int maximum, int step = 1, std::function<void()> onChanged = {})
     {
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)] = makeLabelCell(label);
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)].isDisabled = true;
         auto& value = boxes[static_cast<std::size_t>(column + 1)][static_cast<std::size_t>(row)];
         value = makeFloatCell(static_cast<float>(target.load()), static_cast<float>(minimum), static_cast<float>(maximum), 0,
-            [&target, minimum, maximum, step](int direction) { target.store(juce::jlimit(minimum, maximum, target.load() + direction * step)); });
-        value.onInsert = [&target, minimum, maximum](double inserted) { target.store(juce::jlimit(minimum, maximum, static_cast<int>(std::lround(inserted)))); };
+            [&target, minimum, maximum, step, onChanged](int direction) { target.store(juce::jlimit(minimum, maximum, target.load() + direction * step)); if (onChanged) onChanged(); });
+        value.onInsert = [&target, minimum, maximum, onChanged](double inserted) { target.store(juce::jlimit(minimum, maximum, static_cast<int>(std::lround(inserted)))); if (onChanged) onChanged(); };
     };
-    auto floating = [&boxes](int column, int row, const char* label, std::atomic<float>& target, float minimum, float maximum, float step, int decimals = 0)
+    auto exponential = [&boxes](int column, int row, const char* label, std::atomic<int>& target, int minimum, int maximum, std::function<void()> onChanged = {})
+    {
+        boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)] = makeLabelCell(label);
+        boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)].isDisabled = true;
+        auto& value = boxes[static_cast<std::size_t>(column + 1)][static_cast<std::size_t>(row)];
+        value = makeFloatCell(static_cast<float>(target.load()), static_cast<float>(minimum), static_cast<float>(maximum), 0,
+            [&target, minimum, maximum, onChanged](int direction)
+            {
+                target.store(exponentialStep(target.load(), minimum, maximum, direction));
+                if (onChanged) onChanged();
+            });
+        value.onInsert = [&target, minimum, maximum, onChanged](double inserted)
+        {
+            target.store(juce::jlimit(minimum, maximum, static_cast<int>(std::lround(inserted))));
+            if (onChanged) onChanged();
+        };
+    };
+    auto floating = [&boxes](int column, int row, const char* label, std::atomic<float>& target, float minimum, float maximum, float step, int decimals = 0, std::function<void()> onChanged = {})
     {
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)] = makeLabelCell(label);
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)].isDisabled = true;
         auto& value = boxes[static_cast<std::size_t>(column + 1)][static_cast<std::size_t>(row)];
         value = makeFloatCell(target.load(), minimum, maximum, decimals,
-            [&target, minimum, maximum, step](int direction) { target.store(juce::jlimit(minimum, maximum, target.load() + direction * step)); });
-        value.onInsert = [&target, minimum, maximum](double inserted) { target.store(juce::jlimit(minimum, maximum, static_cast<float>(inserted))); };
+            [&target, minimum, maximum, step, onChanged](int direction) { target.store(juce::jlimit(minimum, maximum, target.load() + direction * step)); if (onChanged) onChanged(); });
+        value.onInsert = [&target, minimum, maximum, onChanged](double inserted) { target.store(juce::jlimit(minimum, maximum, static_cast<float>(inserted))); if (onChanged) onChanged(); };
     };
-    auto choice = [&boxes](int column, int row, const char* label, std::atomic<int>& target, const char* const* names, int count)
+    auto choice = [&boxes](int column, int row, const char* label, std::atomic<int>& target, const char* const* names, int count, std::function<void()> onChanged = {})
     {
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)] = makeLabelCell(label);
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)].isDisabled = true;
@@ -834,8 +1089,8 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
         value.kind = UIBox::Kind::TrackerCell;
         value.isDisabled = false;
         value.text = names[juce::jlimit(0, count - 1, target.load())];
-        value.onAdjust = [&target, count](int direction) { int next = target.load() + (direction < 0 ? -1 : 1); if (next < 0) next = count - 1; if (next >= count) next = 0; target.store(next); };
-        value.onInsert = [&target, count](double inserted) { target.store(juce::jlimit(0, count - 1, static_cast<int>(std::lround(inserted)))); };
+        value.onAdjust = [&target, count, onChanged](int direction) { int next = target.load() + (direction < 0 ? -1 : 1); if (next < 0) next = count - 1; if (next >= count) next = 0; target.store(next); if (onChanged) onChanged(); };
+        value.onInsert = [&target, count, onChanged](double inserted) { target.store(juce::jlimit(0, count - 1, static_cast<int>(std::lround(inserted)))); if (onChanged) onChanged(); };
     };
     auto enabledToggle = [&boxes](int column, std::atomic<int>& target)
     {
@@ -848,47 +1103,83 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
     };
 
     enabledToggle(0, kick.enabled); enabledToggle(2, snare.enabled); enabledToggle(4, hat.enabled);
-    enabledToggle(6, crash.enabled); enabledToggle(8, ride.enabled); enabledToggle(10, tom.enabled);
+    enabledToggle(6, crash.enabled); enabledToggle(8, ride.enabled); enabledToggle(10, tom.enabled); enabledToggle(12, clap.enabled);
+    const auto presetChanged = [this] { markPresetCustom(); };
 
-    integer(0, 1, "NOTE", kick.triggerNote, 0, 127); choice(0, 2, "WAVE", kick.wave, kWaveNames, kWaveCount); integer(0, 3, "TUNE", kick.tune, 12, 96);
-    integer(0, 4, "PENV", kick.pitchAmount, 0, 96); integer(0, 5, "UP", kick.pitchUpMs, 0, 100);
-    integer(0, 6, "DOWN", kick.pitchDownMs, 5, 2000, 5); integer(0, 7, "DEC", kick.decayMs, 20, 8000, 100);
-    choice(0, 8, "NTYP", kick.noiseType, kNoiseNames, 3); floating(0, 9, "CLICK", kick.click, 0, 100, 5);
-    floating(0, 10, "BODY", kick.body, 0, 100, 5); floating(0, 11, "LEV", kick.level, 0, 100, 5);
-    choice(0, 12, "MODE", kick.oneShot, kTriggerModeNames, 2);
+    // Roland-style core controls stay close to their panel names.  The final
+    // control in each strip is deliberately wider-ranging and is applied when
+    // a voice starts, so it is expressive without adding callback cost.
+    integer(0, 1, "NOTE", kick.triggerNote, 0, 127);
+    floating(0, 2, "LEV", kick.level, 0, 100, 10);
+    integer(0, 3, "TUNE", kick.tune, 12, 96, 3);
+    floating(0, 4, "TONE", kick.tone, 0, 100, 10);
+    exponential(0, 5, "DEC", kick.decayMs, 20, 8000);
+    integer(0, 6, "PUNCH", kick.punch, -10, 10);
+    choice(0, 7, "MODE", kick.oneShot, kTriggerModeNames, 2);
+    choice(0, 8, "WAVE", kick.wave, kWaveNames, kWaveCount);
 
-    integer(2, 1, "NOTE", snare.triggerNote, 0, 127); choice(2, 2, "TYPE", snare.type, kSnareNames, 3); integer(2, 3, "TUNE", snare.tune, -48, 48);
-    floating(2, 4, "BODY", snare.body, 0, 100, 5); floating(2, 5, "SNAP", snare.snap, 0, 100, 5);
-    integer(2, 6, "BDEC", snare.bodyDecayMs, 20, 4000, 10); integer(2, 7, "NDEC", snare.noiseDecayMs, 10, 4000, 10);
-    floating(2, 8, "TONE", snare.tone, 0, 100, 5); floating(2, 9, "LEV", snare.level, 0, 100, 5);
-    choice(2, 12, "MODE", snare.oneShot, kTriggerModeNames, 2);
+    integer(2, 1, "NOTE", snare.triggerNote, 0, 127);
+    floating(2, 2, "LEV", snare.level, 0, 100, 10, 0, presetChanged);
+    integer(2, 3, "TUNE", snare.tune, -48, 48, 3, presetChanged);
+    floating(2, 4, "TONE", snare.tone, 0, 100, 10, 0, presetChanged);
+    floating(2, 5, "SNAP", snare.snap, 0, 100, 10, 0, presetChanged);
+    integer(2, 6, "RING", snare.ring, -10, 10, 1, presetChanged);
+    choice(2, 7, "MODE", snare.oneShot, kTriggerModeNames, 2);
+    boxes[2][8] = makeLabelCell("PSET");
+    boxes[2][8].isDisabled = true;
+    auto& presetCell = boxes[3][8];
+    presetCell.kind = UIBox::Kind::TrackerCell;
+    presetCell.isDisabled = false;
+    presetCell.text = kPresetNames[juce::jlimit(0, 2, kitPreset.load(std::memory_order_relaxed))];
+    presetCell.onAdjust = [this](int direction)
+    {
+        const auto current = getKitPreset();
+        applyKitPreset(current == KitPreset::tr808 && direction >= 0 ? KitPreset::tr909 : KitPreset::tr808);
+    };
+    presetCell.onInsert = [this](double inserted)
+    {
+        const int value = juce::jlimit(0, 2, static_cast<int>(std::lround(inserted)));
+        if (value == static_cast<int>(KitPreset::custom)) markPresetCustom();
+        else applyKitPreset(static_cast<KitPreset>(value));
+    };
+    integer(4, 1, "NOTE", hat.triggerNote, 0, 127);
+    floating(4, 2, "LEV", hat.level, 0, 100, 10, 0, presetChanged);
+    integer(4, 3, "TUNE", hat.tune, -48, 48, 3, presetChanged);
+    exponential(4, 4, "CDEC", hat.closedDecayMs, 5, 500, presetChanged);
+    exponential(4, 5, "ODEC", hat.openDecayMs, 50, 8000, presetChanged);
+    integer(4, 6, "METAL", hat.metal, -10, 10, 1, presetChanged);
+    choice(4, 7, "MODE", hat.oneShot, kTriggerModeNames, 2);
 
-    integer(4, 1, "NOTE", hat.triggerNote, 0, 127); integer(4, 2, "TUNE", hat.tune, -48, 48); floating(4, 3, "SPRD", hat.spread, 0, 100, 5);
-    floating(4, 4, "HPF", hat.highPassHz, 100, 18000, 250); floating(4, 5, "BPF", hat.bandPassHz, 100, 18000, 250);
-    floating(4, 6, "RES", hat.resonance, 0, 100, 5); integer(4, 7, "CDEC", hat.closedDecayMs, 5, 500, 5);
-    integer(4, 8, "ODEC", hat.openDecayMs, 50, 8000, 10); floating(4, 9, "GRIT", hat.grit, 0, 100, 5);
-    floating(4, 10, "LEV", hat.level, 0, 100, 5);
-    choice(4, 12, "MODE", hat.oneShot, kTriggerModeNames, 2);
+    integer(6, 1, "NOTE", crash.triggerNote, 0, 127);
+    floating(6, 2, "LEV", crash.level, 0, 100, 10, 0, presetChanged);
+    integer(6, 3, "TUNE", crash.tune, -48, 48, 3, presetChanged);
+    floating(6, 4, "TONE", crash.tone, 0, 100, 10, 0, presetChanged);
+    exponential(6, 5, "DEC", crash.decayMs, 100, 12000, presetChanged);
+    integer(6, 6, "EDGE", crash.edge, -10, 10, 1, presetChanged);
+    choice(6, 7, "MODE", crash.oneShot, kTriggerModeNames, 2);
 
-    integer(6, 1, "NOTE", crash.triggerNote, 0, 127); integer(6, 2, "TUNE", crash.tune, -48, 48); floating(6, 3, "SPRD", crash.spread, 0, 100, 5);
-    floating(6, 4, "METL", crash.metal, 0, 100, 5); floating(6, 5, "NOIS", crash.noise, 0, 100, 5);
-    floating(6, 6, "RING", crash.ring, 0, 100, 5); floating(6, 7, "TONE", crash.tone, 0, 100, 5);
-    floating(6, 8, "RES", crash.resonance, 0, 100, 5); integer(6, 9, "ATK", crash.attackMs, 0, 500);
-    integer(6, 10, "DEC", crash.decayMs, 100, 12000, 10); floating(6, 11, "LEV", crash.level, 0, 100, 5);
-    choice(6, 12, "MODE", crash.oneShot, kTriggerModeNames, 2);
+    integer(8, 1, "NOTE", ride.triggerNote, 0, 127);
+    floating(8, 2, "LEV", ride.level, 0, 100, 10, 0, presetChanged);
+    integer(8, 3, "TUNE", ride.tune, -48, 48, 3, presetChanged);
+    floating(8, 4, "TONE", ride.tone, 0, 100, 10, 0, presetChanged);
+    exponential(8, 5, "DEC", ride.decayMs, 100, 12000, presetChanged);
+    integer(8, 6, "BELL", ride.bellCharacter, -10, 10, 1, presetChanged);
+    choice(8, 7, "MODE", ride.oneShot, kTriggerModeNames, 2);
 
-    integer(8, 1, "NOTE", ride.triggerNote, 0, 127); integer(8, 2, "TUNE", ride.tune, -48, 48); floating(8, 3, "RATIO", ride.ratio, 0.25f, 16.0f, 0.25f, 2);
-    floating(8, 4, "FM", ride.fm, 0, 20, 0.1f, 1); floating(8, 5, "BELL", ride.bell, 0, 100, 5);
-    floating(8, 6, "WASH", ride.wash, 0, 100, 5); floating(8, 7, "RING", ride.ring, 0, 100, 5);
-    floating(8, 8, "TONE", ride.tone, 0, 100, 5); integer(8, 9, "DEC", ride.decayMs, 100, 12000, 10);
-    floating(8, 10, "LEV", ride.level, 0, 100, 5);
-    choice(8, 12, "MODE", ride.oneShot, kTriggerModeNames, 2);
+    integer(10, 1, "NOTE", tom.triggerNote, 0, 127);
+    floating(10, 2, "LEV", tom.level, 0, 100, 10);
+    integer(10, 3, "TUNE", tom.tune, 24, 108, 3);
+    exponential(10, 4, "DEC", tom.decayMs, 20, 6000);
+    integer(10, 6, "BEND", tom.bend, -10, 10);
+    choice(10, 7, "MODE", tom.oneShot, kTriggerModeNames, 2);
 
-    integer(10, 1, "NOTE", tom.triggerNote, 0, 127); choice(10, 2, "WAVE", tom.wave, kWaveNames, kWaveCount); integer(10, 3, "TUNE", tom.tune, 24, 108);
-    integer(10, 4, "PENV", tom.pitchAmount, 0, 72); integer(10, 5, "DOWN", tom.pitchDownMs, 5, 2000, 5);
-    integer(10, 6, "DEC", tom.decayMs, 20, 6000, 10); floating(10, 7, "CLICK", tom.click, 0, 100, 5);
-    floating(10, 8, "BODY", tom.body, 0, 100, 5); floating(10, 9, "LEV", tom.level, 0, 100, 5);
-    choice(10, 12, "MODE", tom.oneShot, kTriggerModeNames, 2);
+    integer(12, 1, "NOTE", clap.triggerNote, 0, 127);
+    floating(12, 2, "LEV", clap.level, 0, 100, 10, 0, presetChanged);
+    floating(12, 3, "TONE", clap.tone, 0, 100, 10, 0, presetChanged);
+    exponential(12, 4, "DEC", clap.decayMs, 30, 1600, presetChanged);
+    floating(12, 5, "DENS", clap.density, 0, 100, 10, 0, presetChanged);
+    integer(12, 6, "ROOM", clap.room, -10, 10, 1, presetChanged);
+    choice(12, 7, "MODE", clap.oneShot, kTriggerModeNames, 2);
     return boxes;
 }
 
@@ -896,12 +1187,14 @@ void DrumSynthMachine::getStateInformation(juce::MemoryBlock& destData)
 {
     auto* object = new juce::DynamicObject(); object->setProperty("version", kStateVersion);
     const auto put = [object](const char* key, auto& value) { object->setProperty(key, value.load(std::memory_order_relaxed)); };
-    put("kickEnabled", kick.enabled); put("kickNote", kick.triggerNote); put("kickWave", kick.wave); put("kickTune", kick.tune); put("kickPitchAmount", kick.pitchAmount); put("kickPitchUpMs", kick.pitchUpMs); put("kickPitchDownMs", kick.pitchDownMs); put("kickDecayMs", kick.decayMs); put("kickNoiseType", kick.noiseType); put("kickClick", kick.click); put("kickBody", kick.body); put("kickLevel", kick.level); put("kickOneShot", kick.oneShot);
-    put("snareEnabled", snare.enabled); put("snareNote", snare.triggerNote); put("snareType", snare.type); put("snareTune", snare.tune); put("snareBody", snare.body); put("snareSnap", snare.snap); put("snareBodyDecayMs", snare.bodyDecayMs); put("snareNoiseDecayMs", snare.noiseDecayMs); put("snareTone", snare.tone); put("snareLevel", snare.level); put("snareOneShot", snare.oneShot);
-    put("hatEnabled", hat.enabled); put("hatNote", hat.triggerNote); put("hatTune", hat.tune); put("hatSpread", hat.spread); put("hatHighPassHz", hat.highPassHz); put("hatBandPassHz", hat.bandPassHz); put("hatResonance", hat.resonance); put("hatClosedDecayMs", hat.closedDecayMs); put("hatOpenDecayMs", hat.openDecayMs); put("hatGrit", hat.grit); put("hatLevel", hat.level); put("hatOneShot", hat.oneShot);
-    put("crashEnabled", crash.enabled); put("crashNote", crash.triggerNote); put("crashTune", crash.tune); put("crashSpread", crash.spread); put("crashMetal", crash.metal); put("crashNoise", crash.noise); put("crashRing", crash.ring); put("crashTone", crash.tone); put("crashResonance", crash.resonance); put("crashAttackMs", crash.attackMs); put("crashDecayMs", crash.decayMs); put("crashLevel", crash.level); put("crashOneShot", crash.oneShot);
-    put("rideEnabled", ride.enabled); put("rideNote", ride.triggerNote); put("rideTune", ride.tune); put("rideRatio", ride.ratio); put("rideFm", ride.fm); put("rideBell", ride.bell); put("rideWash", ride.wash); put("rideRing", ride.ring); put("rideTone", ride.tone); put("rideDecayMs", ride.decayMs); put("rideLevel", ride.level); put("rideOneShot", ride.oneShot);
-    put("tomEnabled", tom.enabled); put("tomNote", tom.triggerNote); put("tomWave", tom.wave); put("tomTune", tom.tune); put("tomPitchAmount", tom.pitchAmount); put("tomPitchDownMs", tom.pitchDownMs); put("tomDecayMs", tom.decayMs); put("tomClick", tom.click); put("tomBody", tom.body); put("tomLevel", tom.level); put("tomOneShot", tom.oneShot);
+    put("kickEnabled", kick.enabled); put("kickNote", kick.triggerNote); put("kickWave", kick.wave); put("kickTune", kick.tune); put("kickPitchAmount", kick.pitchAmount); put("kickPitchUpMs", kick.pitchUpMs); put("kickPitchDownMs", kick.pitchDownMs); put("kickDecayMs", kick.decayMs); put("kickNoiseType", kick.noiseType); put("kickClick", kick.click); put("kickBody", kick.body); put("kickTone", kick.tone); put("kickPunch", kick.punch); put("kickLevel", kick.level); put("kickOneShot", kick.oneShot);
+    put("snareEnabled", snare.enabled); put("snareNote", snare.triggerNote); put("snareType", snare.type); put("snareTune", snare.tune); put("snareBody", snare.body); put("snareSnap", snare.snap); put("snareBodyDecayMs", snare.bodyDecayMs); put("snareNoiseDecayMs", snare.noiseDecayMs); put("snareTone", snare.tone); put("snareRing", snare.ring); put("snareLevel", snare.level); put("snareOneShot", snare.oneShot);
+    put("hatEnabled", hat.enabled); put("hatNote", hat.triggerNote); put("hatTune", hat.tune); put("hatSpread", hat.spread); put("hatHighPassHz", hat.highPassHz); put("hatBandPassHz", hat.bandPassHz); put("hatResonance", hat.resonance); put("hatClosedDecayMs", hat.closedDecayMs); put("hatOpenDecayMs", hat.openDecayMs); put("hatGrit", hat.grit); put("hatMetal", hat.metal); put("hatLevel", hat.level); put("hatOneShot", hat.oneShot);
+    put("crashEnabled", crash.enabled); put("crashNote", crash.triggerNote); put("crashTune", crash.tune); put("crashSpread", crash.spread); put("crashMetal", crash.metal); put("crashNoise", crash.noise); put("crashRing", crash.ring); put("crashTone", crash.tone); put("crashResonance", crash.resonance); put("crashAttackMs", crash.attackMs); put("crashDecayMs", crash.decayMs); put("crashEdge", crash.edge); put("crashLevel", crash.level); put("crashOneShot", crash.oneShot);
+    put("rideEnabled", ride.enabled); put("rideNote", ride.triggerNote); put("rideTune", ride.tune); put("rideRatio", ride.ratio); put("rideFm", ride.fm); put("rideBell", ride.bell); put("rideWash", ride.wash); put("rideRing", ride.ring); put("rideTone", ride.tone); put("rideDecayMs", ride.decayMs); put("rideBellCharacter", ride.bellCharacter); put("rideLevel", ride.level); put("rideOneShot", ride.oneShot);
+    put("tomEnabled", tom.enabled); put("tomNote", tom.triggerNote); put("tomWave", tom.wave); put("tomTune", tom.tune); put("tomPitchAmount", tom.pitchAmount); put("tomPitchDownMs", tom.pitchDownMs); put("tomDecayMs", tom.decayMs); put("tomClick", tom.click); put("tomBody", tom.body); put("tomBend", tom.bend); put("tomLevel", tom.level); put("tomOneShot", tom.oneShot);
+    put("clapEnabled", clap.enabled); put("clapNote", clap.triggerNote); put("clapTone", clap.tone); put("clapDecayMs", clap.decayMs); put("clapDensity", clap.density); put("clapRoom", clap.room); put("clapLevel", clap.level); put("clapOneShot", clap.oneShot);
+    put("kitPreset", kitPreset); put("hatModel", hatModel); put("crashModel", crashModel); put("rideModel", rideModel); put("clapModel", clapModel);
     writeMachineStateJson(destData, juce::var(object));
 }
 
@@ -910,12 +1203,40 @@ void DrumSynthMachine::setStateInformation(const void* data, int sizeInBytes)
     const auto state = parseMachineStateJson(data, sizeInBytes);
     if (state.isVoid()) return;
     resetParametersToDefaults();
+    const auto* object = state.getDynamicObject();
+    const bool hasModelState = object != nullptr && object->hasProperty("hatModel");
+    const bool hasClapState = object != nullptr && object->hasProperty("clapEnabled");
     const auto getI = [&state](const char* key, std::atomic<int>& value, int minimum, int maximum) { value.store(getIntProperty(state, key, value.load(), minimum, maximum)); };
     const auto getF = [&state](const char* key, std::atomic<float>& value, float minimum, float maximum) { const float restored = getFloatProperty(state, key, value.load(), minimum, maximum); value.store(std::isfinite(restored) ? restored : juce::jlimit(minimum, maximum, value.load())); };
-    getI("kickEnabled", kick.enabled, 0, 1); getI("kickNote", kick.triggerNote, 0, 127); getI("kickWave", kick.wave, 0, kWaveCount - 1); getI("kickTune", kick.tune, 12, 96); getI("kickPitchAmount", kick.pitchAmount, 0, 96); getI("kickPitchUpMs", kick.pitchUpMs, 0, 100); getI("kickPitchDownMs", kick.pitchDownMs, 5, 2000); getI("kickDecayMs", kick.decayMs, 20, 8000); getI("kickNoiseType", kick.noiseType, 0, 2); getF("kickClick", kick.click, 0, 100); getF("kickBody", kick.body, 0, 100); getF("kickLevel", kick.level, 0, 100); getI("kickOneShot", kick.oneShot, 0, 1);
-    getI("snareEnabled", snare.enabled, 0, 1); getI("snareNote", snare.triggerNote, 0, 127); getI("snareType", snare.type, 0, 2); getI("snareTune", snare.tune, -48, 48); getF("snareBody", snare.body, 0, 100); getF("snareSnap", snare.snap, 0, 100); getI("snareBodyDecayMs", snare.bodyDecayMs, 20, 4000); getI("snareNoiseDecayMs", snare.noiseDecayMs, 10, 4000); getF("snareTone", snare.tone, 0, 100); getF("snareLevel", snare.level, 0, 100); getI("snareOneShot", snare.oneShot, 0, 1);
-    getI("hatEnabled", hat.enabled, 0, 1); getI("hatNote", hat.triggerNote, 0, 127); getI("hatTune", hat.tune, -48, 48); getF("hatSpread", hat.spread, 0, 100); getF("hatHighPassHz", hat.highPassHz, 100, 18000); getF("hatBandPassHz", hat.bandPassHz, 100, 18000); getF("hatResonance", hat.resonance, 0, 100); getI("hatClosedDecayMs", hat.closedDecayMs, 5, 500); getI("hatOpenDecayMs", hat.openDecayMs, 50, 8000); getF("hatGrit", hat.grit, 0, 100); getF("hatLevel", hat.level, 0, 100); getI("hatOneShot", hat.oneShot, 0, 1);
-    getI("crashEnabled", crash.enabled, 0, 1); getI("crashNote", crash.triggerNote, 0, 127); getI("crashTune", crash.tune, -48, 48); getF("crashSpread", crash.spread, 0, 100); getF("crashMetal", crash.metal, 0, 100); getF("crashNoise", crash.noise, 0, 100); getF("crashRing", crash.ring, 0, 100); getF("crashTone", crash.tone, 0, 100); getF("crashResonance", crash.resonance, 0, 100); getI("crashAttackMs", crash.attackMs, 0, 500); getI("crashDecayMs", crash.decayMs, 100, 12000); getF("crashLevel", crash.level, 0, 100); getI("crashOneShot", crash.oneShot, 0, 1);
-    getI("rideEnabled", ride.enabled, 0, 1); getI("rideNote", ride.triggerNote, 0, 127); getI("rideTune", ride.tune, -48, 48); getF("rideRatio", ride.ratio, 0.25f, 16.0f); getF("rideFm", ride.fm, 0, 20); getF("rideBell", ride.bell, 0, 100); getF("rideWash", ride.wash, 0, 100); getF("rideRing", ride.ring, 0, 100); getF("rideTone", ride.tone, 0, 100); getI("rideDecayMs", ride.decayMs, 100, 12000); getF("rideLevel", ride.level, 0, 100); getI("rideOneShot", ride.oneShot, 0, 1);
-    getI("tomEnabled", tom.enabled, 0, 1); getI("tomNote", tom.triggerNote, 0, 127); getI("tomWave", tom.wave, 0, kWaveCount - 1); getI("tomTune", tom.tune, 24, 108); getI("tomPitchAmount", tom.pitchAmount, 0, 72); getI("tomPitchDownMs", tom.pitchDownMs, 5, 2000); getI("tomDecayMs", tom.decayMs, 20, 6000); getF("tomClick", tom.click, 0, 100); getF("tomBody", tom.body, 0, 100); getF("tomLevel", tom.level, 0, 100); getI("tomOneShot", tom.oneShot, 0, 1);
+    getI("kickEnabled", kick.enabled, 0, 1); getI("kickNote", kick.triggerNote, 0, 127); getI("kickWave", kick.wave, 0, kWaveCount - 1); getI("kickTune", kick.tune, 12, 96); getI("kickPitchAmount", kick.pitchAmount, 0, 96); getI("kickPitchUpMs", kick.pitchUpMs, 0, 100); getI("kickPitchDownMs", kick.pitchDownMs, 5, 2000); getI("kickDecayMs", kick.decayMs, 20, 8000); getI("kickNoiseType", kick.noiseType, 0, 2); getF("kickClick", kick.click, 0, 100); getF("kickBody", kick.body, 0, 100); getF("kickTone", kick.tone, 0, 100); getI("kickPunch", kick.punch, -10, 10); getF("kickLevel", kick.level, 0, 100); getI("kickOneShot", kick.oneShot, 0, 1);
+    getI("snareEnabled", snare.enabled, 0, 1); getI("snareNote", snare.triggerNote, 0, 127); getI("snareType", snare.type, 0, 2); getI("snareTune", snare.tune, -48, 48); getF("snareBody", snare.body, 0, 100); getF("snareSnap", snare.snap, 0, 100); getI("snareBodyDecayMs", snare.bodyDecayMs, 20, 4000); getI("snareNoiseDecayMs", snare.noiseDecayMs, 10, 4000); getF("snareTone", snare.tone, 0, 100); getI("snareRing", snare.ring, -10, 10); getF("snareLevel", snare.level, 0, 100); getI("snareOneShot", snare.oneShot, 0, 1);
+    getI("hatEnabled", hat.enabled, 0, 1); getI("hatNote", hat.triggerNote, 0, 127); getI("hatTune", hat.tune, -48, 48); getF("hatSpread", hat.spread, 0, 100); getF("hatHighPassHz", hat.highPassHz, 100, 18000); getF("hatBandPassHz", hat.bandPassHz, 100, 18000); getF("hatResonance", hat.resonance, 0, 100); getI("hatClosedDecayMs", hat.closedDecayMs, 5, 500); getI("hatOpenDecayMs", hat.openDecayMs, 50, 8000); getF("hatGrit", hat.grit, 0, 100); getI("hatMetal", hat.metal, -10, 10); getF("hatLevel", hat.level, 0, 100); getI("hatOneShot", hat.oneShot, 0, 1);
+    getI("crashEnabled", crash.enabled, 0, 1); getI("crashNote", crash.triggerNote, 0, 127); getI("crashTune", crash.tune, -48, 48); getF("crashSpread", crash.spread, 0, 100); getF("crashMetal", crash.metal, 0, 100); getF("crashNoise", crash.noise, 0, 100); getF("crashRing", crash.ring, 0, 100); getF("crashTone", crash.tone, 0, 100); getF("crashResonance", crash.resonance, 0, 100); getI("crashAttackMs", crash.attackMs, 0, 500); getI("crashDecayMs", crash.decayMs, 100, 12000); getI("crashEdge", crash.edge, -10, 10); getF("crashLevel", crash.level, 0, 100); getI("crashOneShot", crash.oneShot, 0, 1);
+    getI("rideEnabled", ride.enabled, 0, 1); getI("rideNote", ride.triggerNote, 0, 127); getI("rideTune", ride.tune, -48, 48); getF("rideRatio", ride.ratio, 0.25f, 16.0f); getF("rideFm", ride.fm, 0, 20); getF("rideBell", ride.bell, 0, 100); getF("rideWash", ride.wash, 0, 100); getF("rideRing", ride.ring, 0, 100); getF("rideTone", ride.tone, 0, 100); getI("rideDecayMs", ride.decayMs, 100, 12000); getI("rideBellCharacter", ride.bellCharacter, -10, 10); getF("rideLevel", ride.level, 0, 100); getI("rideOneShot", ride.oneShot, 0, 1);
+    getI("tomEnabled", tom.enabled, 0, 1); getI("tomNote", tom.triggerNote, 0, 127); getI("tomWave", tom.wave, 0, kWaveCount - 1); getI("tomTune", tom.tune, 24, 108); getI("tomPitchAmount", tom.pitchAmount, 0, 72); getI("tomPitchDownMs", tom.pitchDownMs, 5, 2000); getI("tomDecayMs", tom.decayMs, 20, 6000); getF("tomClick", tom.click, 0, 100); getF("tomBody", tom.body, 0, 100); getI("tomBend", tom.bend, -10, 10); getF("tomLevel", tom.level, 0, 100); getI("tomOneShot", tom.oneShot, 0, 1);
+    if (hasClapState)
+    {
+        getI("clapEnabled", clap.enabled, 0, 1); getI("clapNote", clap.triggerNote, 0, 127);
+        getF("clapTone", clap.tone, 0, 100); getI("clapDecayMs", clap.decayMs, 30, 1600);
+        getF("clapDensity", clap.density, 0, 100); getI("clapRoom", clap.room, -10, 10);
+        getF("clapLevel", clap.level, 0, 100); getI("clapOneShot", clap.oneShot, 0, 1);
+    }
+    else
+    {
+        // Prior projects had no clap responder.  Keep note 78 silent when
+        // loading them, while new machines retain the useful enabled default.
+        clap.enabled.store(0);
+    }
+    if (hasModelState)
+    {
+        getI("kitPreset", kitPreset, 0, 2); getI("hatModel", hatModel, 0, 2);
+        getI("crashModel", crashModel, 0, 2); getI("rideModel", rideModel, 0, 2); getI("clapModel", clapModel, 1, 2);
+    }
+    else
+    {
+        // Version-1 projects predate the new model tables.  Keep their old
+        // metal bank instead of changing a saved song merely by loading it.
+        markPresetCustom();
+        hatModel.store(0); crashModel.store(0); rideModel.store(0);
+    }
 }

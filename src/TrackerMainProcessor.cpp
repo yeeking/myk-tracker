@@ -17,8 +17,8 @@
 namespace
 {
 constexpr int oscListenPort = 9001;
-constexpr int lcdDisplayPort = 9000;
-constexpr const char* lcdDisplayHost = "127.0.0.1";
+constexpr int kDefaultLcdDisplayPort = 9000;
+constexpr const char* kDefaultLcdDisplayHost = "127.0.0.1";
 constexpr const char* cellValueAddress = "/cell";
 constexpr const char* zoomInAddress = "/zoom_in";
 constexpr const char* zoomOutAddress = "/zoom_out";
@@ -506,9 +506,7 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
             setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
 
         if (rewindNow && previousPlaybackSequencer != nullptr)
-        {
             previousPlaybackSequencer->resetForTransportStart();
-        }
         return;
     }
 
@@ -1020,14 +1018,17 @@ void TrackerMainProcessor::initialiseOsc()
         DBG("OSC receiver listening on port " << oscListenPort);
     }
 
-    oscSenderReady = oscSender.connect(lcdDisplayHost, lcdDisplayPort);
+    const auto displayHost = juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_OSC_DISPLAY_HOST", kDefaultLcdDisplayHost);
+    const auto configuredDisplayPort = juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_OSC_DISPLAY_PORT", juce::String(kDefaultLcdDisplayPort)).getIntValue();
+    const int displayPort = configuredDisplayPort > 0 && configuredDisplayPort < 65536 ? configuredDisplayPort : kDefaultLcdDisplayPort;
+    oscSenderReady = oscSender.connect(displayHost, displayPort);
     if (!oscSenderReady)
     {
-        DBG("OSC sender failed to connect to " << lcdDisplayHost << ":" << lcdDisplayPort);
+        DBG("OSC sender failed to connect to " << displayHost << ":" << displayPort);
     }
     else
     {
-        DBG("OSC sender connected to " << lcdDisplayHost << ":" << lcdDisplayPort);
+        DBG("OSC sender connected to " << displayHost << ":" << displayPort);
     }
 }
 
@@ -1581,6 +1582,12 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     processing.store(true, std::memory_order_release);
     std::lock_guard<std::mutex> audioLock(audioMutex);
     juce::ScopedNoDenormals noDenormals;
+    // Prepared MCP/UI pattern banks become audible only at this block boundary.
+    // Each sequencer performs an O(1) swap and defers old-memory destruction to
+    // the message thread.
+    for (auto& sequenceSet : sequenceSets)
+        if (sequenceSet != nullptr)
+            sequenceSet->applyPendingSequenceReplacementsAudioThread();
     auto* playbackSequencer = getPlaybackSequencerInternal();
     bool receivedMidi = false; 
     for (const MidiMessageMetadata metadata : midiMessages){
@@ -1710,7 +1717,18 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         elapsedSamples = blockEndSample;
     }
     hostClockActive.store(usingHostClock, std::memory_order_relaxed);
-    const bool sequencerPlaying = playbackSequencer != nullptr && playbackSequencer->isPlaying();
+    // Re-resolve the playback sequencer here: a song-row switch may have
+    // replaced it during the tick loop above, leaving the pointer cached at
+    // the top of the callback pointing at the old, now-stopped sequencer.
+    // Treating that as a transport stop would all-notes-off and swallow the
+    // incoming pattern's first tick (its downbeat notes are queued by then).
+    // Re-resolve the playback sequencer here: a song-row switch may have
+    // replaced it during the tick loop above, leaving the pointer cached at
+    // the top of the callback pointing at the old, now-stopped sequencer.
+    // Treating that as a transport stop would all-notes-off and swallow the
+    // incoming pattern's first tick (its downbeat notes are queued by then).
+    auto* currentPlaybackSequencer = getPlaybackSequencerInternal();
+    const bool sequencerPlaying = currentPlaybackSequencer != nullptr && currentPlaybackSequencer->isPlaying();
     if (sequencerWasPlaying && !sequencerPlaying)
         allNotesOff();
     sequencerWasPlaying = sequencerPlaying;

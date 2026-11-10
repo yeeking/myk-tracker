@@ -226,6 +226,19 @@ if (BUILD_TESTING)
         juce::juce_recommended_warning_flags)
     add_test(NAME drum-synth-tests COMMAND drum-synth-tests)
 
+    juce_add_console_app(drum-synth-render PRODUCT_NAME "Drum Synth Render")
+    juce_generate_juce_header(drum-synth-render)
+    target_sources(drum-synth-render PRIVATE
+        tools/DrumSynthRender.cpp
+        src/machines/DrumSynthMachine.cpp)
+    target_include_directories(drum-synth-render PRIVATE src src/machines)
+    target_compile_features(drum-synth-render PRIVATE cxx_std_17)
+    target_compile_definitions(drum-synth-render PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(drum-synth-render PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
     add_executable(drum-processor-tests)
     target_sources(drum-processor-tests PRIVATE tests/DrumProcessorTests.cpp)
     target_include_directories(drum-processor-tests PRIVATE

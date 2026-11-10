@@ -1,39 +1,10 @@
 #include "HTTPServer.h"
 
-namespace
-{
-constexpr auto kProtocolVersion = "2026-07-28";
+namespace { constexpr auto kProtocolVersion = "2026-07-28"; }
 
-bool isExactLoopbackOrigin(const juce::String& raw)
-{
-    const auto value = raw.trim().toLowerCase();
-    if (value.isEmpty()) return true;
-    const bool http = value.startsWith("http://");
-    const bool https = value.startsWith("https://");
-    if (!http && !https) return false;
-    const auto authority = value.fromFirstOccurrenceOf("://", false, false).upToFirstOccurrenceOf("/", false, false);
-    const auto host = authority.upToFirstOccurrenceOf(":", false, false);
-    if (host != "localhost" && host != "127.0.0.1") return false;
-    if (authority == host) return true;
-    const auto port = authority.substring(host.length() + 1);
-    return port.isNotEmpty() && port.containsOnly("0123456789") && juce::isPositiveAndBelow(port.getIntValue(), 65536);
-}
-
-bool isExactLoopbackHost(const juce::String& raw)
-{
-    const auto value = raw.trim().toLowerCase();
-    if (value.startsWith("[::1]"))
-        return value == "[::1]" || value.substring(5).startsWith(":");
-    const auto host = value.upToFirstOccurrenceOf(":", false, false);
-    if (host != "localhost" && host != "127.0.0.1") return false;
-    if (value == host) return true;
-    const auto port = value.substring(host.length() + 1);
-    return port.isNotEmpty() && port.containsOnly("0123456789") && juce::isPositiveAndBelow(port.getIntValue(), 65536);
-}
-} // namespace
-
-TrackerMcpServer::TrackerMcpServer(TrackerControlService& control, int portIn)
-    : juce::Thread("MYK Tracker MCP server"), router(control), port(portIn)
+TrackerMcpServer::TrackerMcpServer(TrackerControlService& control, int portIn, juce::String bindAddressIn)
+    : juce::Thread("MYK Tracker MCP server"), router(control), port(portIn),
+      bindAddress(bindAddressIn.trim().isNotEmpty() ? bindAddressIn.trim() : "0.0.0.0")
 {
     initialiseRoutes();
 }
@@ -50,6 +21,7 @@ void TrackerMcpServer::initialiseRoutes()
         body.getDynamicObject()->setProperty("ok", ready.load());
         body.getDynamicObject()->setProperty("protocolVersion", kProtocolVersion);
         body.getDynamicObject()->setProperty("port", port);
+        body.getDynamicObject()->setProperty("bindAddress", bindAddress);
         body.getDynamicObject()->setProperty("server", "myk-tracker");
         response.set_content(juce::JSON::toString(body, false).toStdString(), "application/json");
     });
@@ -63,10 +35,10 @@ void TrackerMcpServer::initialiseRoutes()
 void TrackerMcpServer::run()
 {
     ready.store(true);
-    if (!server.listen("127.0.0.1", port))
+    if (!server.listen(bindAddress.toStdString().c_str(), port))
     {
         ready.store(false);
-        DBG("MYK Tracker MCP server could not listen on 127.0.0.1:" << port);
+        DBG("MYK Tracker MCP server could not listen on " << bindAddress << ":" << port);
     }
 }
 
@@ -105,13 +77,7 @@ void TrackerMcpServer::closeLegacySseSessions()
 
 void TrackerMcpServer::handleLegacySse(const httplib::Request& request, httplib::Response& response)
 {
-    if (!isAllowedLoopbackRequest(request))
-    {
-        response.status = 403;
-        response.set_content("{\"error\":\"loopback_origin_required\"}", "application/json");
-        return;
-    }
-
+    juce::ignoreUnused(request);
     auto session = std::make_shared<LegacySseSession>();
     session->id = "myk-sse-" + juce::String(nextLegacySseId.fetch_add(1));
     {
@@ -165,12 +131,6 @@ void TrackerMcpServer::handleLegacySse(const httplib::Request& request, httplib:
         });
 }
 
-bool TrackerMcpServer::isAllowedLoopbackRequest(const httplib::Request& request) const
-{
-    if (request.has_header("Origin") && !isExactLoopbackOrigin(request.get_header_value("Origin"))) return false;
-    return !request.has_header("Host") || isExactLoopbackHost(request.get_header_value("Host"));
-}
-
 void TrackerMcpServer::writeRouterResponse(httplib::Response& response, const McpRouter::Response& routed)
 {
     response.status = routed.status;
@@ -184,12 +144,6 @@ void TrackerMcpServer::handleMcp(const httplib::Request& request, httplib::Respo
 {
     response.set_header("Cache-Control", "no-store");
     response.set_header("MCP-Protocol-Version", kProtocolVersion);
-    if (!isAllowedLoopbackRequest(request))
-    {
-        response.status = 403;
-        response.set_content("{\"error\":\"loopback_origin_required\"}", "application/json");
-        return;
-    }
     if (!request.has_header("Content-Type") || !juce::String(request.get_header_value("Content-Type")).containsIgnoreCase("application/json"))
     {
         response.status = 415;

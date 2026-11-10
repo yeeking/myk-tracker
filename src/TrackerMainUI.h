@@ -160,6 +160,8 @@ private:
     std::vector<float> seqConfigTriggerFlash;
     bool seqConfigTriggerBaselineValid = false;
     std::size_t seqConfigTriggerSetIndex = std::size_t(-1);
+    std::array<std::uint64_t, 7> drumTriggerCounts {};
+    std::string drumTriggerPulseContext;
     size_t visibleCols = 0;
     size_t visibleRows = 0;
     size_t startCol = 0;

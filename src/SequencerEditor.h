@@ -457,14 +457,13 @@ private:
   void flashOctaveHud(const std::string& label);
   void clampStepCursorToCurrentStep();
   bool applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals,
-                               const std::string& familyLabel, std::size_t variationIndex,
-                               bool advanceAfterWrite = false, bool alternate = false);
+                                const std::string& familyLabel, std::size_t variationIndex,
+                                bool alternate = false);
   bool applyChordNotesToCurrentStep(char physicalKey, const std::vector<int>& notes,
-                                    const std::string& familyLabel, std::size_t variationIndex,
-                                    std::size_t variationCount, bool advanceAfterWrite,
-                                    bool alternate);
+                                     const std::string& familyLabel, std::size_t variationIndex,
+                                     std::size_t variationCount,
+                                     bool alternate);
   std::optional<int> resolveChordRootForCurrentStep() const;
-  void advanceChordProgressionStep();
   void resetChordCycle();
   void setChordRoot(double midiNote);
   std::vector<std::vector<UIBox>> buildMachineStackCells(std::size_t stackIndex);

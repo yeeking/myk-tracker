@@ -3059,11 +3059,11 @@ bool SequencerEditor::handleChordKey(char key, bool alternate)
     if (variationIndex >= activeTonnetzVoicings.size())
       return true;
     return applyChordNotesToCurrentStep(key, activeTonnetzVoicings[variationIndex],
-                                        shortcut->label, variationIndex, variationCount, true, alternate);
+                                        shortcut->label, variationIndex, variationCount, alternate);
   }
 
   return applyChordToCurrentStep(key, shortcut->variations[variationIndex],
-                                 shortcut->label, variationIndex, false, alternate);
+                                 shortcut->label, variationIndex, alternate);
 }
 
 bool SequencerEditor::handleControlKey(char key)
@@ -3182,8 +3182,8 @@ bool SequencerEditor::isCurrentSamplerRangeCell() const
 }
 
 bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vector<int>& intervals,
-                                              const std::string& familyLabel, std::size_t variationIndex,
-                                              bool advanceAfterWrite, bool alternate)
+                                               const std::string& familyLabel, std::size_t variationIndex,
+                                               bool alternate)
 {
   if (sequencer == nullptr || intervals.empty())
     return false;
@@ -3206,7 +3206,7 @@ bool SequencerEditor::applyChordToCurrentStep(char physicalKey, const std::vecto
 
   return applyChordNotesToCurrentStep(physicalKey, notes, familyLabel, variationIndex,
                                       kChordShortcuts.empty() ? 0u : kChordShortcuts.front().variations.size(),
-                                      advanceAfterWrite, alternate);
+                                      alternate);
 }
 
 std::optional<int> SequencerEditor::resolveChordRootForCurrentStep() const
@@ -3232,26 +3232,11 @@ std::optional<int> SequencerEditor::resolveChordRootForCurrentStep() const
   return std::nullopt;
 }
 
-void SequencerEditor::advanceChordProgressionStep()
-{
-  if (sequencer == nullptr)
-    return;
-  const auto* sequence = sequencer->getSequence(currentSequence);
-  if (sequence == nullptr || sequence->getLength() == 0)
-    return;
-
-  // Progression entry deliberately follows the playback length rather than
-  // the allocated edit buffer, and wraps without resetting its active cycle.
-  currentStep = (currentStep + 1) % sequence->getLength();
-  clampStepCursorToCurrentStep();
-}
-
 bool SequencerEditor::applyChordNotesToCurrentStep(char physicalKey, const std::vector<int>& notes,
-                                                   const std::string& familyLabel,
-                                                   std::size_t variationIndex,
-                                                   std::size_t variationCount,
-                                                   bool advanceAfterWrite,
-                                                   bool alternate)
+                                                    const std::string& familyLabel,
+                                                    std::size_t variationIndex,
+                                                    std::size_t variationCount,
+                                                    bool alternate)
 {
   if (sequencer == nullptr || notes.empty()
       || std::any_of(notes.begin(), notes.end(), [] (int note) { return note < 1 || note > 127; }))
@@ -3301,11 +3286,10 @@ bool SequencerEditor::applyChordNotesToCurrentStep(char physicalKey, const std::
 
   if (writingSequence)
   {
+    // Chord entry writes to the armed step and stays there, matching piano
+    // note entry; variation cycling rewrites the same step in place.
     writeStepData(std::move(chordRows));
-    if (advanceAfterWrite)
-      advanceChordProgressionStep();
-    else
-      clampStepCursorToCurrentStep();
+    clampStepCursorToCurrentStep();
     requestStringRefresh();
     lastMusicalKeyChangedContent = true;
   }

@@ -614,7 +614,9 @@ StandalonePluginHolder::StandalonePluginHolder(juce::PropertySet* settingsToUse,
     if (auto* trackerProcessor = dynamic_cast<TrackerMainProcessor*>(processor.get()))
     {
         const auto configuredPort = juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_MCP_PORT", "8080").getIntValue();
-        mcpServer = std::make_unique<TrackerMcpServer>(trackerProcessor->getControlService(), configuredPort > 0 ? configuredPort : 8080);
+        const auto bindAddress = juce::SystemStats::getEnvironmentVariable("MYK_TRACKER_MCP_BIND_ADDRESS", "0.0.0.0");
+        mcpServer = std::make_unique<TrackerMcpServer>(trackerProcessor->getControlService(),
+                                                       configuredPort > 0 ? configuredPort : 8080, bindAddress);
         mcpServer->startThread();
     }
     startPlaying();

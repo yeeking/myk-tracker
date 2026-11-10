@@ -9,13 +9,14 @@
 
 #include "../MachineInterface.h"
 
-/** Six-part, mono drum synthesizer.  Parameter storage is atomic so the UI
+/** Seven-part, mono drum synthesizer.  Parameter storage is atomic so the UI
     never blocks the audio callback; note and filter state belongs exclusively
     to the audio thread. */
 class DrumSynthMachine final : public MachineInterface
 {
 public:
-    enum class Drum : int { kick, crash, snare, ride, closedHat, tom, openHat, none };
+    enum class Drum : int { kick, crash, snare, ride, closedHat, tom, clap, openHat, none };
+    enum class KitPreset : int { custom = 0, tr808 = 1, tr909 = 2 };
 
     DrumSynthMachine();
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
@@ -29,9 +30,12 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
     void resetParametersToDefaults();
+    void applyKitPreset(KitPreset preset);
+    KitPreset getKitPreset() const noexcept;
 
     Drum drumForNote(int midiNote) const noexcept;
     const char* describeNote(int midiNote) const noexcept;
+    std::array<std::uint64_t, 7> getTriggerCounts() const noexcept;
 
 public:
     static constexpr int kTableSize = 2048;
@@ -101,6 +105,10 @@ private:
         int noiseType = 0;
         int profile = 0;
         int noiseHoldSamples = 0;
+        int burstPeriodSamples = 0;
+        int burstLengthSamples = 0;
+        int burstCount = 0;
+        int burstEndSamples = 0;
         std::array<double, 8> phases {};
         std::array<Biquad, 4> filters {};
     };
@@ -108,33 +116,52 @@ private:
     struct KickParameters
     {
         std::atomic<int> enabled { 1 }, triggerNote { 72 }, wave { 0 }, tune { 36 }, pitchAmount { 24 }, pitchUpMs { 0 }, pitchDownMs { 60 }, decayMs { 1200 }, noiseType { 0 }, oneShot { 1 };
-        std::atomic<float> click { 45.0f }, body { 100.0f }, level { 95.0f };
+        std::atomic<float> click { 45.0f }, body { 100.0f }, tone { 100.0f }, level { 95.0f };
+        std::atomic<int> punch { 0 };
     } kick;
     struct SnareParameters
     {
         std::atomic<int> enabled { 1 }, triggerNote { 73 }, type { 1 }, tune { 0 }, bodyDecayMs { 300 }, noiseDecayMs { 220 }, oneShot { 1 };
         std::atomic<float> body { 65.0f }, snap { 70.0f }, tone { 60.0f }, level { 80.0f };
+        std::atomic<int> ring { 0 };
     } snare;
     struct HatParameters
     {
         std::atomic<int> enabled { 1 }, triggerNote { 74 }, tune { 0 }, closedDecayMs { 70 }, openDecayMs { 700 }, oneShot { 1 };
         std::atomic<float> spread { 50.0f }, highPassHz { 5000.0f }, bandPassHz { 7000.0f }, resonance { 30.0f }, grit { 20.0f }, level { 70.0f };
+        std::atomic<int> metal { 0 };
     } hat;
     struct CrashParameters
     {
         std::atomic<int> enabled { 1 }, triggerNote { 75 }, tune { 0 }, attackMs { 2 }, decayMs { 1800 }, oneShot { 1 };
         std::atomic<float> spread { 50.0f }, metal { 75.0f }, noise { 35.0f }, ring { 20.0f }, tone { 55.0f }, resonance { 45.0f }, level { 65.0f };
+        std::atomic<int> edge { 0 };
     } crash;
     struct RideParameters
     {
         std::atomic<int> enabled { 1 }, triggerNote { 76 }, tune { 0 }, decayMs { 2500 }, oneShot { 1 };
         std::atomic<float> ratio { 3.0f }, fm { 2.5f }, bell { 70.0f }, wash { 35.0f }, ring { 15.0f }, tone { 65.0f }, level { 65.0f };
+        std::atomic<int> bellCharacter { 0 };
     } ride;
     struct TomParameters
     {
         std::atomic<int> enabled { 1 }, triggerNote { 77 }, wave { 0 }, tune { 48 }, pitchAmount { 12 }, pitchDownMs { 100 }, decayMs { 500 }, oneShot { 1 };
         std::atomic<float> click { 15.0f }, body { 100.0f }, level { 75.0f };
+        std::atomic<int> bend { 0 };
     } tom;
+    struct ClapParameters
+    {
+        std::atomic<int> enabled { 1 }, triggerNote { 78 }, decayMs { 220 }, oneShot { 1 };
+        std::atomic<float> density { 50.0f };
+        std::atomic<float> tone { 55.0f }, level { 75.0f };
+        std::atomic<int> room { 0 };
+    } clap;
+
+    // The preset status is deliberately separate from the individual model
+    // selections: editing a parameter makes the kit custom without losing the
+    // inexpensive oscillator/filter topology selected by its last preset.
+    std::atomic<int> kitPreset { static_cast<int>(KitPreset::tr808) };
+    std::atomic<int> hatModel { 1 }, crashModel { 1 }, rideModel { 1 }, clapModel { 1 };
 
     static const Tables& tables();
     static float wrapPhase(double phase) noexcept;
@@ -157,12 +184,14 @@ private:
     float renderCrash(Voice& voice) noexcept;
     float renderRide(Voice& voice) noexcept;
     float renderTom(Voice& voice) noexcept;
+    float renderClap(Voice& voice) noexcept;
     float renderMetalBank(Voice& voice, const std::array<float, 6>& baseFrequencies) noexcept;
     float nextNoise(Voice& voice) noexcept;
     float decayMultiplierForMs(float milliseconds) const noexcept;
     float smoothedOutputLevel(float current, float target) const noexcept;
+    void markPresetCustom() noexcept;
 
-    std::array<Voice, 6> voices {};
+    std::array<Voice, 7> voices {};
     /** A short-lived copy of an open hat while a closed hat chokes it. */
     Voice hatChokeTail;
     const std::vector<MachineScheduledNote>* scheduledBlockNotes = nullptr;
@@ -172,7 +201,8 @@ private:
     float outputSmoothing = 1.0f;
     float releaseMultiplier3ms = 0.0f;
     float releaseMultiplier2ms = 0.0f;
-    std::array<float, 6> outputLevels {{ 0.95f, 0.8f, 0.7f, 0.65f, 0.65f, 0.75f }};
+    std::array<float, 7> outputLevels {{ 0.95f, 0.8f, 0.7f, 0.65f, 0.65f, 0.75f, 0.75f }};
+    std::array<std::atomic<std::uint64_t>, 7> triggerCounts {};
     std::uint32_t randomState = 0x6d2b79f5u;
     std::uint64_t sampleCounter = 0;
 };
