@@ -44,7 +44,8 @@ void requirePermissiveProjectVersionLoading()
                 && static_cast<std::size_t>(CommandType::DistortionFx) == 6
                 && static_cast<std::size_t>(CommandType::FilterFx) == 11
                 && static_cast<std::size_t>(CommandType::ModulationMatrix) == 15
-                && static_cast<std::size_t>(CommandType::DrumSynth) == 16,
+                && static_cast<std::size_t>(CommandType::DrumSynth) == 16
+                && static_cast<std::size_t>(CommandType::FmSynth) == 17,
             "persisted command IDs retain their historical numeric values");
 
     TrackerMainProcessor source;
@@ -219,10 +220,88 @@ void requireSongSwitchPreservesIncomingDownbeat()
     processor.releaseResources();
 }
 
+void requireSongRowInsertionClonesIndependently()
+{
+    TrackerMainProcessor processor;
+
+    auto* firstSet = processor.getSequencer();
+    require(firstSet != nullptr, "initial song sequence set exists");
+    if (firstSet == nullptr)
+        return;
+
+    auto* firstSequence = firstSet->getSequence(0);
+    require(firstSequence != nullptr, "initial song sequence exists");
+    if (firstSequence == nullptr)
+        return;
+    firstSequence->setStepData(0, {{ static_cast<double>(CommandType::MidiNote), 60.0, 100.0, 2.0 }});
+    processor.setSequenceSetBpm(0, 133.0);
+    processor.adjustSongRowBeatCount(0, -8);
+
+    const auto secondRow = processor.addSongRowByCloningViewedSet();
+    require(secondRow == 1, "song setup appends a second row");
+    processor.setViewedSequenceSetIndex(1);
+    processor.setSequenceSetBpm(1, 111.0);
+    processor.adjustSongRowBeatCount(1, -4);
+    if (auto* secondSequence = processor.getSequencer()->getSequence(0))
+        secondSequence->setStepData(0, {{ static_cast<double>(CommandType::MidiNote), 67.0, 90.0, 3.0 }});
+
+    const auto thirdRow = processor.addSongRowByCloningViewedSet();
+    require(thirdRow == 2, "song setup appends a following row");
+    const auto sourceSetId = processor.getSongRowSequenceSetId(1);
+    const auto followingSetId = processor.getSongRowSequenceSetId(2);
+    const auto sourceBeats = processor.getSongRowBeatCount(1);
+    const auto sourceBpm = processor.getSongRowBpm(1);
+    const auto sourceData = processor.getSequencer()->getStepData(0, 0);
+
+    const auto insertedRow = processor.insertSongRowByCloningRow(1);
+    require(insertedRow == 2, "song clone is inserted immediately below its source");
+    require(processor.getSongRowCount() == 4, "insertion adds exactly one song row");
+    require(processor.getSongRowSequenceSetId(1) == sourceSetId, "source row remains in place");
+    require(processor.getSongRowSequenceSetId(2) != sourceSetId, "inserted row owns an independent sequence set");
+    require(processor.getSongRowSequenceSetId(3) == followingSetId, "following song rows shift down once");
+    require(processor.getSongRowBeatCount(2) == sourceBeats, "inserted row copies source beat count");
+    require(processor.getSongRowBpm(2) == sourceBpm, "inserted row copies source BPM");
+
+    const auto insertedSetId = processor.getSongRowSequenceSetId(2);
+    processor.setViewedSequenceSetIndex(insertedSetId);
+    require(processor.getSequencer()->getStepData(0, 0) == sourceData,
+            "inserted sequence set copies source pattern data");
+    processor.getSequencer()->getSequence(0)->setStepData(0,
+        {{ static_cast<double>(CommandType::MidiNote), 72.0, 80.0, 1.0 }});
+    processor.setViewedSequenceSetIndex(sourceSetId);
+    require(processor.getSequencer()->getStepData(0, 0) == sourceData,
+            "editing inserted pattern does not modify its source");
+
+    juce::MemoryBlock state;
+    processor.getStateInformation(state);
+    TrackerMainProcessor restored;
+    restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+    require(restored.getSongRowCount() == 4, "inserted song rows survive a state round trip");
+    require(restored.getSongRowBeatCount(2) == sourceBeats && restored.getSongRowBpm(2) == sourceBpm,
+            "inserted song row timing survives a state round trip");
+
+    auto* editor = processor.getSequenceEditor();
+    require(editor != nullptr, "processor exposes song editor for insertion action");
+    if (editor == nullptr)
+        return;
+    editor->gotoSongPage();
+    editor->setSelectedSongCursor(1, 0);
+    for (int press = 0; press < 5; ++press)
+        editor->moveCursorRight();
+    require(editor->getCurrentSongCol() == 5, "song-row cursor reaches moved delete column");
+    editor->setSelectedSongCursor(1, 4);
+    editor->click();
+    require(editor->getCurrentSongRow() == 2 && editor->getCurrentSongCol() == 0,
+            "insert action selects the inserted row SET cell");
+    require(processor.getSongRowCount() == 5, "song editor insert action creates a row");
+    editor->setSelectedSongCursor(1, 5);
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     requirePermissiveProjectVersionLoading();
+    requireSongRowInsertionClonesIndependently();
     requireSongSwitchPreservesIncomingDownbeat();
 
     TrackerMainProcessor processor;
@@ -301,5 +380,32 @@ int main()
     editor->togglePlayback();
     require(!processor.isPlaybackRunningSafely(), "space-equivalent playback toggle stops transport");
     processor.releaseResources();
+
+    TrackerMainProcessor fmProcessor;
+    fmProcessor.prepareToPlay(48000.0, 64);
+    while (findSlot(fmProcessor, CommandType::FmSynth) >= fmProcessor.getMachineStackTypes(0).size())
+        fmProcessor.addMachineToStack(0);
+    const auto fmTypes = fmProcessor.getMachineStackTypes(0);
+    const auto fmSlot = findSlot(fmProcessor, CommandType::FmSynth);
+    require(fmSlot < fmTypes.size(), "FM is available in the machine stack cycle");
+    for (std::size_t slot = 0; slot < fmTypes.size(); ++slot)
+    {
+        const bool shouldEnable = slot == fmSlot;
+        if (fmProcessor.isMachineEnabledInStack(0, slot) != shouldEnable)
+            fmProcessor.toggleMachineEnabledInStack(0, slot);
+    }
+    fmProcessor.sendTimedMessageToMachine(CommandType::FmSynth, 0, 57, 120, 8.0, false);
+    juce::AudioBuffer<float> fmAudio(2, 64);
+    double fmEnergy = 0.0;
+    for (int block = 0; block < 128; ++block)
+    {
+        fmAudio.clear();
+        fmProcessor.processBlock(fmAudio, midi);
+        fmEnergy += energy(fmAudio);
+    }
+    require(fmEnergy > 0.01, "processor stack renders sample-accurate FM audio");
+    require(dynamic_cast<FmSynthMachine*>(fmProcessor.getMachine(CommandType::FmSynth, 0)) != nullptr,
+            "processor exposes the persistent FM machine");
+    fmProcessor.releaseResources();
     return 0;
 }

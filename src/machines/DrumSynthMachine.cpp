@@ -16,7 +16,14 @@ constexpr int kStateVersion = 4;
 constexpr std::array<float, 6> kLegacyMetalFrequencies {{ 245.0f, 306.0f, 365.0f, 415.0f, 437.0f, 619.0f }};
 constexpr std::array<float, 6> k808MetalFrequencies {{ 205.3f, 304.4f, 369.6f, 522.7f, 540.0f, 800.0f }};
 constexpr std::array<float, 6> k909MetalFrequencies {{ 191.0f, 287.0f, 421.0f, 541.0f, 683.0f, 917.0f }};
+// The hardware metal oscillators are independent and do not restart in phase.
+// A deterministic decorrelated constellation gives the synthesized bank the
+// same property after transport has cleared its voice state.  Keeping three
+// oscillators in each polarity at the first sample also avoids a level step.
+constexpr std::array<double, 6> kHatMetalPhaseOffsets {{ 0.071, 0.193, 0.337, 0.579, 0.713, 0.887 }};
 constexpr float kMinimumEnvelope = 0.00001f;
+constexpr float kHatRetriggerRampMs = 0.5f;
+constexpr float kHatChokeCrossfadeMs = 2.0f;
 
 const char* const kTriggerModeNames[] = { "GATE", "1SHOT" };
 const char* const kEnabledNames[] = { "OFF", "ON" };
@@ -135,6 +142,9 @@ float DrumSynthMachine::Biquad::process(float input) noexcept
     const float output = b0 * input + z1;
     if (!std::isfinite(output) || std::abs(output) > safetyLimit)
     {
+#if defined(MYK_TRACKER_DRUM_DIAGNOSTICS)
+        ++safetyResetCount;
+#endif
         reset();
         return 0.0f;
     }
@@ -143,6 +153,9 @@ float DrumSynthMachine::Biquad::process(float input) noexcept
     if (!std::isfinite(z1) || !std::isfinite(z2)
         || std::abs(z1) > safetyLimit || std::abs(z2) > safetyLimit)
     {
+#if defined(MYK_TRACKER_DRUM_DIAGNOSTICS)
+        ++safetyResetCount;
+#endif
         reset();
         return 0.0f;
     }
@@ -322,6 +335,21 @@ std::array<std::uint64_t, 7> DrumSynthMachine::getTriggerCounts() const noexcept
     return result;
 }
 
+#if defined(MYK_TRACKER_DRUM_DIAGNOSTICS)
+std::uint64_t DrumSynthMachine::getFilterSafetyResetCount() const noexcept
+{
+    std::uint64_t result = 0;
+    const auto addVoice = [&result](const Voice& voice)
+    {
+        for (const auto& filter : voice.filters)
+            result += filter.safetyResetCount;
+    };
+    for (const auto& voice : voices) addVoice(voice);
+    addVoice(hatChokeTail);
+    return result;
+}
+#endif
+
 void DrumSynthMachine::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused(samplesPerBlock);
@@ -477,7 +505,8 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
         case Drum::none: return;
     }
 
-    if (drum == Drum::closedHat && voice->active && voice->openHat)
+    const bool hatChoke = drum == Drum::closedHat && voice->active && voice->openHat;
+    if (hatChoke)
     {
         hatChokeTail = *voice;
         beginRelease(hatChokeTail, 2);
@@ -489,7 +518,14 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
         const int metalModel = (drum == Drum::closedHat || drum == Drum::openHat) ? hatModel.load(std::memory_order_relaxed)
             : drum == Drum::crash ? crashModel.load(std::memory_order_relaxed)
             : drum == Drum::ride ? rideModel.load(std::memory_order_relaxed) : 0;
-        configureMetalPhases(*voice, metalFrequenciesForModel(metalModel));
+        if (drum == Drum::closedHat || drum == Drum::openHat)
+        {
+            for (std::size_t index = 0; index < kHatMetalPhaseOffsets.size(); ++index)
+                voice->phases[index] = kHatMetalPhaseOffsets[index];
+            voice->metalBankMemory = 0.0f;
+        }
+        else
+            configureMetalPhases(*voice, metalFrequenciesForModel(metalModel));
     }
     if (!wasActive)
         for (auto& filter : voice->filters)
@@ -503,10 +539,37 @@ void DrumSynthMachine::trigger(Drum drum, const MachineScheduledNote& event) noe
         : drum == Drum::tom ? tom.oneShot.load(std::memory_order_relaxed) != 0
         : clap.oneShot.load(std::memory_order_relaxed) != 0;
     configureGate(*voice, event, oneShot);
-    voice->envelope = wasActive ? voice->envelope + (1.0f - voice->envelope) * 0.85f : 1.0f;
-    voice->envelope2 = wasActive ? voice->envelope2 + (1.0f - voice->envelope2) * 0.85f : 1.0f;
-    voice->envelope3 = wasActive ? voice->envelope3 + (1.0f - voice->envelope3) * 0.85f : 1.0f;
-    voice->bodyEnvelope2 = wasActive ? voice->bodyEnvelope2 + (1.0f - voice->bodyEnvelope2) * 0.85f : 1.0f;
+    const bool isHat = drum == Drum::closedHat || drum == Drum::openHat;
+    voice->retriggerRampSamples = 0;
+    voice->retriggerEnvelopeIncrement = 0.0f;
+    voice->chokeFadeSamples = 0;
+    voice->chokeFadeGain = 1.0f;
+    voice->chokeFadeIncrement = 0.0f;
+    if (isHat && wasActive)
+    {
+        // A hard 85% envelope boost created a discontinuity whenever a live
+        // hat was retriggered.  Preserve its phase/filter history and ramp
+        // only the envelope recovery over a sub-millisecond interval.
+        voice->retriggerRampSamples = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate * kHatRetriggerRampMs * 0.001)));
+        voice->retriggerEnvelopeIncrement = (1.0f - voice->envelope)
+            / static_cast<float>(voice->retriggerRampSamples);
+        if (hatChoke)
+        {
+            // The copied open-hat tail supplies continuity while the newly
+            // configured closed hat enters.  A two-millisecond fade prevents
+            // their first samples from being summed at full gain.
+            voice->chokeFadeSamples = juce::jmax(1, static_cast<int>(std::lround(currentSampleRate * kHatChokeCrossfadeMs * 0.001)));
+            voice->chokeFadeGain = 0.0f;
+            voice->chokeFadeIncrement = 1.0f / static_cast<float>(voice->chokeFadeSamples);
+        }
+    }
+    else
+    {
+        voice->envelope = wasActive ? voice->envelope + (1.0f - voice->envelope) * 0.85f : 1.0f;
+        voice->envelope2 = wasActive ? voice->envelope2 + (1.0f - voice->envelope2) * 0.85f : 1.0f;
+        voice->envelope3 = wasActive ? voice->envelope3 + (1.0f - voice->envelope3) * 0.85f : 1.0f;
+        voice->bodyEnvelope2 = wasActive ? voice->bodyEnvelope2 + (1.0f - voice->bodyEnvelope2) * 0.85f : 1.0f;
+    }
 
     switch (drum)
     {
@@ -855,7 +918,27 @@ float DrumSynthMachine::renderMetalBank(Voice& voice, const std::array<float, 6>
 
 float DrumSynthMachine::renderHat(Voice& voice) noexcept
 {
-    float metal = renderMetalBank(voice, metalFrequenciesForModel(voice.profile));
+    const float chokeFadeGain = voice.chokeFadeGain;
+    if (voice.retriggerRampSamples > 0)
+    {
+        voice.envelope = std::min(1.0f, voice.envelope + voice.retriggerEnvelopeIncrement);
+        --voice.retriggerRampSamples;
+    }
+    if (voice.chokeFadeSamples > 0)
+    {
+        voice.chokeFadeGain = std::min(1.0f, voice.chokeFadeGain + voice.chokeFadeIncrement);
+        --voice.chokeFadeSamples;
+    }
+    const float rawMetal = renderMetalBank(voice, metalFrequenciesForModel(voice.profile));
+    // An individual oscillator edge moves the six-way average by roughly a
+    // third.  Only larger moves imply several square waves crossing together,
+    // which is the impulse-like condition heard after transport restarts.
+    // Slew just those coincidences over adjacent samples; this is cheaper and
+    // less tonally invasive than adding another filter to every active hat.
+    constexpr float maximumMetalStep = 0.35f;
+    voice.metalBankMemory += juce::jlimit(-maximumMetalStep, maximumMetalStep,
+                                         rawMetal - voice.metalBankMemory);
+    float metal = voice.metalBankMemory;
     if (voice.profile == 2)
         metal += nextNoise(voice) * (0.025f + 0.075f * voice.component1) * (1.0f - voice.tone);
     metal = voice.filters[1].process(voice.filters[0].process(metal));
@@ -863,7 +946,7 @@ float DrumSynthMachine::renderHat(Voice& voice) noexcept
     voice.envelope *= voice.decayMultiplier;
     if (voice.tone > 0.0001f)
         metal = softSaturate(metal);
-    return metal * voice.envelope * voice.velocityGain * voice.gateGain;
+    return metal * voice.envelope * voice.velocityGain * voice.gateGain * chokeFadeGain;
 }
 
 float DrumSynthMachine::renderCrash(Voice& voice) noexcept

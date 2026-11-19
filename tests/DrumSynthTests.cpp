@@ -151,6 +151,74 @@ juce::AudioBuffer<float> renderTogether(std::initializer_list<int> notes, int sa
     return buffer;
 }
 
+juce::AudioBuffer<float> renderPattern(DrumSynthMachine& synth,
+                                       const std::vector<MachineScheduledNote>& absoluteEvents,
+                                       int totalSamples, int blockSize)
+{
+    juce::AudioBuffer<float> output(1, totalSamples);
+    output.clear();
+    juce::MidiBuffer midi;
+    for (int blockStart = 0; blockStart < totalSamples; blockStart += blockSize)
+    {
+        const int sampleCount = std::min(blockSize, totalSamples - blockStart);
+        std::vector<MachineScheduledNote> blockEvents;
+        for (const auto& event : absoluteEvents)
+            if (event.sampleOffset >= blockStart && event.sampleOffset < blockStart + sampleCount)
+            {
+                auto localEvent = event;
+                localEvent.sampleOffset -= blockStart;
+                blockEvents.push_back(localEvent);
+            }
+        synth.scheduleBlockNotes(blockEvents);
+        juce::AudioBuffer<float> block(1, sampleCount);
+        block.clear();
+        synth.processBlock(block, midi);
+        output.copyFrom(0, blockStart, block, 0, 0, sampleCount);
+    }
+    return output;
+}
+
+double eventDelta(const juce::AudioBuffer<float>& buffer, int sample)
+{
+    return sample > 0 && sample < buffer.getNumSamples()
+        ? std::abs(static_cast<double>(buffer.getSample(0, sample) - buffer.getSample(0, sample - 1)))
+        : 0.0;
+}
+
+double percentileDeltaExcludingEvents(const juce::AudioBuffer<float>& buffer,
+                                      const std::vector<int>& events, double percentile)
+{
+    std::vector<double> deltas;
+    for (int sample = 1; sample < buffer.getNumSamples(); ++sample)
+    {
+        bool nearEvent = false;
+        for (const int event : events)
+            if (std::abs(sample - event) <= 2) { nearEvent = true; break; }
+        if (!nearEvent)
+            deltas.push_back(std::abs(static_cast<double>(buffer.getSample(0, sample)
+                                                       - buffer.getSample(0, sample - 1))));
+    }
+    std::sort(deltas.begin(), deltas.end());
+    return deltas.empty() ? 0.0 : deltas[static_cast<std::size_t>(std::min<int>(
+        static_cast<int>(deltas.size()) - 1, static_cast<int>(std::floor(percentile * (deltas.size() - 1)))) )];
+}
+
+double maximumDeltaExcludingEvents(const juce::AudioBuffer<float>& buffer,
+                                   const std::vector<int>& events, int exclusionRadius)
+{
+    double result = 0.0;
+    for (int sample = 1; sample < buffer.getNumSamples(); ++sample)
+    {
+        bool nearEvent = false;
+        for (const int event : events)
+            if (std::abs(sample - event) <= exclusionRadius) { nearEvent = true; break; }
+        if (!nearEvent)
+            result = std::max(result, std::abs(static_cast<double>(buffer.getSample(0, sample)
+                                                                - buffer.getSample(0, sample - 1))));
+    }
+    return result;
+}
+
 }
 
 int main()
@@ -335,6 +403,75 @@ int main()
     retriggered.processBlock(retriggeredAudio, midi);
     require(energy(retriggeredAudio, 20, 50) > 0.0 && energy(retriggeredAudio, 100, 256) < 0.0001,
             "latest retrigger replaces the earlier gate deadline");
+
+    // A long-lived hat used to jump 85% towards a new envelope on every
+    // trigger.  Exercise the real multi-block path: event continuity must be
+    // no worse than ordinary high-frequency metal-bank movement.
+    DrumSynthMachine repeatedHats;
+    repeatedHats.prepareToPlay(48000.0, 64);
+    repeatedHats.applyKitPreset(DrumSynthMachine::KitPreset::tr808);
+    std::vector<MachineScheduledNote> repeatedHatEvents;
+    std::vector<int> repeatedHatOffsets;
+    for (int hit = 0; hit < 32; ++hit)
+    {
+        const int offset = hit * 6000;
+        repeatedHatOffsets.push_back(offset);
+        repeatedHatEvents.push_back({ offset, 74, static_cast<unsigned short>(hit % 2 == 0 ? 110 : 127), 8.0, false });
+    }
+    const auto repeatedHatAudio = renderPattern(repeatedHats, repeatedHatEvents, 32 * 6000 + 4096, 64);
+    const double hatBackgroundDelta = percentileDeltaExcludingEvents(repeatedHatAudio, repeatedHatOffsets, 0.999);
+    for (const int offset : repeatedHatOffsets)
+        require(eventDelta(repeatedHatAudio, offset) <= hatBackgroundDelta * 2.0 + 0.001,
+                "active hi-hat retriggers do not create a waveform step");
+    const double repeatedHatMaximumDelta = maximumDeltaExcludingEvents(repeatedHatAudio, repeatedHatOffsets, 144);
+    if (repeatedHatMaximumDelta >= 0.08)
+        std::cerr << "Repeated hi-hat maximum between-trigger delta: " << repeatedHatMaximumDelta << '\n';
+    require(repeatedHatMaximumDelta < 0.08,
+            "independent hi-hat metal oscillators do not form large between-trigger impulses");
+
+    // Stopping playback clears every voice.  The next run must restore the
+    // independent metal-oscillator relationship instead of restarting a
+    // coherent square-wave bank that clicks while its phases drift apart.
+    repeatedHats.allNotesOff();
+    const auto restartedHatAudio = renderPattern(repeatedHats, repeatedHatEvents, 32 * 6000 + 4096, 64);
+    const double restartedHatMaximumDelta = maximumDeltaExcludingEvents(restartedHatAudio, repeatedHatOffsets, 144);
+    if (restartedHatMaximumDelta >= 0.08)
+        std::cerr << "Restarted hi-hat maximum between-trigger delta: " << restartedHatMaximumDelta << '\n';
+    require(restartedHatMaximumDelta < 0.08, "hi-hats remain impulse-free after an all-notes-off transport restart");
+    repeatedHats.applyKitPreset(DrumSynthMachine::KitPreset::tr909);
+    repeatedHats.allNotesOff();
+    const auto restarted909HatAudio = renderPattern(repeatedHats, repeatedHatEvents, 32 * 6000 + 4096, 64);
+    require(maximumDeltaExcludingEvents(restarted909HatAudio, repeatedHatOffsets, 144) < 0.08,
+            "909 hi-hats remain impulse-free after an all-notes-off transport restart");
+#if defined(MYK_TRACKER_DRUM_DIAGNOSTICS)
+    require(repeatedHats.getFilterSafetyResetCount() == 0,
+            "repeated hi-hats do not require filter safety recovery");
+#endif
+
+    // The closed hat must crossfade an active open-hat tail rather than sum
+    // both voices at full level during its first sample.
+    DrumSynthMachine chokedHats;
+    chokedHats.prepareToPlay(48000.0, 64);
+    chokedHats.applyKitPreset(DrumSynthMachine::KitPreset::tr909);
+    std::vector<MachineScheduledNote> chokeEvents;
+    std::vector<int> chokeOffsets;
+    for (int hit = 0; hit < 16; ++hit)
+    {
+        const int openOffset = hit * 12000;
+        const int closedOffset = openOffset + 6000;
+        chokeEvents.push_back({ openOffset, 86, 120, 8.0, false });
+        chokeEvents.push_back({ closedOffset, 74, 120, 8.0, false });
+        chokeOffsets.push_back(closedOffset);
+    }
+    const auto chokedHatAudio = renderPattern(chokedHats, chokeEvents, 16 * 12000 + 4096, 64);
+    const double chokeBackgroundDelta = percentileDeltaExcludingEvents(chokedHatAudio, chokeOffsets, 0.999);
+    for (const int offset : chokeOffsets)
+        require(eventDelta(chokedHatAudio, offset) <= chokeBackgroundDelta * 2.0 + 0.001,
+                "open-to-closed hat choking does not double its first sample");
+#if defined(MYK_TRACKER_DRUM_DIAGNOSTICS)
+    require(chokedHats.getFilterSafetyResetCount() == 0,
+            "choked hi-hats do not require filter safety recovery");
+#endif
 
     DrumSynthMachine stateSource;
     insertControl(stateSource, 2, "PSET", 2.0);

@@ -1759,7 +1759,7 @@ void SequencerEditor::moveCursorLeftOnSongPage()
 
 void SequencerEditor::moveCursorRightOnSongPage()
 {
-  const std::size_t maxCol = currentSongRow == 0 ? 1u : 4u;
+  const std::size_t maxCol = currentSongRow == 0 ? 1u : 5u;
   if (currentSongCol < maxCol)
     ++currentSongCol;
 }
@@ -1770,7 +1770,7 @@ void SequencerEditor::moveCursorUpOnSongPage()
     return;
 
   --currentSongRow;
-  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 4u);
+  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 5u);
   if (songHost != nullptr)
     songHost->setSelectedSongRow(currentSongRow == 0 ? 0u : currentSongRow - 1);
 }
@@ -1782,7 +1782,7 @@ void SequencerEditor::moveCursorDownOnSongPage()
     return;
 
   ++currentSongRow;
-  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 4u);
+  currentSongCol = std::min<std::size_t>(currentSongCol, currentSongRow == 0 ? 1u : 5u);
   if (songHost != nullptr && currentSongRow > 0)
     songHost->setSelectedSongRow(currentSongRow - 1);
 }
@@ -2056,6 +2056,14 @@ void SequencerEditor::clickOnSongPage()
     return;
   }
   if (currentSongCol == 4)
+  {
+    const std::size_t insertedRow = songHost->insertSongRowByCloningRow(songRowIndex);
+    currentSongRow = insertedRow + 1;
+    currentSongCol = 0;
+    songHost->setSelectedSongRow(insertedRow);
+    return;
+  }
+  if (currentSongCol == 5)
   {
     songHost->removeSongRow(songRowIndex);
     currentSongRow = std::min<std::size_t>(currentSongRow, songHost->getSongRowCount());

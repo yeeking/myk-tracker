@@ -80,6 +80,7 @@ src/Sequencer.cpp src/SequencerEditor.cpp src/SequencerEditorMachine.cpp src/Seq
     src/SuperSamplerProcessor.cpp
     src/machines/WavetableSynthMachine.cpp
     src/machines/DrumSynthMachine.cpp
+    src/machines/FmSynthMachine.cpp
     src/machines/WaveshaperDistortionMachine.cpp
     src/machines/DelayFxMachine.cpp
     src/machines/ChannelStripMachine.cpp
@@ -219,12 +220,26 @@ if (BUILD_TESTING)
         src/machines/DrumSynthMachine.cpp)
     target_include_directories(drum-synth-tests PRIVATE src src/machines)
     target_compile_features(drum-synth-tests PRIVATE cxx_std_17)
-    target_compile_definitions(drum-synth-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_compile_definitions(drum-synth-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 MYK_TRACKER_DRUM_DIAGNOSTICS=1)
     target_link_libraries(drum-synth-tests PRIVATE
         juce::juce_audio_utils
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
     add_test(NAME drum-synth-tests COMMAND drum-synth-tests)
+
+    juce_add_console_app(fm-synth-tests PRODUCT_NAME "FM Synth Tests")
+    juce_generate_juce_header(fm-synth-tests)
+    target_sources(fm-synth-tests PRIVATE
+        tests/FmSynthTests.cpp
+        src/machines/FmSynthMachine.cpp)
+    target_include_directories(fm-synth-tests PRIVATE src src/machines)
+    target_compile_features(fm-synth-tests PRIVATE cxx_std_17)
+    target_compile_definitions(fm-synth-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(fm-synth-tests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME fm-synth-tests COMMAND fm-synth-tests)
 
     juce_add_console_app(drum-synth-render PRODUCT_NAME "Drum Synth Render")
     juce_generate_juce_header(drum-synth-render)
@@ -233,7 +248,7 @@ if (BUILD_TESTING)
         src/machines/DrumSynthMachine.cpp)
     target_include_directories(drum-synth-render PRIVATE src src/machines)
     target_compile_features(drum-synth-render PRIVATE cxx_std_17)
-    target_compile_definitions(drum-synth-render PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_compile_definitions(drum-synth-render PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 MYK_TRACKER_DRUM_DIAGNOSTICS=1)
     target_link_libraries(drum-synth-render PRIVATE
         juce::juce_audio_utils
         juce::juce_recommended_config_flags

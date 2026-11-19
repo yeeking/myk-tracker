@@ -25,6 +25,8 @@ enum class ModulationDestination : std::size_t
     stackPan,
     /** Free-running delay time, as a percentage offset from its base milliseconds. */
     delayTime,
+    /** Four-operator FM synth: ratio-operator pitch, modulation index, feedback and waveform colour. */
+    fmPitch, fmIndex, fmFeedback, fmColor,
     count
 };
 

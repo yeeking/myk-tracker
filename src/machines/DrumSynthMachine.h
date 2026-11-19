@@ -36,6 +36,10 @@ public:
     Drum drumForNote(int midiNote) const noexcept;
     const char* describeNote(int midiNote) const noexcept;
     std::array<std::uint64_t, 7> getTriggerCounts() const noexcept;
+#if defined(MYK_TRACKER_DRUM_DIAGNOSTICS)
+    /** Test/debug-only: recursive filter recoveries observed on the audio thread. */
+    std::uint64_t getFilterSafetyResetCount() const noexcept;
+#endif
 
 public:
     static constexpr int kTableSize = 2048;
@@ -57,6 +61,9 @@ public:
     {
         float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
         float z1 = 0.0f, z2 = 0.0f;
+#if defined(MYK_TRACKER_DRUM_DIAGNOSTICS)
+        std::uint64_t safetyResetCount = 0;
+#endif
         float process(float input) noexcept;
         void reset() noexcept { z1 = z2 = 0.0f; }
         void setBandPass(float hz, float q, double sampleRate, const Tables& tables) noexcept;
@@ -76,6 +83,11 @@ private:
         int age = 0;
         int gateSamples = 0;
         int attackSamples = 0;
+        // Only used by an active hi-hat retrigger/choke.  Keeping the old
+        // oscillator/filter state while ramping these gains avoids a step in
+        // the rendered waveform without changing an isolated hit.
+        int retriggerRampSamples = 0;
+        int chokeFadeSamples = 0;
         float envelope = 0.0f;
         float envelope2 = 0.0f;
         float envelope3 = 0.0f;
@@ -100,7 +112,11 @@ private:
         float fmIndex = 2.5f;
         float ring = 0.0f;
         float noiseMemory = 0.0f;
+        float metalBankMemory = 0.0f;
         float releaseMultiplier = 0.0f;
+        float retriggerEnvelopeIncrement = 0.0f;
+        float chokeFadeGain = 1.0f;
+        float chokeFadeIncrement = 0.0f;
         int waveform = 0;
         int noiseType = 0;
         int profile = 0;

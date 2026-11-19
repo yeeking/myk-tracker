@@ -25,7 +25,8 @@ void usage()
 {
     std::cerr << "Usage: drum-synth-render --output <wav> [--preset 808|909]"
                  " [--voice kick|snare|hat|openhat|crash|ride|tom|clap] [--velocity 1..127]"
-                 " [--rate Hz] [--seconds duration]"
+                 " [--rate Hz] [--seconds duration] [--block-size samples]"
+                 " [--repeat-ms interval] [--count hits]"
                  " [--set voice.CONTROL=value]...\n";
 }
 
@@ -83,6 +84,9 @@ int main(int argc, char* argv[])
     int velocity = 120;
     double sampleRate = 44100.0;
     double seconds = 8.0;
+    int blockSize = 512;
+    double repeatMilliseconds = 0.0;
+    int repeatCount = 1;
     std::vector<juce::String> overrides;
     for (int index = 1; index < argc; ++index)
     {
@@ -93,20 +97,27 @@ int main(int argc, char* argv[])
         else if (argument == "--velocity" && index + 1 < argc) velocity = std::atoi(argv[++index]);
         else if (argument == "--rate" && index + 1 < argc) sampleRate = std::atof(argv[++index]);
         else if (argument == "--seconds" && index + 1 < argc) seconds = std::atof(argv[++index]);
+        else if (argument == "--block-size" && index + 1 < argc) blockSize = std::atoi(argv[++index]);
+        else if (argument == "--repeat-ms" && index + 1 < argc) repeatMilliseconds = std::atof(argv[++index]);
+        else if (argument == "--count" && index + 1 < argc) repeatCount = std::atoi(argv[++index]);
         else if (argument == "--set" && index + 1 < argc) overrides.emplace_back(argv[++index]);
         else { usage(); return 2; }
     }
 
     const int note = noteForVoice(voice);
     if (outputPath.isEmpty() || note < 0 || (preset != 808 && preset != 909)
-        || velocity < 1 || velocity > 127 || sampleRate < 8000.0 || seconds <= 0.0)
+        || velocity < 1 || velocity > 127 || sampleRate < 8000.0 || seconds <= 0.0
+        || blockSize <= 0 || repeatMilliseconds < 0.0 || repeatCount < 1
+        || (repeatCount > 1 && repeatMilliseconds <= 0.0))
     {
         usage();
         return 2;
     }
 
-    constexpr int blockSize = 512;
-    const int samples = static_cast<int>(std::ceil(sampleRate * seconds));
+    const int repeatSamples = static_cast<int>(std::lround(sampleRate * repeatMilliseconds * 0.001));
+    const int requestedSamples = static_cast<int>(std::ceil(sampleRate * seconds));
+    const int requiredSamples = repeatCount > 1 ? repeatSamples * (repeatCount - 1) + static_cast<int>(sampleRate) : 0;
+    const int samples = std::max(requestedSamples, requiredSamples);
     DrumSynthMachine synth;
     synth.prepareToPlay(sampleRate, blockSize);
     synth.applyKitPreset(preset == 909 ? DrumSynthMachine::KitPreset::tr909 : DrumSynthMachine::KitPreset::tr808);
@@ -126,10 +137,14 @@ int main(int argc, char* argv[])
         const int count = std::min(blockSize, samples - offset);
         juce::AudioBuffer<float> block(1, count);
         block.clear();
-        if (offset == 0)
-            blockNotes = { { 0, static_cast<unsigned short>(note), static_cast<unsigned short>(velocity), 8.0, false } };
-        else
-            blockNotes.clear();
+        blockNotes.clear();
+        for (int hit = 0; hit < repeatCount; ++hit)
+        {
+            const int hitOffset = hit * repeatSamples;
+            if (hitOffset >= offset && hitOffset < offset + count)
+                blockNotes.push_back({ hitOffset - offset, static_cast<unsigned short>(note),
+                                       static_cast<unsigned short>(velocity), 8.0, false });
+        }
         synth.scheduleBlockNotes(blockNotes);
         synth.processBlock(block, midi);
         output.copyFrom(0, offset, block, 0, 0, count);

@@ -28,6 +28,7 @@
 #include "SuperSamplerProcessor.h"
 #include "machines/WavetableSynthMachine.h"
 #include "machines/DrumSynthMachine.h"
+#include "machines/FmSynthMachine.h"
 #include "machines/WaveshaperDistortionMachine.h"
 #include "machines/DelayFxMachine.h"
 #include "machines/ChannelStripMachine.h"
@@ -191,6 +192,7 @@ public:
     SongPlayMode getSongPlayMode() const override;
     void setSongPlayMode(SongPlayMode mode) override;
     std::size_t addSongRowByCloningViewedSet() override;
+    std::size_t insertSongRowByCloningRow(std::size_t row) override;
     void removeSongRow(std::size_t row) override;
     void adjustSongRowSequenceSetId(std::size_t row, int direction) override;
     void adjustSongRowBeatCount(std::size_t row, int direction) override;
@@ -386,6 +388,7 @@ private:
         std::unique_ptr<SuperSamplerProcessor> sampler;
         std::unique_ptr<WavetableSynthMachine> wavetableSynth;
         std::unique_ptr<DrumSynthMachine> drumSynth;
+        std::unique_ptr<FmSynthMachine> fmSynth;
         std::unique_ptr<WaveshaperDistortionMachine> distortionFx;
         std::unique_ptr<DelayFxMachine> delayFx;
         std::unique_ptr<ChannelStripMachine> channelStripFx;
@@ -400,6 +403,8 @@ private:
         std::vector<MachineScheduledNote> wavetableBlockNotes;
         /** Drum events distributed into the current block, sorted by sample offset. */
         std::vector<MachineScheduledNote> drumBlockNotes;
+        /** FM synth events distributed into the current block, sorted by sample offset. */
+        std::vector<MachineScheduledNote> fmBlockNotes;
         /** Filter-sweep notes distributed into the current block, sorted by sample offset. */
         std::vector<MachineScheduledNote> filterBlockNotes;
         std::vector<MachineScheduledNote> modulationBlockNotes;
@@ -407,6 +412,7 @@ private:
         bool samplerProcessingActive = false;
         bool wavetableProcessingActive = false;
         bool drumProcessingActive = false;
+        bool fmProcessingActive = false;
         bool filterProcessingActive = false;
         bool muted = false;
         bool solo = false;
@@ -434,6 +440,7 @@ private:
             f(*sampler);
             f(*wavetableSynth);
             f(*drumSynth);
+            f(*fmSynth);
             f(*distortionFx);
             f(*delayFx);
             f(*channelStripFx);
@@ -459,6 +466,7 @@ private:
     std::vector<ScheduledSamplerEvent> scratchFutureSamplerEvents;
     NoteEventQueue wavetableEvents;
     NoteEventQueue drumEvents;
+    NoteEventQueue fmEvents;
     NoteEventQueue filterEvents;
     NoteEventQueue modulationEvents;
     static constexpr std::size_t kMaxModulationClockTicks = 256;
@@ -563,7 +571,7 @@ private:
     static MachineStack::SlotState makeDefaultSlotState(CommandType type);
     /** (property key, machine) pairs for state save/restore. The persisted names
         are part of the plugin state format; do not rename. */
-    static std::array<std::pair<const char*, MachineInterface*>, 8> stackMachineStateEntries(MachineStack& stack);
+    static std::array<std::pair<const char*, MachineInterface*>, 9> stackMachineStateEntries(MachineStack& stack);
     static bool isAuxSendType(CommandType type);
     static bool slotSupportsReturnLevel(CommandType type);
     static bool slotAllowsDuplicate(CommandType type);

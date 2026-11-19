@@ -100,6 +100,7 @@ public:
   virtual SongPlayMode getSongPlayMode() const = 0;
   virtual void setSongPlayMode(SongPlayMode mode) = 0;
   virtual std::size_t addSongRowByCloningViewedSet() = 0;
+  virtual std::size_t insertSongRowByCloningRow(std::size_t row) = 0;
   virtual void removeSongRow(std::size_t row) = 0;
   virtual void adjustSongRowSequenceSetId(std::size_t row, int direction) = 0;
   virtual void adjustSongRowBeatCount(std::size_t row, int direction) = 0;

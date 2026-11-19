@@ -57,6 +57,7 @@ std::string describeStackCursorAction(const std::string& cellText)
 bool isSimpleMachineDetail(CommandType type)
 {
     return type == CommandType::DrumSynth
+        || type == CommandType::FmSynth
         || type == CommandType::DistortionFx
         || type == CommandType::DelayFx
         || type == CommandType::FilterFx
@@ -1723,7 +1724,7 @@ void TrackerMainUI::prepareSongView()
         playMode = audioProcessor.getSongPlayMode();
     });
 
-    std::vector<std::vector<UIBox>> boxes(5, std::vector<UIBox>(rowCount));
+    std::vector<std::vector<UIBox>> boxes(6, std::vector<UIBox>(rowCount));
 
     boxes[0][0].kind = UIBox::Kind::TrackerCell;
     boxes[0][0].text = "PLAY SONG";
@@ -1737,6 +1738,8 @@ void TrackerMainUI::prepareSongView()
     boxes[3][0].isDisabled = true;
     boxes[4][0].kind = UIBox::Kind::None;
     boxes[4][0].isDisabled = true;
+    boxes[5][0].kind = UIBox::Kind::None;
+    boxes[5][0].isDisabled = true;
 
     audioProcessor.withAudioThreadExclusive([&]()
     {
@@ -1752,7 +1755,9 @@ void TrackerMainUI::prepareSongView()
             boxes[3][displayRow].kind = UIBox::Kind::TrackerCell;
             boxes[3][displayRow].text = "EDIT";
             boxes[4][displayRow].kind = UIBox::Kind::TrackerCell;
-            boxes[4][displayRow].text = "DEL";
+            boxes[4][displayRow].text = "INS";
+            boxes[5][displayRow].kind = UIBox::Kind::TrackerCell;
+            boxes[5][displayRow].text = "DEL";
 
             if (playMode == SongPlayMode::song && row == playbackSongRow)
             {
@@ -1761,15 +1766,16 @@ void TrackerMainUI::prepareSongView()
                 boxes[2][displayRow].isHighlighted = true;
                 boxes[3][displayRow].isHighlighted = true;
                 boxes[4][displayRow].isHighlighted = true;
+                boxes[5][displayRow].isHighlighted = true;
             }
         }
     });
 
     currentSongRow = std::min(currentSongRow, rowCount - 1);
-    currentSongCol = std::min(currentSongCol, static_cast<std::size_t>(currentSongRow == 0 ? 1 : 4));
+    currentSongCol = std::min(currentSongCol, static_cast<std::size_t>(currentSongRow == 0 ? 1 : 5));
     boxes[currentSongCol][currentSongRow].isSelected = true;
 
-    updateCellStates(boxes, rowCount, 5);
+    updateCellStates(boxes, rowCount, 6);
     overlayState.text = "Song";
     overlayState.color = palette.textPrimary;
     overlayState.glowColor = palette.gridPlayhead;

@@ -119,7 +119,9 @@ float ModulationMatrixMachine::sourceValue(ModulationSource source, ModulationDe
     if (lastNote < 0) return 0.0f;
     const float semitones = static_cast<float>(lastNote - 69);
     if (destination == ModulationDestination::waveFrequency || destination == ModulationDestination::waveSubFrequency) return juce::jlimit(-1.0f, 1.0f, semitones / 24.0f);
-    if (destination == ModulationDestination::filterCutoff || isLfoFrequencyDestination(destination)) return juce::jlimit(-1.0f, 1.0f, semitones / 48.0f);
+    if (destination == ModulationDestination::filterCutoff || isLfoFrequencyDestination(destination)
+        || destination == ModulationDestination::fmPitch)
+        return juce::jlimit(-1.0f, 1.0f, semitones / 48.0f);
     return juce::jlimit(-1.0f, 1.0f, semitones / 69.0f);
 }
 float ModulationMatrixMachine::routeSum(ModulationDestination destination, const std::array<float, 4>& lfos, const std::array<float, 3>& clocks, bool notePulse, bool includePulseSources) const noexcept
@@ -236,7 +238,7 @@ float ModulationMatrixMachine::sampleWaveformForUi(int waveform, float phase) co
     return sampleWave(static_cast<Waveform>(juce::jlimit(0, 3, waveform)), phase, 0.0f);
 }
 const char* ModulationMatrixMachine::destinationLabel(ModulationDestination destination)
-{ static constexpr const char* labels[] = { "W F1", "W SUB", "W POS", "S POS", "F CUT", "F RES", "F ATK", "L1 F", "L2 F", "L3 F", "L4 F", "S POS", "PAN", "D TIME" }; return labels[static_cast<std::size_t>(destination)]; }
+{ static constexpr const char* labels[] = { "W F1", "W SUB", "W POS", "S POS", "F CUT", "F RES", "F ATK", "L1 F", "L2 F", "L3 F", "L4 F", "S POS", "PAN", "D TIME", "FM PIT", "FM IDX", "FM FB", "FM COL" }; return labels[static_cast<std::size_t>(destination)]; }
 std::vector<ModulationDestination> ModulationMatrixMachine::visibleDestinations() const
 {
     const auto mask = installedDestinationMask.load(std::memory_order_acquire); std::vector<ModulationDestination> result;
@@ -248,6 +250,7 @@ std::vector<ModulationDestination> ModulationMatrixMachine::visibleDestinations(
         add(ModulationDestination::samplerPosition);
     if (mask & 8u)
         add(ModulationDestination::delayTime);
+    if (mask & 16u) { add(ModulationDestination::fmPitch); add(ModulationDestination::fmIndex); add(ModulationDestination::fmFeedback); add(ModulationDestination::fmColor); }
     add(ModulationDestination::stackPan);
     return result;
 }
@@ -345,7 +348,7 @@ bool ModulationMatrixMachine::clearCell(int row, int col)
 
 void ModulationMatrixMachine::getStateInformation(juce::MemoryBlock& out)
 {
-    auto* root = new juce::DynamicObject(); root->setProperty("version", 4);
+    auto* root = new juce::DynamicObject(); root->setProperty("version", 5);
     const auto setArray = [root](const char* name, const auto& values) { juce::Array<juce::var> array; for (const auto& value : values) array.add(value.load()); root->setProperty(name, array); };
     setArray("wave", waveforms); setArray("coarse", coarse); setArray("fine", fine); setArray("div", dividers);
     juce::Array<juce::var> routes; for (const auto& row : depths) for (const auto& value : row) routes.add(value.load()); root->setProperty("routes", routes);
@@ -364,11 +367,18 @@ void ModulationMatrixMachine::setStateInformation(const void* data, int size)
     const auto load = [&parsed](const char* name, auto& values, int low, int high) { if (const auto* array = parsed.getProperty(name, {}).getArray()) for (std::size_t i = 0; i < values.size() && i < static_cast<std::size_t>(array->size()); ++i) values[i] = juce::jlimit(low, high, static_cast<int>(array->getReference(static_cast<int>(i)))); };
     load("wave", waveforms, 0, 4); load("coarse", coarse, 0, 127); load("fine", fine, -99, 99); load("div", dividers, 1, 16);
     if (const auto* array = parsed.getProperty("routes", {}).getArray())
+    {
+        constexpr std::size_t oldDestinationCount = 14;
+        const int version = static_cast<int>(parsed.getProperty("version", 4));
         for (std::size_t source = 0; source < kModulationSourceCount; ++source) for (std::size_t destination = 0; destination < kModulationDestinationCount; ++destination)
         {
-            const auto index = source * kModulationDestinationCount + destination;
+            if (version < 5 && destination >= oldDestinationCount)
+                continue;
+            const auto stride = version < 5 ? oldDestinationCount : kModulationDestinationCount;
+            const auto index = source * stride + destination;
             if (index < static_cast<std::size_t>(array->size())) depths[source][destination] = juce::jlimit(-100, 100, static_cast<int>(array->getReference(static_cast<int>(index))));
         }
+    }
     for (const auto source : { ModulationSource::clock1, ModulationSource::clock2, ModulationSource::clock3, ModulationSource::noteTrigger })
         for (int target = 0; target < 4; ++target)
         { auto& value = depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(ModulationDestination::lfo1Frequency) + static_cast<std::size_t>(target)]; value = value.load() == 0 ? 0 : 1; }

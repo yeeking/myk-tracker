@@ -82,7 +82,8 @@ machine parameters are shared across sequence sets.
 | `MIDI` | terminal | no DSP object | emits external MIDI |
 | `WAVE` | terminal instrument | one per stack | mixes mono source audio |
 | `SAMPLER` | terminal instrument | one per stack | mixes mono sample audio |
-| `DRUM` | terminal instrument | one per stack | mixes six-engine mono drums |
+| `DRUM` | terminal instrument | one per stack | mixes seven-engine mono drums |
+| `FM` | terminal instrument | one per stack | mixes four-operator mono FM audio |
 | `DIST` | serial effect | one per stack | transforms mono stack buffer |
 | `DELAY` | serial effect | one per stack | transforms mono buffer; drains tails when bypassed |
 | `CHSTR` | serial effect | one per stack | transforms mono stack buffer |
@@ -93,7 +94,7 @@ machine parameters are shared across sequence sets.
 The user-facing slot cycle is:
 
 ```text
-MIDI → WAVE → SAMPLER → DRUM → DIST → DELAY → CHSTR → AUX1 → AUX2 → FILTER
+MIDI → WAVE → SAMPLER → DRUM → FM → DIST → DELAY → CHSTR → AUX1 → AUX2 → FILTER
 ```
 
 `MOD` is permanently displayed above the slots and uses the pseudo-slot ID
@@ -106,9 +107,9 @@ sequencer/audition note
         |
         +--> fixed MOD note/PITCH observation
         |
-        +--> enabled terminal slot(s): MIDI / WAVE / SAMPLER / DRUM
+        +--> enabled terminal slot(s): MIDI / WAVE / SAMPLER / DRUM / FM
 
-WAVE + SAMPLER + DRUM                    (mono stack buffer)
+WAVE + SAMPLER + DRUM + FM               (mono stack buffer)
         |
         v
 ordered non-source slot walk             (mono)
@@ -573,7 +574,7 @@ This is separate from adding a machine control. Inspect:
 - `src/ModulationTypes.h`
 - `ModulationMatrixMachine.*`
 - `TrackerMainProcessor::refreshStackProcessingState()`
-- the destination consumer (WAVE, FILTER, SAMPLER, DELAY, or stack mixer)
+- the destination consumer (WAVE, FM, FILTER, SAMPLER, DELAY, or stack mixer)
 
 The matrix uses fixed source/destination identifiers, preallocated block
 buffers, compiled nonzero routes, and active-destination masks. A new
@@ -698,6 +699,7 @@ examples are:
 - `modulation-matrix-tests`
 - `wavetable-synth-tests`
 - `drum-synth-tests`
+- `fm-synth-tests`
 - `drum-processor-tests`
 
 Good machine tests cover:

@@ -139,9 +139,9 @@ void TrackerMainProcessor::enqueueMachineMidi(juce::MidiBuffer& targetBuffer,
     outstandingNoteOffs++;
 }
 
-std::array<std::pair<const char*, MachineInterface*>, 8> TrackerMainProcessor::stackMachineStateEntries(MachineStack& stack)
+std::array<std::pair<const char*, MachineInterface*>, 9> TrackerMainProcessor::stackMachineStateEntries(MachineStack& stack)
 {
-    std::array<std::pair<const char*, MachineInterface*>, 8> entries;
+    std::array<std::pair<const char*, MachineInterface*>, 9> entries;
     entries[0] = { "sampler", stack.sampler.get() };
     entries[1] = { "wavetableSynth", stack.wavetableSynth.get() };
     entries[2] = { "distortionFx", stack.distortionFx.get() };
@@ -150,6 +150,7 @@ std::array<std::pair<const char*, MachineInterface*>, 8> TrackerMainProcessor::s
     entries[5] = { "filterFx", stack.filterFx.get() };
     entries[6] = { "modulationMatrix", stack.modulationMatrix.get() };
     entries[7] = { "drumSynth", stack.drumSynth.get() };
+    entries[8] = { "fmSynth", stack.fmSynth.get() };
     return entries;
 }
 
@@ -188,6 +189,7 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
     bool samplerActive = false;
     bool wavetableActive = false;
     bool drumActive = false;
+    bool fmActive = false;
     bool filterActive = false;
 
     for (const auto& slot : stack.slots)
@@ -201,12 +203,15 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
             wavetableActive = true;
         else if (slot.type == CommandType::DrumSynth)
             drumActive = true;
+        else if (slot.type == CommandType::FmSynth)
+            fmActive = true;
         else if (slot.type == CommandType::FilterFx)
             filterActive = true;
 
         if (slot.type == CommandType::Sampler
             || slot.type == CommandType::WavetableSynth
             || slot.type == CommandType::DrumSynth
+            || slot.type == CommandType::FmSynth
             || isAudioEffectType(slot.type))
             hasAudioPath = true;
     }
@@ -215,6 +220,7 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
     stack.samplerProcessingActive = samplerActive;
     stack.wavetableProcessingActive = wavetableActive;
     stack.drumProcessingActive = drumActive;
+    stack.fmProcessingActive = fmActive;
     stack.filterProcessingActive = filterActive;
     unsigned int destinations = 0;
     for (const auto& slot : stack.slots)
@@ -223,6 +229,7 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
         if (slot.type == CommandType::FilterFx) destinations |= 2u;
         if (slot.type == CommandType::Sampler) destinations |= 4u;
         if (slot.type == CommandType::DelayFx) destinations |= 8u;
+        if (slot.type == CommandType::FmSynth) destinations |= 16u;
     }
     if (stack.modulationMatrix != nullptr)
         stack.modulationMatrix->setInstalledDestinations(destinations);
@@ -734,7 +741,8 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
         if (slotType == CommandType::MidiNote
             || slotType == CommandType::Sampler
             || slotType == CommandType::WavetableSynth
-            || slotType == CommandType::DrumSynth)
+            || slotType == CommandType::DrumSynth
+            || slotType == CommandType::FmSynth)
         {
             hasExplicitTerminalRoute = true;
         }
@@ -769,6 +777,10 @@ void TrackerMainProcessor::dispatchNoteThroughStack(std::size_t stackIndex,
                 break;
             case CommandType::DrumSynth:
                 enqueueStackNote(drumEvents, stackIndex, note, velocity, held ? 0 : durInTicks);
+                anyTerminalTriggered = true;
+                break;
+            case CommandType::FmSynth:
+                enqueueStackNote(fmEvents, stackIndex, note, velocity, held ? 0 : durInTicks);
                 anyTerminalTriggered = true;
                 break;
             case CommandType::DistortionFx:
@@ -1058,6 +1070,7 @@ void TrackerMainProcessor::initialiseMachines()
         stack.sampler = std::make_unique<SuperSamplerProcessor>();
         stack.wavetableSynth = std::make_unique<WavetableSynthMachine>();
         stack.drumSynth = std::make_unique<DrumSynthMachine>();
+        stack.fmSynth = std::make_unique<FmSynthMachine>();
         stack.distortionFx = std::make_unique<WaveshaperDistortionMachine>();
         stack.delayFx = std::make_unique<DelayFxMachine>();
         stack.channelStripFx = std::make_unique<ChannelStripMachine>();
@@ -1071,6 +1084,7 @@ void TrackerMainProcessor::initialiseMachines()
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
         stack.drumBlockNotes.clear();
+        stack.fmBlockNotes.clear();
         stack.filterBlockNotes.clear();
         stack.modulationBlockNotes.clear();
         stack.midiOutputChannel = 1;
@@ -1078,6 +1092,7 @@ void TrackerMainProcessor::initialiseMachines()
         stack.samplerProcessingActive = false;
         stack.wavetableProcessingActive = false;
         stack.drumProcessingActive = false;
+        stack.fmProcessingActive = false;
         stack.filterProcessingActive = false;
         stack.muted = false;
         stack.solo = false;
@@ -1089,6 +1104,7 @@ void TrackerMainProcessor::initialiseMachines()
     scratchFutureSamplerEvents.clear();
     wavetableEvents.clear();
     drumEvents.clear();
+    fmEvents.clear();
     filterEvents.clear();
     modulationEvents.clear();
 
@@ -1207,6 +1223,8 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload(bool refreshMachineC
             if (songCol == 2)
                 return "BPM " + juce::String(getSongRowBpm(rowIndex));
             if (songCol == 4)
+                return "INS";
+            if (songCol == 5)
                 return "DEL";
             return "EDIT";
         }
@@ -1458,7 +1476,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     // Reserve ordinary dense performance workloads before audio starts. These
     // queues remain growable so unusually large sessions never lose notes.
     constexpr std::size_t eventCapacity = 4096;
-    for (auto* queue : { &wavetableEvents, &drumEvents, &filterEvents, &modulationEvents })
+    for (auto* queue : { &wavetableEvents, &drumEvents, &fmEvents, &filterEvents, &modulationEvents })
     {
         queue->pending.reserve(eventCapacity);
         queue->scratch.reserve(eventCapacity);
@@ -1488,11 +1506,13 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
         stack.drumBlockNotes.clear();
+        stack.fmBlockNotes.clear();
         stack.filterBlockNotes.clear();
         // Fixed-size scope ring for the UI oscilloscope; independent of the block
         stack.samplerMidiBuffer.ensureSize(16384);
         stack.wavetableBlockNotes.reserve(1024);
         stack.drumBlockNotes.reserve(1024);
+        stack.fmBlockNotes.reserve(1024);
         stack.filterBlockNotes.reserve(1024);
         stack.modulationBlockNotes.reserve(1024);
         // Scope history remains active regardless of the visible page.
@@ -1512,6 +1532,7 @@ void TrackerMainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     scratchFutureSamplerEvents.clear();
     wavetableEvents.scratch.clear();
     drumEvents.scratch.clear();
+    fmEvents.scratch.clear();
     filterEvents.scratch.clear();
     emptyMidiBuffer.clear();
     updateClockedMachineActivity();
@@ -1535,6 +1556,7 @@ void TrackerMainProcessor::releaseResources()
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
         stack.drumBlockNotes.clear();
+        stack.fmBlockNotes.clear();
         stack.filterBlockNotes.clear();
         stack.forEachMachine([] (MachineInterface& machine)
         {
@@ -1544,6 +1566,7 @@ void TrackerMainProcessor::releaseResources()
     scratchFutureSamplerEvents.clear();
     wavetableEvents.scratch.clear();
     drumEvents.scratch.clear();
+    fmEvents.scratch.clear();
     filterEvents.scratch.clear();
     emptyMidiBuffer.clear();
     masterMeterLevels.fill(0.0f);
@@ -1787,6 +1810,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         stack.samplerMidiBuffer.clear();
         stack.wavetableBlockNotes.clear();
         stack.drumBlockNotes.clear();
+        stack.fmBlockNotes.clear();
         stack.filterBlockNotes.clear();
         stack.modulationBlockNotes.clear();
     }
@@ -1826,6 +1850,8 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     distributeNoteEvents(wavetableEvents, blockStartSample, blockEndSample, &MachineStack::wavetableBlockNotes);
 
     distributeNoteEvents(drumEvents, blockStartSample, blockEndSample, &MachineStack::drumBlockNotes);
+
+    distributeNoteEvents(fmEvents, blockStartSample, blockEndSample, &MachineStack::fmBlockNotes);
 
     // now distribute the sequencer notes that retrigger filter cutoff sweeps
     distributeNoteEvents(filterEvents, blockStartSample, blockEndSample, &MachineStack::filterBlockNotes);
@@ -1872,6 +1898,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 const auto* modulation = &stack->modulationMatrix->getBlockView();
                 stack->sampler->setModulationBlock(modulation);
                 stack->wavetableSynth->setModulationBlock(modulation);
+                stack->fmSynth->setModulationBlock(modulation);
                 stack->filterFx->setModulationBlock(modulation);
                 stack->delayFx->setModulationBlock(modulation);
             }
@@ -1892,6 +1919,12 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 PerformanceMetrics::Scope timing(performanceMetrics, PerformanceMetrics::Stage::drum);
                 stack->drumSynth->scheduleBlockNotes(stack->drumBlockNotes);
                 stack->drumSynth->processBlock(stackBuffer, emptyMidiBuffer);
+            }
+            if (stack->fmProcessingActive && stack->fmSynth != nullptr)
+            {
+                PerformanceMetrics::Scope timing(performanceMetrics, PerformanceMetrics::Stage::fm);
+                stack->fmSynth->scheduleBlockNotes(stack->fmBlockNotes);
+                stack->fmSynth->processBlock(stackBuffer, emptyMidiBuffer);
             }
             // The filter's audio runs through the effect slot loop below; this
             // only hands over the notes that retrigger its cutoff envelope.
@@ -2209,9 +2242,9 @@ void TrackerMainProcessor::setSelectedSongRow(std::size_t row)
     if (songRows.empty())
         return;
     selectedSongRow = std::min(row, songRows.size() - 1);
-    currentSongRowBeatCounter = juce::jmax(1, songRows[selectedSongRow].beatCount);
     if (songPlayMode == SongPlayMode::sequence)
     {
+        currentSongRowBeatCounter = juce::jmax(1, songRows[selectedSongRow].beatCount);
         if (auto* playbackSequencer = getPlaybackSequencerInternal())
         {
             if (playbackSequencer->isPlaying())
@@ -2291,6 +2324,43 @@ std::size_t TrackerMainProcessor::addSongRowByCloningViewedSet()
     const std::size_t newSetIndex = sequenceSets.size() - 1;
     songRows.push_back({ newSetIndex, 16 });
     return songRows.size() - 1;
+}
+
+std::size_t TrackerMainProcessor::insertSongRowByCloningRow(std::size_t row)
+{
+    if (row >= songRows.size())
+        return songRows.empty() ? 0 : songRows.size() - 1;
+
+    const auto sourceRow = songRows[row];
+    if (sourceRow.sequenceSetId >= sequenceSets.size() || sequenceSets[sourceRow.sequenceSetId] == nullptr)
+        return row;
+
+    auto newSequenceSet = createDefaultSequenceSet();
+    restoreSingleSequencer(*newSequenceSet, serializeSingleSequencer(*sequenceSets[sourceRow.sequenceSetId]));
+    if (sequenceSetMachineEnableStates.size() < sequenceSets.size())
+        normaliseAllMachineEnableStates();
+    const auto sourceEnableState = sourceRow.sequenceSetId < sequenceSetMachineEnableStates.size()
+        ? sequenceSetMachineEnableStates[sourceRow.sequenceSetId]
+        : captureMachineEnableState();
+
+    sequenceSets.push_back(std::move(newSequenceSet));
+    sequenceSetBpms.push_back(sourceRow.sequenceSetId < sequenceSetBpms.size()
+        ? sequenceSetBpms[sourceRow.sequenceSetId]
+        : getBPM());
+    sequenceSetMachineEnableStates.push_back(sourceEnableState);
+
+    const std::size_t insertedRow = row + 1;
+    songRows.insert(songRows.begin() + static_cast<std::ptrdiff_t>(insertedRow),
+                    { sequenceSets.size() - 1, sourceRow.beatCount });
+
+    // Song-row positions, unlike sequence-set IDs, shift below the insertion.
+    // Keep the current audible row and its remaining duration intact.
+    if (currentSongRow >= insertedRow)
+        ++currentSongRow;
+    if (selectedSongRow >= insertedRow)
+        ++selectedSongRow;
+
+    return insertedRow;
 }
 
 void TrackerMainProcessor::removeSongRow(std::size_t row)
@@ -2456,6 +2526,7 @@ std::size_t TrackerMainProcessor::getMachineCount(CommandType type) const
         case CommandType::Sampler:
         case CommandType::WavetableSynth:
         case CommandType::DrumSynth:
+        case CommandType::FmSynth:
         case CommandType::DistortionFx:
         case CommandType::DelayFx:
         case CommandType::ChannelStripFx:
@@ -2930,6 +3001,7 @@ void TrackerMainProcessor::allNotesOff()
     samplerEventsToSend.clear();
     wavetableEvents.clear();
     drumEvents.clear();
+    fmEvents.clear();
     filterEvents.clear();
     for (std::size_t i = 0; i < machineStacks.size(); ++i)
         allNotesOffForStack(i);
@@ -2959,7 +3031,8 @@ std::string TrackerMainProcessor::describeStepNote(CommandType machineType, unsi
                         return sampler->describeNoteForSequencer(static_cast<int>(note));
                     break;
                 }
-                if (slot->type == CommandType::MidiNote || slot->type == CommandType::WavetableSynth)
+                if (slot->type == CommandType::MidiNote || slot->type == CommandType::WavetableSynth
+                    || slot->type == CommandType::FmSynth)
                     break;
             }
         }
@@ -3025,7 +3098,8 @@ void TrackerMainProcessor::endHeldNote(CommandType machineType, unsigned short m
     for (const auto& slot : stack->slots)
     {
         if (slot.type == CommandType::MidiNote || slot.type == CommandType::Sampler
-            || slot.type == CommandType::WavetableSynth || slot.type == CommandType::DrumSynth)
+            || slot.type == CommandType::WavetableSynth || slot.type == CommandType::DrumSynth
+            || slot.type == CommandType::FmSynth)
             hasExplicitTerminalRoute = true;
         if (!slot.enabled)
             continue;
@@ -3037,6 +3111,8 @@ void TrackerMainProcessor::endHeldNote(CommandType machineType, unsigned short m
             enqueueStackNote(wavetableEvents, stackIndex, note, 0, 0, true);
         else if (slot.type == CommandType::DrumSynth)
             enqueueStackNote(drumEvents, stackIndex, note, 0, 0, true);
+        else if (slot.type == CommandType::FmSynth)
+            enqueueStackNote(fmEvents, stackIndex, note, 0, 0, true);
         else if (slot.type == CommandType::FilterFx)
             enqueueStackNote(filterEvents, stackIndex, note, 0, 0, true);
     }
@@ -3122,6 +3198,7 @@ void TrackerMainProcessor::clearPendingEvents()
     samplerEventsToSend.clear();
     wavetableEvents.clear();
     drumEvents.clear();
+    fmEvents.clear();
     filterEvents.clear();
 }
 
@@ -3166,6 +3243,7 @@ MachineInterface* TrackerMainProcessor::getMachineForStackType(MachineStack& sta
         case CommandType::Sampler: return stack.sampler.get();
         case CommandType::WavetableSynth: return stack.wavetableSynth.get();
         case CommandType::DrumSynth: return stack.drumSynth.get();
+        case CommandType::FmSynth: return stack.fmSynth.get();
         case CommandType::DistortionFx: return stack.distortionFx.get();
         case CommandType::DelayFx: return stack.delayFx.get();
         case CommandType::ChannelStripFx: return stack.channelStripFx.get();
@@ -3199,6 +3277,7 @@ TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBusForType(Comma
         case CommandType::Sampler:
         case CommandType::WavetableSynth:
         case CommandType::DrumSynth:
+        case CommandType::FmSynth:
         case CommandType::DistortionFx:
         case CommandType::DelayFx:
         case CommandType::ChannelStripFx:
@@ -3223,6 +3302,7 @@ const TrackerMainProcessor::SharedAuxBus* TrackerMainProcessor::getAuxBusForType
         case CommandType::Sampler:
         case CommandType::WavetableSynth:
         case CommandType::DrumSynth:
+        case CommandType::FmSynth:
         case CommandType::DistortionFx:
         case CommandType::DelayFx:
         case CommandType::ChannelStripFx:

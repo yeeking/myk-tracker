@@ -5,6 +5,7 @@
 
 #include "machines/ModulationMatrixMachine.h"
 #include "machines/DelayFxMachine.h"
+#include "machines/MachineStateCodec.h"
 
 namespace
 {
@@ -120,6 +121,38 @@ int main()
     restored.setStateInformation(invalidUtf8, static_cast<int>(sizeof(invalidUtf8)));
     cells = restored.getUIBoxes({});
     require(cells[7][5].text == "1", "invalid matrix state leaves existing settings intact");
+
+    // Version 4 flattened routes used a 14-destination stride. Appending the
+    // four FM destinations must not shift any existing source/destination pair.
+    auto* legacyRoot = new juce::DynamicObject();
+    legacyRoot->setProperty("version", 4);
+    juce::Array<juce::var> legacyRoutes;
+    for (int index = 0; index < static_cast<int>(kModulationSourceCount * 14); ++index)
+        legacyRoutes.add(index == static_cast<int>(ModulationSource::lastNote) * 14
+                                   + static_cast<int>(ModulationDestination::stackPan)
+            ? 77 : 0);
+    legacyRoot->setProperty("routes", legacyRoutes);
+    const auto legacyJson = juce::JSON::toString(juce::var(legacyRoot));
+    ModulationMatrixMachine migrated;
+    migrated.setInstalledDestinations(16u);
+    migrated.prepareToPlay(48000.0, 64);
+    migrated.setStateInformation(legacyJson.toRawUTF8(), legacyJson.getNumBytesAsUTF8());
+    juce::MemoryBlock migratedState;
+    migrated.getStateInformation(migratedState);
+    const auto migratedParsed = parseMachineStateJson(migratedState.getData(), static_cast<int>(migratedState.getSize()));
+    require(static_cast<int>(migratedParsed.getProperty("version", 0)) == 5,
+            "MOD state is saved as version 5");
+    const auto* migratedRoutes = migratedParsed.getProperty("routes", {}).getArray();
+    require(migratedRoutes != nullptr
+                && static_cast<int>(migratedRoutes->getReference(
+                    static_cast<int>(ModulationSource::lastNote) * static_cast<int>(kModulationDestinationCount)
+                    + static_cast<int>(ModulationDestination::stackPan))) == 77,
+            "v4 route remains attached to its original destination after migration");
+    require(migratedRoutes != nullptr
+                && static_cast<int>(migratedRoutes->getReference(
+                    static_cast<int>(ModulationSource::lastNote) * static_cast<int>(kModulationDestinationCount)
+                    + static_cast<int>(ModulationDestination::fmPitch))) == 0,
+            "new FM destinations default to no route in migrated state");
 
     while (restored.navigateRight()) {}
     cells = restored.getUIBoxes({});

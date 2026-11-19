@@ -45,6 +45,7 @@ std::optional<CommandType> commandTypeFromName(const juce::String& name)
         { "sampler", CommandType::Sampler },
         { "wavetable_synth", CommandType::WavetableSynth },
         { "drum", CommandType::DrumSynth }, { "drum_synth", CommandType::DrumSynth },
+        { "fm", CommandType::FmSynth }, { "fm_synth", CommandType::FmSynth },
         { "distortion", CommandType::DistortionFx }, { "delay", CommandType::DelayFx },
         { "channel_strip", CommandType::ChannelStripFx }, { "aux_send_1", CommandType::AuxSend1Fx },
         { "aux_send_2", CommandType::AuxSend2Fx }, { "filter", CommandType::FilterFx },

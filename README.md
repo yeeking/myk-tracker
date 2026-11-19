@@ -52,10 +52,11 @@ cmake --build build --target myk-tracker-plug_Standalone
 
 ### Performance benchmark
 
-The opt-in offline benchmark measures callback and per-stage CPU time at 44.1
-and 48 kHz with a 256-sample block. It includes isolated WAVE and DRUM scenes,
-their effect paths, and dense eight-stack stress scenes. It does not affect a
-normal build:
+The opt-in offline benchmark measures callback and per-stage CPU time. Its
+general scenes run at 44.1/48 kHz with 256-sample blocks; FM additionally runs
+at 44.1/48/96 kHz with 64, 128, 256, and 512-sample blocks. It includes
+isolated WAVE, DRUM, and FM scenes, their effect paths, and dense eight-stack
+stress scenes. It does not affect a normal build:
 
 ```bash
 tools/run-performance-benchmark.sh performance-results/my-run
@@ -113,9 +114,54 @@ direct number entry remains exact. The compact grid regenerates DRUM MCP
 control IDs, so direct-control clients must rediscover them. Active drum voices
 briefly flash their name/enable header pair in the editor.
 
+## Four-operator FM synth
+
+`FM` is a polyphonic four-operator phase-modulation instrument based on the
+ratio, modulation-index, complex-algorithm, feedback, and scaling techniques in
+Chowning and Bristow's *FM Theory and Applications*. Add it from the machine
+stack cycle after `DRUM`. `PSET` supplies thirteen practical and instructional
+patches; `ALG` recalls `PAIR`, `CASC`, `PARM`, `2PAIR`, `SHARE`, `BRNCH`, `ADD`,
+or `FDBK` routing while retaining the operator settings.
+
+`EVOLVE` is a long-form feedback-cascade patch for held notes. Its three
+modulators follow staggered multi-stage index envelopes over roughly 27
+seconds, moving through bright, hollow, and rebuilt inharmonic phases while
+the carrier remains audible. Velocity changes the depth of that evolution.
+
+Each operator has a ratio (`RAT`) mode from `0.00–64.00`, a fixed-frequency
+(`FIX`) mode from `0.1 Hz–20 kHz`, fine detune, output level, and a four-rate /
+four-level envelope. `VEL`, `BP`, `LSL`, `LSR`, and `RSCL` make timbre and
+envelope speed respond to performance and register. Matrix values are signed
+modulation indices in radians (`-16.00…+16.00`), not percentages: increasing an
+index adds significant sidebands, whereas changing an operator ratio changes
+their spacing. Diagonal cells are feedback; cycles use a deterministic
+one-sample delay.
+
+The global `INDEX` and `FEED` controls scale off-diagonal and diagonal matrix
+routes. `COLOR` morphs sine operators toward their chosen periodic/noise
+waveform, and `DRIVE` adds efficient soft saturation. `VOI` selects one to eight
+voices; mono legato preserves phase and envelopes while `GLIDE` moves between
+pitches. Ratio operators follow notes, while fixed operators remain fixed for
+formants and resonances. `MOD` exposes `FM PIT`, `FM IDX`, `FM FB`, and `FM COL`
+only when an FM slot is installed. Factory patches use keyboard scaling to
+limit unwanted high-register foldback, but extreme custom matrices may alias
+deliberately. Machine-control clients should rediscover the new FM control IDs.
+
 `drum-synth-render` accepts repeatable overrides such as
 `--set hat.METAL=10`; `tools/analyze_drum_adventure.py` reports normalised
 spectral, envelope, and onset changes for rendered adventure-control sweeps.
+For hi-hat continuity investigations it also accepts `--repeat-ms 125 --count
+256 --block-size 64`.  Analyse a WAV produced by the standalone master
+recorder with `tools/analyze_hat_clicks.py --input <recording.wav> --output
+performance-results/drum-synth/hat-clicks/<run> --interval-ms 125 --count
+256`; it writes raw discontinuity/onset metrics plus waveform, aligned-onset,
+and spectrogram plots.  The hat engine applies a 0.5 ms envelope recovery only
+when an already-active hat is retriggered, and fades a closed hat into the
+existing two-millisecond open-hat choke tail.  After a stopped transport clears
+the voice, its six metal oscillators restart from a deterministic decorrelated
+phase constellation.  A per-sample slew guard affects only coincident
+multi-oscillator square-wave edges before the existing filters; ordinary edges
+and active-retrigger phase/filter history remain unchanged.
 
 ## Sampler samplesets
 
@@ -143,6 +189,14 @@ both maps (e.g. `GM OCT +1` or `OCT 7`) while a key is being entered or the
 octave is adjusted. On the Sequence page, piano-mode octave keys rewrite the
 note under the cursor only while note entry is ARMed; the Step page keeps its
 always-editable behaviour.
+
+## Song page
+
+Song rows present `SET`, `BEAT`, `BPM`, `EDIT`, `INS`, and `DEL`. Move to a
+row's `INS` cell and press Enter to insert an independent copy directly below
+it. The copy retains the source pattern, BPM, machine-enable state, and beat
+count, while later Song rows move down. The existing `=` shortcut still
+appends a clone of the currently viewed set.
 
 ## Network MCP and OSC control
 
