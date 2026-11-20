@@ -325,6 +325,8 @@ public:
   bool enterSelectedMachineDetail();
   bool enterMachineDetailFromAnywhere();
   bool cycleMachineDetailNext();
+  /** Cycles the focused machine's compact visual panel, if it has one. */
+  bool cycleMachineUiPanel(int direction);
   bool isEditingMachineDetail() const;
   std::optional<CommandType> getFocusedMachineDetailType() const;
   /** Slot selected by the current machine-detail page, when one is open. */

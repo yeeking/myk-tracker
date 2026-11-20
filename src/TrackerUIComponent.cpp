@@ -331,6 +331,7 @@ void TrackerUIComponent::initOpenGL(int width, int height)
     // Static preview traces receive retained buffers lazily in renderTraces;
     // every OpenGL handle is still owned by the renderer lifecycle.
     openGLContext->extensions.glGenBuffers(1, &traceVertexBuffer);
+    openGLContext->extensions.glGenBuffers(1, &traceMarkerVertexBuffer);
     openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glEnable(GL_DEPTH_TEST);
@@ -378,6 +379,11 @@ void TrackerUIComponent::shutdownOpenGL()
         traceVertexBuffer = 0;
         traceVertexCapacityBytes = 0;
     }
+    if (traceMarkerVertexBuffer != 0)
+    {
+        openGLContext->extensions.glDeleteBuffers(1, &traceMarkerVertexBuffer);
+        traceMarkerVertexBuffer = 0;
+    }
     for (auto& entry : cachedTraceBuffers)
         if (entry.second.vbo != 0)
             openGLContext->extensions.glDeleteBuffers(1, &entry.second.vbo);
@@ -407,6 +413,11 @@ void TrackerUIComponent::setCellSize(float width, float height)
 {
     cellWidth = width;
     cellHeight = height;
+}
+
+void TrackerUIComponent::setCellDepth(float depth)
+{
+    cellDepth = juce::jmax(0.01f, depth);
 }
 
 void TrackerUIComponent::setTraces(const std::vector<Trace>& traces)
@@ -625,12 +636,14 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
         for (size_t row = 0; row < visibleRows; ++row)
         {
             const auto& cell = cellsCopy[col][row];
+            if (!style.drawEmptyCells && cell.text.empty())
+                continue;
             const float depthScale = cell.depthScale;
             const float depth = cellDepth * depthScale;
 
             const auto position = juce::Vector3D<float>(centerX,
                                                         startY - static_cast<float>(row) * stepY,
-                                                        depth * 0.5f);
+                                                        depth * 0.5f + cell.zOffset);
             const auto scale = juce::Vector3D<float>(width, cellHeight, depth);
             const auto modelMatrix = getModelMatrix(position, scale);
             const auto colour = cell.fillColor;
@@ -679,7 +692,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
                 const float barX = (centerX - width * 0.5f) + width * 0.1f + barWidth * 0.5f;
                 const auto barPosition = juce::Vector3D<float>(barX,
                                                                startY - static_cast<float>(row) * stepY,
-                                                               depth + 0.008f);
+                                                               depth + cell.zOffset + 0.008f);
                 const auto barMatrix = getModelMatrix(barPosition,
                                                       juce::Vector3D<float>(barWidth, barHeight, 0.01f));
                 if (shaderUniforms->modelMatrix != nullptr)
@@ -713,7 +726,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
                     const auto railPosition = juce::Vector3D<float>(
                         railX,
                         startY - static_cast<float>(row) * stepY,
-                        depth + 0.009f);
+                        depth + cell.zOffset + 0.009f);
                     const auto railMatrix = getModelMatrix(
                         railPosition,
                         juce::Vector3D<float>(railWidth, railHeight, 0.012f));
@@ -744,7 +757,7 @@ void TrackerUIComponent::renderGrid(const juce::Matrix3D<float>& projectionMatri
             if (cell.drawInsetOutline)
             {
                 const auto insetPosition = juce::Vector3D<float>(centerX,
-                    startY - static_cast<float>(row) * stepY, depth + 0.015f);
+                    startY - static_cast<float>(row) * stepY, depth + cell.zOffset + 0.015f);
                 const auto insetScale = juce::Vector3D<float>(width * 0.84f, cellHeight * 0.78f, depth);
                 outlines.push_back(OutlineEntry{ getModelMatrix(insetPosition, insetScale),
                     cell.insetOutlineColor, cell.insetOutlineLineWidth });
@@ -1007,10 +1020,45 @@ void TrackerUIComponent::renderTraces(const juce::Matrix3D<float>& projectionMat
 
         glLineWidth(trace.lineWidth);
         glDrawArrays(GL_LINE_STRIP, 0, vertexCount);
+
+        if (!trace.markers.empty())
+        {
+            // This is deliberately a flat square rather than an envelope
+            // glyph or a 3-D cube: it is a position marker, not a control.
+            // Keep its one-point uploads isolated from the shared dynamic
+            // polyline buffer. Shrinking that buffer here used to make the
+            // following scope read beyond its allocation, producing either a
+            // missing scope or a spurious line towards the viewport centre.
+            bindTraceBuffer(traceMarkerVertexBuffer);
+            if (shaderUniforms->modelMatrix != nullptr)
+                shaderUniforms->modelMatrix->setMatrix4(identity.mat, 1, GL_FALSE);
+            for (const auto& marker : trace.markers)
+            {
+                const float position = juce::jlimit(0.0f, 1.0f, marker.position);
+                const float sample = juce::jlimit(-1.0f, 1.0f, marker.sample);
+                const std::array<Vertex, 1> point {{
+                    { { x0 + (x1 - x0) * position, regionCenterY + sample * amp, trace.z + 0.035f },
+                      { 0.0f, 0.0f, 1.0f } }
+                }};
+                openGLContext->extensions.glBufferData(GL_ARRAY_BUFFER,
+                                                       static_cast<GLsizeiptr>(sizeof(point)),
+                                                       point.data(), GL_DYNAMIC_DRAW);
+                if (shaderUniforms->cellColor != nullptr)
+                    shaderUniforms->cellColor->set(marker.color.getFloatRed(), marker.color.getFloatGreen(),
+                                                   marker.color.getFloatBlue(), marker.color.getFloatAlpha());
+                if (shaderUniforms->glowColor != nullptr)
+                    shaderUniforms->glowColor->set(0.0f, 0.0f, 0.0f);
+                if (shaderUniforms->cellGlow != nullptr)
+                    shaderUniforms->cellGlow->set(0.0f);
+                glPointSize(juce::jmax(6.0f, marker.size * 78.0f));
+                glDrawArrays(GL_POINTS, 0, 1);
+            }
+        }
     }
 
     glDepthMask(GL_TRUE);
     glLineWidth(1.0f);
+    glPointSize(1.0f);
     openGLContext->extensions.glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
@@ -1094,7 +1142,7 @@ void TrackerUIComponent::renderCellText(const juce::Matrix3D<float>& projectionM
             const float depth = cellDepth * cell.depthScale;
             const float cellCenterX = centerX;
             const float cellCenterY = startY - static_cast<float>(row) * stepY;
-            const float textZ = depth + textDepthOffset;
+            const float textZ = depth + cell.zOffset + textDepthOffset;
 
             const float textWidth = textGeomParams.advance * static_cast<float>(cell.text.size());
             const float targetWidth = width * 0.9f;

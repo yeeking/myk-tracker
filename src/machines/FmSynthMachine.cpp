@@ -45,6 +45,18 @@ FmSynthMachine::FmSynthMachine()
     for (auto& row : modulationIndices)
         for (auto& value : row)
             value.store(0.0f);
+    for (auto& voice : uiEnvelopeVoices)
+    {
+        voice.active.store(0, std::memory_order_relaxed);
+        voice.age.store(0, std::memory_order_relaxed);
+        voice.midiNote.store(-1, std::memory_order_relaxed);
+        for (int op = 0; op < kOperatorCount; ++op)
+        {
+            voice.stages[static_cast<std::size_t>(op)].store(0, std::memory_order_relaxed);
+            voice.progress[static_cast<std::size_t>(op)].store(0.0f, std::memory_order_relaxed);
+            voice.levels[static_cast<std::size_t>(op)].store(0.0f, std::memory_order_relaxed);
+        }
+    }
     initialiseTables();
     applyPreset(Preset::init);
     cachedPatch = snapshotPatch();
@@ -110,9 +122,69 @@ void FmSynthMachine::setSecondsPerTick(double value)
 
 void FmSynthMachine::allNotesOff()
 {
-    for (auto& voice : voices)
+    for (int index = 0; index < kMaxVoiceCount; ++index)
+    {
+        auto& voice = voices[static_cast<std::size_t>(index)];
         voice = Voice {};
+        uiEnvelopeVoices[static_cast<std::size_t>(index)].active.store(0, std::memory_order_relaxed);
+    }
     voiceAgeCounter = 0;
+}
+
+void FmSynthMachine::publishUiEnvelopeSnapshot() noexcept
+{
+    for (int voiceIndex = 0; voiceIndex < kMaxVoiceCount; ++voiceIndex)
+    {
+        const auto& source = voices[static_cast<std::size_t>(voiceIndex)];
+        auto& target = uiEnvelopeVoices[static_cast<std::size_t>(voiceIndex)];
+        target.age.store(source.age, std::memory_order_relaxed);
+        target.midiNote.store(source.midiNote, std::memory_order_relaxed);
+        target.active.store(source.active ? 1 : 0, std::memory_order_relaxed);
+        for (int op = 0; op < kOperatorCount; ++op)
+        {
+            const auto& envelope = source.operators[static_cast<std::size_t>(op)].envelope;
+            const int stage = juce::jlimit(0, 3, envelope.stage);
+            const float progress = envelope.remaining > 0 && envelope.stageSamples > 0
+                ? 1.0f - static_cast<float>(envelope.remaining) / static_cast<float>(envelope.stageSamples)
+                : 1.0f;
+            target.stages[static_cast<std::size_t>(op)].store(stage, std::memory_order_relaxed);
+            target.progress[static_cast<std::size_t>(op)].store(juce::jlimit(0.0f, 1.0f, progress), std::memory_order_relaxed);
+            target.levels[static_cast<std::size_t>(op)].store(juce::jlimit(0.0f, 1.0f, envelope.level), std::memory_order_relaxed);
+        }
+    }
+}
+
+void FmSynthMachine::getUiEnvelopeSnapshot(UiEnvelopeSnapshot& destination) const noexcept
+{
+    for (int voiceIndex = 0; voiceIndex < kMaxVoiceCount; ++voiceIndex)
+    {
+        auto& target = destination.voices[static_cast<std::size_t>(voiceIndex)];
+        const auto& source = uiEnvelopeVoices[static_cast<std::size_t>(voiceIndex)];
+        target.active = source.active.load(std::memory_order_relaxed) != 0;
+        target.age = source.age.load(std::memory_order_relaxed);
+        target.midiNote = source.midiNote.load(std::memory_order_relaxed);
+        for (int op = 0; op < kOperatorCount; ++op)
+        {
+            target.stages[static_cast<std::size_t>(op)] = source.stages[static_cast<std::size_t>(op)].load(std::memory_order_relaxed);
+            target.progress[static_cast<std::size_t>(op)] = source.progress[static_cast<std::size_t>(op)].load(std::memory_order_relaxed);
+            target.levels[static_cast<std::size_t>(op)] = source.levels[static_cast<std::size_t>(op)].load(std::memory_order_relaxed);
+        }
+    }
+}
+
+FmSynthMachine::UiEnvelopeDefinition FmSynthMachine::getUiEnvelopeDefinition() const noexcept
+{
+    UiEnvelopeDefinition definition;
+    definition.revision = parameterRevision.load(std::memory_order_acquire);
+    for (int op = 0; op < kOperatorCount; ++op)
+        for (int stage = 0; stage < 4; ++stage)
+        {
+            definition.rates[static_cast<std::size_t>(op)][static_cast<std::size_t>(stage)] =
+                operatorParameters[static_cast<std::size_t>(op)].rates[static_cast<std::size_t>(stage)].load(std::memory_order_relaxed);
+            definition.levels[static_cast<std::size_t>(op)][static_cast<std::size_t>(stage)] =
+                operatorParameters[static_cast<std::size_t>(op)].levels[static_cast<std::size_t>(stage)].load(std::memory_order_relaxed);
+        }
+    return definition;
 }
 
 float FmSynthMachine::rateSeconds(int rate) noexcept
@@ -141,6 +213,7 @@ void FmSynthMachine::startEnvelope(Envelope& envelope, const OperatorSnapshot& o
     envelope.active = true;
     envelope.target = op.levels[0] * 0.01f;
     envelope.remaining = rateSamples(op, 0, midiNote);
+    envelope.stageSamples = envelope.remaining;
     envelope.increment = (envelope.target - envelope.level) / static_cast<float>(envelope.remaining);
 }
 
@@ -158,12 +231,14 @@ void FmSynthMachine::advanceEnvelopeStage(Envelope& envelope, const OperatorSnap
             envelope.stage = 4;
             envelope.target = 0.0f;
             envelope.remaining = juce::jmax(1, static_cast<int>(currentSampleRate * 0.005));
+            envelope.stageSamples = envelope.remaining;
             envelope.increment = -envelope.level / static_cast<float>(envelope.remaining);
         }
         else
         {
             envelope.active = false;
             envelope.remaining = 0;
+            envelope.stageSamples = 0;
         }
         return;
     }
@@ -173,12 +248,14 @@ void FmSynthMachine::advanceEnvelopeStage(Envelope& envelope, const OperatorSnap
         ++envelope.stage;
         envelope.target = op.levels[static_cast<std::size_t>(envelope.stage)] * 0.01f;
         envelope.remaining = rateSamples(op, envelope.stage, midiNote);
+        envelope.stageSamples = envelope.remaining;
         envelope.increment = (envelope.target - envelope.level) / static_cast<float>(envelope.remaining);
     }
     else
     {
         envelope.level = op.levels[2] * 0.01f;
         envelope.remaining = 0; // Sustain at L3 until note release.
+        envelope.stageSamples = 0;
     }
 }
 
@@ -209,9 +286,11 @@ void FmSynthMachine::releaseVoice(Voice& voice, const PatchSnapshot& patch) noex
         envelope.stage = 3;
         envelope.target = patch.operators[static_cast<std::size_t>(op)].levels[3] * 0.01f;
         envelope.remaining = rateSamples(patch.operators[static_cast<std::size_t>(op)], 3, voice.midiNote);
+        envelope.stageSamples = envelope.remaining;
         envelope.increment = (envelope.target - envelope.level) / static_cast<float>(envelope.remaining);
         envelope.active = true;
     }
+
 }
 
 FmSynthMachine::Voice& FmSynthMachine::allocateVoice(int limit) noexcept
@@ -553,6 +632,16 @@ void FmSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
             buffer.addSample(channel, sample, mixed);
     }
+
+    if (uiEnvelopeMonitoring.load(std::memory_order_relaxed))
+    {
+        uiEnvelopeSamplesUntilPublish -= buffer.getNumSamples();
+        if (uiEnvelopeSamplesUntilPublish <= 0)
+        {
+            publishUiEnvelopeSnapshot();
+            uiEnvelopeSamplesUntilPublish = juce::jmax(1, static_cast<int>(currentSampleRate * 0.005));
+        }
+    }
 }
 
 FmSynthMachine::PatchSnapshot FmSynthMachine::snapshotPatch() const
@@ -888,7 +977,154 @@ std::string FmSynthMachine::noteName(int midiNote)
     return std::string(names[midiNote % 12]) + std::to_string(midiNote / 12 - 1);
 }
 
-std::vector<std::vector<UIBox>> FmSynthMachine::getUIBoxes(const MachineUiContext&)
+std::vector<std::vector<UIBox>> FmSynthMachine::getUIBoxes(const MachineUiContext& context)
+{
+    const auto logical = getControlBoxes(context);
+    constexpr std::size_t columns = 12;
+    constexpr std::size_t rows = 11;
+    std::vector<std::vector<UIBox>> boxes(columns, std::vector<UIBox>(rows));
+    for (auto& column : boxes)
+        for (auto& cell : column) { cell.kind = UIBox::Kind::None; cell.isDisabled = true; }
+
+    const auto place = [&] (std::size_t visualColumn, std::size_t visualRow,
+                            std::size_t logicalLabelColumn, std::size_t logicalRow,
+                            bool secondary = false)
+    {
+        if (logicalLabelColumn + 1 >= logical.size() || logicalRow >= logical[logicalLabelColumn].size())
+            return;
+        if (!secondary)
+            boxes[visualColumn][visualRow] = logical[logicalLabelColumn][logicalRow];
+        else
+        {
+            auto value = logical[logicalLabelColumn + 1][logicalRow];
+            value.text = logical[logicalLabelColumn][logicalRow].text + " " + value.text;
+            boxes[visualColumn][visualRow] = std::move(value);
+        }
+    };
+    const auto placePair = [&] (std::size_t base, std::size_t row,
+                                std::size_t logicalLabelColumn, std::size_t logicalRow)
+    {
+        place(base, row, logicalLabelColumn, logicalRow);
+        if (logicalLabelColumn + 1 < logical.size()
+            && logicalRow < logical[logicalLabelColumn + 1].size())
+            boxes[base + 1][row] = logical[logicalLabelColumn + 1][logicalRow];
+    };
+
+    for (int op = 0; op < kOperatorCount; ++op)
+    {
+        const std::size_t base = static_cast<std::size_t>(op * 3);
+        const std::size_t logicalColumn = static_cast<std::size_t>(2 + op * 2);
+        boxes[base][0] = logical[logicalColumn][0];
+        boxes[base + 1][0] = logical[logicalColumn + 1][1];
+        boxes[base + 2][0] = makeLabelCell(operatorParameters[static_cast<std::size_t>(op)].output.load() > 0.0f ? "CAR" : "MOD");
+        boxes[base + 2][0].isDisabled = true;
+        switch (uiBank)
+        {
+            case UiBank::core:
+                placePair(base, 4, logicalColumn, 2); // WAVE
+                place(base + 2, 4, logicalColumn, 8, true); // OUT, compact secondary value
+                placePair(base, 5, logicalColumn, 3); // MODE
+                place(base + 2, 5, logicalColumn, 4, true); // CRS
+                placePair(base, 6, logicalColumn, 5); // FINE
+                place(base + 2, 6, logicalColumn, 7, true); // DET
+                placePair(base, 7, logicalColumn, 6); // FIX
+                break;
+            case UiBank::envelope:
+                for (int stage = 0; stage < 4; ++stage)
+                {
+                    placePair(base, static_cast<std::size_t>(4 + stage), logicalColumn,
+                              static_cast<std::size_t>(9 + stage * 2));
+                    place(base + 2, static_cast<std::size_t>(4 + stage), logicalColumn,
+                          static_cast<std::size_t>(10 + stage * 2), true);
+                }
+                break;
+            case UiBank::scaling:
+                placePair(base, 4, logicalColumn, 17);
+                placePair(base, 5, logicalColumn, 18);
+                placePair(base, 6, logicalColumn, 19);
+                placePair(base, 7, logicalColumn, 20);
+                placePair(base, 8, logicalColumn, 21);
+                break;
+            case UiBank::route:
+                for (int destination = 0; destination < kOperatorCount; ++destination)
+                {
+                    auto label = makeLabelCell("TO" + std::to_string(destination + 1));
+                    label.isDisabled = true;
+                    boxes[base][static_cast<std::size_t>(4 + destination)] = std::move(label);
+                    boxes[base + 1][static_cast<std::size_t>(4 + destination)] =
+                        logical[static_cast<std::size_t>(11 + destination)][static_cast<std::size_t>(op + 1)];
+                }
+                placePair(base, 8, logicalColumn, 8);
+                break;
+            case UiBank::global:
+            case UiBank::count:
+                break;
+        }
+    }
+
+    if (uiBank == UiBank::global)
+    {
+        const std::array<std::pair<std::size_t, std::size_t>, 10> globals {{
+            { 0, 0 }, { 0, 1 }, { 0, 2 }, { 0, 3 },
+            { 0, 4 }, { 0, 5 }, { 0, 6 }, { 0, 7 },
+            { 0, 8 }, { 0, 9 }
+        }};
+        for (std::size_t index = 0; index < globals.size(); ++index)
+        {
+            const std::size_t lane = index % 4;
+            const std::size_t row = 4 + index / 4;
+            const std::size_t base = lane * 3;
+            place(base, row, globals[index].first, globals[index].second);
+            boxes[base + 1][row] = logical[globals[index].first + 1][globals[index].second];
+        }
+    }
+
+    return boxes;
+}
+
+void FmSynthMachine::onCursorMoved(int row, int col)
+{
+    const auto bankIndex = static_cast<std::size_t>(uiBank);
+    uiBankCursor[bankIndex] = { row, col };
+    uiBankCursorValid[bankIndex] = true;
+    if (col >= 0 && col < 12)
+        uiSelectedOperator = juce::jlimit(0, kOperatorCount - 1, col / 3);
+}
+
+bool FmSynthMachine::cycleUiPanel(int direction)
+{
+    if (direction == 0)
+        return false;
+    const auto count = static_cast<int>(UiBank::count);
+    int next = static_cast<int>(uiBank) + (direction > 0 ? 1 : -1);
+    while (next < 0) next += count;
+    while (next >= count) next -= count;
+    uiBank = static_cast<UiBank>(next);
+    const auto index = static_cast<std::size_t>(uiBank);
+    if (uiBankCursorValid[index])
+        preferredUiCursor = uiBankCursor[index];
+    else
+    {
+        const int laneValueColumn = uiSelectedOperator * 3 + 1;
+        const int row = uiBank == UiBank::core ? 4
+            : uiBank == UiBank::envelope ? 4
+            : uiBank == UiBank::scaling ? 4
+            : uiBank == UiBank::route ? 4
+            : 4;
+        preferredUiCursor = uiBank == UiBank::global ? std::make_pair(4, 1)
+                                                     : std::make_pair(row, laneValueColumn);
+    }
+    return true;
+}
+
+std::optional<std::pair<int, int>> FmSynthMachine::consumePreferredCursorPosition()
+{
+    auto result = preferredUiCursor;
+    preferredUiCursor.reset();
+    return result;
+}
+
+std::vector<std::vector<UIBox>> FmSynthMachine::getControlBoxes(const MachineUiContext&)
 {
     constexpr std::size_t rows = 22;
     constexpr std::size_t columns = 15;
@@ -987,7 +1223,7 @@ std::vector<std::vector<UIBox>> FmSynthMachine::getUIBoxes(const MachineUiContex
         {
             auto& target = modulationIndices[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)];
             boxes[static_cast<std::size_t>(11 + destination)][static_cast<std::size_t>(source + 1)] =
-                floatCell(target, 0.25f, kMinimumIndex, kMaximumIndex, 2, [this] { markAlgorithmCustom(); });
+                floatCell(target, 0.01f, kMinimumIndex, kMaximumIndex, 2, [this] { markAlgorithmCustom(); });
         }
     }
     return boxes;

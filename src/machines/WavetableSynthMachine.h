@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <vector>
@@ -15,6 +16,20 @@ class WavetableSynthMachine final : public MachineInterface
 {
 public:
     static constexpr std::size_t kUiWaveStepCapacity = 6;
+    static constexpr int kUiVoiceCapacity = 8;
+
+    struct UiEnvelopeVoice
+    {
+        bool active = false;
+        std::uint64_t age = 0;
+        int stage = 0;
+        float progress = 0.0f;
+        float level = 0.0f;
+    };
+    struct UiEnvelopeSnapshot
+    {
+        std::array<UiEnvelopeVoice, kUiVoiceCapacity> voices;
+    };
 
     /** Coherent snapshot of the settings needed to build the static UI previews. */
     struct UiPreviewState
@@ -82,6 +97,8 @@ public:
                              float& maxAttack, float& maxDecay, float& maxRelease) const;
     /** Returns all waveform and envelope preview settings under one state lock. */
     UiPreviewState getUiPreviewState() const;
+    void setUiEnvelopeMonitoring(bool enabled) noexcept { uiEnvelopeMonitoring.store(enabled, std::memory_order_relaxed); }
+    void getUiEnvelopeSnapshot(UiEnvelopeSnapshot& destination) const noexcept;
     /** Configured polyphony limit, from one monophonic voice to sixteen voices. */
     int getVoiceCount() const;
 
@@ -159,7 +176,7 @@ private:
     /** Number of available base waveforms. */
     static constexpr std::size_t kWaveformCount = static_cast<std::size_t>(Waveform::count);
     /** Maximum fixed voice-pool size. The configured active limit may be lower. */
-    static constexpr int kMaxVoiceCount = 8;
+    static constexpr int kMaxVoiceCount = kUiVoiceCapacity;
     static constexpr int kDefaultVoiceCount = 4;
     /** Maximum number of wavetable steps in the morph sequence. */
     static constexpr int kMaxWaveSteps = static_cast<int>(kUiWaveStepCapacity);
@@ -168,6 +185,17 @@ private:
     std::array<std::array<float, kTableSize>, kWaveformCount> tables {};
     /** Fixed voice pool. */
     std::array<Voice, kMaxVoiceCount> voices {};
+    struct UiEnvelopeVoiceAtomic
+    {
+        std::atomic<int> active { 0 };
+        std::atomic<std::uint64_t> age { 0 };
+        std::atomic<int> stage { 0 };
+        std::atomic<float> progress { 0.0f };
+        std::atomic<float> level { 0.0f };
+    };
+    std::array<UiEnvelopeVoiceAtomic, kMaxVoiceCount> uiEnvelopeVoices;
+    std::atomic<bool> uiEnvelopeMonitoring { false };
+    int uiEnvelopeSamplesUntilPublish = 0;
     /** Selected waveform at each wavetable step. */
     std::array<Waveform, kMaxWaveSteps> waveSteps {
         Waveform::sine,
@@ -252,6 +280,7 @@ private:
     void initialiseTables();
     /** Pushes the current ADSR settings to all voices. */
     void updateVoiceEnvelopeParameters();
+    void publishUiEnvelopeSnapshot() noexcept;
     /** Recomputes the cached 2^(cents/1200) multiplier from subDetuneCents.
         Message-thread only (ctor, UI adjust, state restore); the audio path
         only ever multiplies. */

@@ -24,6 +24,7 @@
 #include "TrackerFileBrowser.h"
 #include "Palette.h"
 #include "UIBox.h"
+class FmSynthMachine;
 //==============================================================================
 /**
 */
@@ -93,12 +94,14 @@ private:
     void appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
                          std::size_t rows,
                          std::size_t stackIndex,
-                         std::vector<float>& scopeSamples);
+                         std::vector<float>& scopeSamples,
+                         std::size_t bandRows = 2);
     void appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
                             std::size_t rows,
                             const std::vector<float>& envelopeSamples,
                             const std::string& traceCacheId = {},
-                            std::uint64_t traceCacheRevision = 0);
+                            std::uint64_t traceCacheRevision = 0,
+                            std::size_t bandRows = 3);
     void prepareMixerView();
     void prepareAudioConfigView();
     void prepareHelpView();
@@ -183,6 +186,8 @@ private:
         bool valid = false;
         WavetableSynthMachine::UiPreviewState state;
         std::vector<TrackerUIComponent::Trace> traces;
+        std::vector<float> envelopeSamples;
+        std::array<float, 5> envelopeStagePositions {};
         std::uint64_t revision = 0;
     };
     struct EnvelopePreviewCache
@@ -190,6 +195,7 @@ private:
         bool valid = false;
         std::array<float, 8> settings {};
         std::vector<float> samples;
+        std::array<float, 5> stagePositions {};
         std::uint64_t revision = 0;
     };
     struct ModulationPreviewCache
@@ -202,6 +208,17 @@ private:
     std::unordered_map<int, WavetablePreviewCache> wavetablePreviewCaches;
     std::unordered_map<int, EnvelopePreviewCache> filterEnvelopePreviewCaches;
     std::unordered_map<int, ModulationPreviewCache> modulationPreviewCaches;
+    struct FmEnvelopePreviewCache
+    {
+        bool valid = false;
+        std::uint64_t revision = 0;
+        std::array<std::vector<float>, 4> curves;
+        std::array<std::array<float, 5>, 4> stagePositions {};
+    };
+    std::unordered_map<int, FmEnvelopePreviewCache> fmEnvelopePreviewCaches;
+    FmSynthMachine* monitoredFmMachine = nullptr;
+    WavetableSynthMachine* monitoredWavetableMachine = nullptr;
+    FilterFxMachine* monitoredFilterMachine = nullptr;
     struct ScopeCalibration
     {
         float scale = 1.0f;

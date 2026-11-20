@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include "UIBox.h"
@@ -63,6 +65,13 @@ public:
 
     /** Builds the machine editor cells shown on the machine page. */
     virtual std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) = 0;
+    /** Builds the complete logical control surface used by remote clients.
+        Most machines share their visible grid; a banked UI can override this
+        to retain stable, complete control discovery. */
+    virtual std::vector<std::vector<UIBox>> getControlBoxes(const MachineUiContext& context)
+    {
+        return getUIBoxes(context);
+    }
 
     /** Handles an incoming sequencer note event. */
     virtual bool handleIncomingNote(unsigned short note,
@@ -105,6 +114,13 @@ public:
     virtual bool navigateLeft() { return false; }
     /** Lets a wide machine editor consume right-navigation when needed. */
     virtual bool navigateRight() { return false; }
+    /** Cycles a machine-local visual panel. Returns true when changed. */
+    virtual bool cycleUiPanel(int direction) { (void)direction; return false; }
+    /** Optional preferred cursor coordinate after a visual panel change. */
+    virtual std::optional<std::pair<int, int>> consumePreferredCursorPosition()
+    {
+        return std::nullopt;
+    }
     /** Gives an instrument the current stack modulation signals. Audio-thread only. */
     virtual void setModulationBlock(const ModulationBlockView* block) { (void)block; }
     /** Passes printable text input to the machine. */

@@ -12,6 +12,7 @@
 #include "SequencerCommands.h"
 #include "machines/CurvedAdsr.h"
 #include "machines/DrumSynthMachine.h"
+#include "machines/FmSynthMachine.h"
 #include "machines/ModulationMatrixMachine.h"
 #include <algorithm>
 #include <cmath>
@@ -100,6 +101,77 @@ std::string formatSignedGain(float gainDb)
 {
     const int roundedGain = static_cast<int>(std::lround(gainDb));
     return (roundedGain >= 0 ? "+" : "") + std::to_string(roundedGain);
+}
+
+const char* fmBankName(FmSynthMachine::UiBank bank)
+{
+    switch (bank)
+    {
+        case FmSynthMachine::UiBank::core: return "CORE";
+        case FmSynthMachine::UiBank::envelope: return "ENV";
+        case FmSynthMachine::UiBank::scaling: return "SCALE";
+        case FmSynthMachine::UiBank::route: return "ROUTE";
+        case FmSynthMachine::UiBank::global: return "GLOBAL";
+        case FmSynthMachine::UiBank::count: break;
+    }
+    return "CORE";
+}
+
+float fmRateSecondsForUi(int rate)
+{
+    const float normalised = static_cast<float>(juce::jlimit(0, 99, rate)) / 99.0f;
+    return 20.0f * std::pow(0.000025f, normalised);
+}
+
+void makeFmEnvelopeCurve(const std::array<int, 4>& rates,
+                         const std::array<float, 4>& levels,
+                         std::vector<float>& curve,
+                         std::array<float, 5>& stagePositions)
+{
+    std::array<float, 4> weights {};
+    float total = 0.0f;
+    for (int stage = 0; stage < 4; ++stage)
+    {
+        weights[static_cast<std::size_t>(stage)] = std::log1p(fmRateSecondsForUi(rates[static_cast<std::size_t>(stage)]) * 1000.0f);
+        total += weights[static_cast<std::size_t>(stage)];
+    }
+    constexpr float sustainWidth = 0.07f;
+    const float scale = total > 0.0f ? (1.0f - sustainWidth) / total : 0.0f;
+    stagePositions[0] = 0.0f;
+    stagePositions[1] = weights[0] * scale;
+    stagePositions[2] = stagePositions[1] + weights[1] * scale;
+    const float sustainStart = stagePositions[2] + weights[2] * scale;
+    stagePositions[3] = sustainStart + sustainWidth;
+    stagePositions[4] = 1.0f;
+
+    const std::array<float, 6> x {{ 0.0f, stagePositions[1], stagePositions[2], sustainStart, stagePositions[3], 1.0f }};
+    const std::array<float, 6> y {{ levels[3], levels[0], levels[1], levels[2], levels[2], levels[3] }};
+    curve.resize(96);
+    for (std::size_t point = 0; point < curve.size(); ++point)
+    {
+        const float t = static_cast<float>(point) / static_cast<float>(curve.size() - 1);
+        std::size_t segment = 0;
+        while (segment + 1 < x.size() - 1 && t > x[segment + 1]) ++segment;
+        const float width = juce::jmax(0.0001f, x[segment + 1] - x[segment]);
+        const float local = juce::jlimit(0.0f, 1.0f, (t - x[segment]) / width);
+        curve[point] = juce::jlimit(-1.0f, 1.0f, (y[segment] + (y[segment + 1] - y[segment]) * local) * 0.02f - 1.0f);
+    }
+}
+
+float adsrMarkerPosition(int stage, float progress, const std::array<float, 5>& positions)
+{
+    const float p = juce::jlimit(0.0f, 1.0f, progress);
+    switch (juce::jlimit(0, 3, stage))
+    {
+        case 0: return positions[0] + (positions[1] - positions[0]) * p;
+        case 1: return positions[1] + (positions[2] - positions[1]) * p;
+        // Sustain has no finite duration. Keep its marker centred on the
+        // explicit hold section rather than letting it drift.
+        case 2: return 0.5f * (positions[2] + positions[3]);
+        case 3: return positions[3] + (positions[4] - positions[3]) * p;
+        default: break;
+    }
+    return 0.0f;
 }
 
 
@@ -469,6 +541,21 @@ void TrackerMainUI::timerCallback ()
     const auto started = uiBenchmarkEnabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
     if (!isShowing())
         return;
+    if (monitoredFmMachine != nullptr)
+    {
+        monitoredFmMachine->setUiEnvelopeMonitoring(false);
+        monitoredFmMachine = nullptr;
+    }
+    if (monitoredWavetableMachine != nullptr)
+    {
+        monitoredWavetableMachine->setUiEnvelopeMonitoring(false);
+        monitoredWavetableMachine = nullptr;
+    }
+    if (monitoredFilterMachine != nullptr)
+    {
+        monitoredFilterMachine->setUiEnvelopeMonitoring(false);
+        monitoredFilterMachine = nullptr;
+    }
     pollPortableSave();
     ++framesDrawn;
 
@@ -1002,8 +1089,8 @@ void TrackerMainUI::prepareMachineConfigView()
         if (auto* sequence = seq->getSequence(seqEditor->getCurrentSequence()))
         {
             machineId = static_cast<int>(sequence->getMachineId());
+            scopeStackIndex = static_cast<std::size_t>(juce::jmax(0, machineId));
         }
-        scopeStackIndex = seqEditor->getActiveMachineIndex(CommandType::Sampler);
         detailType = seqEditor->getFocusedMachineDetailType();
         needsScope = !detailType.has_value() || detailType.value() != CommandType::Sampler;
         const auto& machineCells = seqEditor->getMachineCells();
@@ -1088,14 +1175,14 @@ void TrackerMainUI::prepareMachineConfigView()
 
         const size_t rows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
-        appendScopeBand(machineBoxes, rows, scopeStackIndex, scopeSamples);
-        updateCellStates(machineBoxes, rows + 2, cols);
 
         // WAVE previews: each source row shows one cycle of its base waveform,
-        // and the ENV columns carry the ADSR outline.
+        // followed by a full-width live ADSR band and the output scope.
         if (auto* synth = dynamic_cast<WavetableSynthMachine*>(
                 audioProcessor.getMachine(CommandType::WavetableSynth, static_cast<std::size_t>(machineId))))
         {
+            synth->setUiEnvelopeMonitoring(true);
+            monitoredWavetableMachine = synth;
             const auto previewState = synth->getUiPreviewState();
             auto& previewCache = wavetablePreviewCaches[machineId];
             if (!previewCache.valid || previewCache.state != previewState)
@@ -1105,7 +1192,7 @@ void TrackerMainUI::prepareMachineConfigView()
                 ++previewCache.revision;
                 previewCache.traces.clear();
                 previewCache.traces.reserve(static_cast<std::size_t>(
-                    previewState.waveStepCount + previewState.subWaveStepCount + 1));
+                    previewState.waveStepCount + previewState.subWaveStepCount));
 
                 constexpr int kGlyphSamples = 32;
                 for (int step = 0; step < previewState.waveStepCount; ++step)
@@ -1172,29 +1259,55 @@ void TrackerMainUI::prepareMachineConfigView()
                     previewCache.traces.push_back(std::move(glyph));
                 }
 
-                TrackerUIComponent::Trace envelope;
-                envelope.colStart = 4.0f;
-                envelope.colEnd = 6.0f;
-                envelope.rowTop = 1.0f;
-                envelope.rowBottom = 5.0f;
                 constexpr int kEnvSamples = 48;
-                envelope.samples.resize(static_cast<std::size_t>(kEnvSamples));
-                CurvedAdsr::fillTraceSamples(envelope.samples,
+                previewCache.envelopeSamples.resize(static_cast<std::size_t>(kEnvSamples));
+                CurvedAdsr::fillTraceSamples(previewCache.envelopeSamples,
                                              previewState.attack, previewState.decay,
                                              previewState.sustain, previewState.release,
                                              previewState.bend, previewState.maxAttack,
                                              previewState.maxDecay, previewState.maxRelease);
-                envelope.color = juce::Colour(0xFFFFD21E);
-                envelope.z = 1.15f;
-                envelope.lineWidth = 2.0f;
-                envelope.cacheId = "wavetable/" + std::to_string(machineId) + "/envelope";
-                envelope.cacheRevision = previewCache.revision;
-                previewCache.traces.push_back(std::move(envelope));
+                previewCache.envelopeStagePositions = CurvedAdsr::traceStagePositions(
+                    previewState.attack, previewState.decay, previewState.release,
+                    previewState.maxAttack, previewState.maxDecay, previewState.maxRelease);
             }
 
             currentTraces.insert(currentTraces.end(),
                                  previewCache.traces.begin(), previewCache.traces.end());
+
+            const auto envelopeTraceIndex = currentTraces.size();
+            appendEnvelopeBand(machineBoxes, rows, previewCache.envelopeSamples,
+                               "wavetable/" + std::to_string(machineId) + "/envelope",
+                               previewCache.revision, 3);
+            if (currentTraces.size() > envelopeTraceIndex)
+            {
+                auto& envelopeTrace = currentTraces[envelopeTraceIndex];
+                WavetableSynthMachine::UiEnvelopeSnapshot runtime;
+                synth->getUiEnvelopeSnapshot(runtime);
+                std::uint64_t newestAge = 0;
+                for (const auto& voice : runtime.voices)
+                    if (voice.active) newestAge = std::max(newestAge, voice.age);
+                for (const auto& voice : runtime.voices)
+                {
+                    if (!voice.active)
+                        continue;
+                    const bool newest = voice.age == newestAge;
+                    const float ageRatio = newestAge > 0
+                        ? static_cast<float>(voice.age) / static_cast<float>(newestAge) : 0.0f;
+                    TrackerUIComponent::Trace::Marker marker;
+                    marker.position = adsrMarkerPosition(voice.stage, voice.progress,
+                                                         previewCache.envelopeStagePositions);
+                    marker.sample = voice.level * 2.0f - 1.0f;
+                    marker.color = newest ? palette.gridPlayhead
+                        : juce::Colour(0xffffa52b).withAlpha(0.25f + ageRatio * 0.45f);
+                    marker.size = newest ? 0.17f : 0.09f + ageRatio * 0.04f;
+                    envelopeTrace.markers.push_back(marker);
+                }
+            }
         }
+
+        constexpr std::size_t envelopeRows = 3;
+        appendScopeBand(machineBoxes, rows + envelopeRows, scopeStackIndex, scopeSamples);
+        updateCellStates(machineBoxes, rows + envelopeRows + 2, cols);
 
         overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [wavetable synth]";
         overlayState.color = palette.textPrimary;
@@ -1272,6 +1385,8 @@ void TrackerMainUI::prepareMachineConfigView()
         const std::size_t baseRows = machineBoxes.empty() ? 1 : machineBoxes[0].size();
         const std::size_t cols = machineBoxes.empty() ? 1 : machineBoxes.size();
         const auto detail = detailType.value();
+        if (detail == CommandType::FmSynth)
+            uiComponent.setCellSize(1.15f, 0.68f);
 
         std::size_t rowsBeforeScope = baseRows;
         if (detail == CommandType::FilterFx)
@@ -1281,6 +1396,8 @@ void TrackerMainUI::prepareMachineConfigView()
             if (auto* filter = dynamic_cast<FilterFxMachine*>(
                     audioProcessor.getMachine(CommandType::FilterFx, static_cast<std::size_t>(machineId))))
             {
+                filter->setUiEnvelopeMonitoring(true);
+                monitoredFilterMachine = filter;
                 filter->getEnvelopeSettings(settings[0], settings[1], settings[2], settings[3],
                                             settings[4], settings[5], settings[6], settings[7]);
             }
@@ -1293,14 +1410,97 @@ void TrackerMainUI::prepareMachineConfigView()
                 CurvedAdsr::fillTraceSamples(previewCache.samples,
                                              settings[0], settings[1], settings[2], settings[3],
                                              settings[4], settings[5], settings[6], settings[7]);
+                previewCache.stagePositions = CurvedAdsr::traceStagePositions(
+                    settings[0], settings[1], settings[3], settings[5], settings[6], settings[7]);
             }
+            const auto envelopeTraceIndex = currentTraces.size();
             appendEnvelopeBand(machineBoxes, baseRows, previewCache.samples,
                                "filter/" + std::to_string(machineId) + "/envelope",
-                               previewCache.revision);
-            rowsBeforeScope += 2;
+                               previewCache.revision, 3);
+            if (currentTraces.size() > envelopeTraceIndex && monitoredFilterMachine != nullptr)
+            {
+                FilterFxMachine::UiEnvelopeSnapshot runtime;
+                monitoredFilterMachine->getUiEnvelopeSnapshot(runtime);
+                if (runtime.active)
+                {
+                    TrackerUIComponent::Trace::Marker marker;
+                    marker.position = adsrMarkerPosition(runtime.stage, runtime.progress,
+                                                         previewCache.stagePositions);
+                    marker.sample = runtime.level * 2.0f - 1.0f;
+                    marker.color = palette.gridPlayhead;
+                    marker.size = 0.17f;
+                    currentTraces[envelopeTraceIndex].markers.push_back(marker);
+                }
+            }
+            rowsBeforeScope += 3;
         }
 
-        appendScopeBand(machineBoxes, rowsBeforeScope, scopeStackIndex, scopeSamples);
+        if (detail == CommandType::FmSynth)
+        {
+            if (auto* fm = dynamic_cast<FmSynthMachine*>(
+                    audioProcessor.getMachine(CommandType::FmSynth, static_cast<std::size_t>(machineId))))
+            {
+                fm->setUiEnvelopeMonitoring(true);
+                monitoredFmMachine = fm;
+                const auto definition = fm->getUiEnvelopeDefinition();
+                auto& cache = fmEnvelopePreviewCaches[machineId];
+                if (!cache.valid || cache.revision != definition.revision)
+                {
+                    cache.valid = true;
+                    cache.revision = definition.revision;
+                    for (int op = 0; op < FmSynthMachine::kOperatorCount; ++op)
+                        makeFmEnvelopeCurve(definition.rates[static_cast<std::size_t>(op)],
+                                            definition.levels[static_cast<std::size_t>(op)],
+                                            cache.curves[static_cast<std::size_t>(op)],
+                                            cache.stagePositions[static_cast<std::size_t>(op)]);
+                }
+
+                FmSynthMachine::UiEnvelopeSnapshot runtime;
+                fm->getUiEnvelopeSnapshot(runtime);
+                std::uint64_t newestAge = 0;
+                for (const auto& voice : runtime.voices)
+                    if (voice.active) newestAge = std::max(newestAge, voice.age);
+                const int selectedOperator = fm->getUiSelectedOperator();
+                for (int op = 0; op < FmSynthMachine::kOperatorCount; ++op)
+                {
+                    TrackerUIComponent::Trace envelope;
+                    envelope.colStart = static_cast<float>(op * 3);
+                    envelope.colEnd = static_cast<float>(op * 3 + 3);
+                    envelope.rowTop = 1.0f;
+                    envelope.rowBottom = 4.0f;
+                    envelope.samples = cache.curves[static_cast<std::size_t>(op)];
+                    envelope.color = op == selectedOperator ? juce::Colour(0xffffd21a) : palette.textPrimary;
+                    envelope.z = 1.18f;
+                    envelope.lineWidth = op == selectedOperator ? 3.0f : 1.8f;
+                    envelope.cacheId = "fm-envelope/" + std::to_string(machineId) + "/" + std::to_string(op);
+                    envelope.cacheRevision = cache.revision;
+                    for (const auto& voice : runtime.voices)
+                    {
+                        if (!voice.active)
+                            continue;
+                        const int stage = juce::jlimit(0, 3, voice.stages[static_cast<std::size_t>(op)]);
+                        const auto& positions = cache.stagePositions[static_cast<std::size_t>(op)];
+                        const float position = positions[static_cast<std::size_t>(stage)]
+                            + (positions[static_cast<std::size_t>(stage + 1)] - positions[static_cast<std::size_t>(stage)])
+                                * juce::jlimit(0.0f, 1.0f, voice.progress[static_cast<std::size_t>(op)]);
+                        const bool newest = voice.age == newestAge;
+                        const float ageRatio = newestAge > 0 ? static_cast<float>(voice.age) / static_cast<float>(newestAge) : 0.0f;
+                        TrackerUIComponent::Trace::Marker marker;
+                        marker.position = position;
+                        marker.sample = voice.levels[static_cast<std::size_t>(op)] * 2.0f - 1.0f;
+                        marker.color = newest ? palette.gridPlayhead : juce::Colour(0xffffa52b).withAlpha(0.25f + ageRatio * 0.45f);
+                        marker.size = newest ? 0.17f : 0.09f + ageRatio * 0.04f;
+                        envelope.markers.push_back(marker);
+                    }
+                    currentTraces.push_back(std::move(envelope));
+                }
+                overlayState.text = "FM " + std::string(fmBankName(fm->getUiBank())) + " OP"
+                    + std::to_string(selectedOperator + 1) + " PGUP/DN";
+            }
+        }
+
+        const std::size_t scopeRows = detail == CommandType::FmSynth ? 4 : 2;
+        appendScopeBand(machineBoxes, rowsBeforeScope, scopeStackIndex, scopeSamples, scopeRows);
         if (detail == CommandType::DrumSynth)
         {
             if (auto* drum = dynamic_cast<DrumSynthMachine*>(
@@ -1330,7 +1530,7 @@ void TrackerMainUI::prepareMachineConfigView()
                 }
             }
         }
-        updateCellStates(machineBoxes, rowsBeforeScope + 2, cols);
+        updateCellStates(machineBoxes, rowsBeforeScope + scopeRows, cols);
 
         if (detail == CommandType::DrumSynth)
         {
@@ -1357,7 +1557,7 @@ void TrackerMainUI::prepareMachineConfigView()
             overlayState.text = "Shared aux [1] reverb";
         else if (detail == CommandType::AuxSend2Fx)
             overlayState.text = "Shared aux [2] reverb";
-        else
+        else if (detail != CommandType::FmSynth)
             overlayState.text = "Stack [" + std::to_string(machineId) + "] machine [" + machineTraits(detail).longName + "]";
 
         overlayState.color = palette.textPrimary;
@@ -1453,20 +1653,22 @@ float TrackerMainUI::updateScopeCalibration(std::size_t stackIndex,
 void TrackerMainUI::appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
                                     std::size_t rows,
                                     std::size_t stackIndex,
-                                    std::vector<float>& scopeSamples)
+                                    std::vector<float>& scopeSamples,
+                                    std::size_t bandRows)
 {
     const std::size_t cols = boxes.size();
     if (cols == 0)
         return;
+    bandRows = juce::jmax<std::size_t>(1, bandRows);
     for (auto& column : boxes)
-        column.resize(rows + 2);
+        column.resize(rows + bandRows);
 
     // Dark band cells, matching the scope band built into the machine stack
     // table. They are disabled and carry no callbacks, so the cursor cannot
     // land on them; the editor's machineCells grid is left untouched.
     for (std::size_t col = 0; col < cols; ++col)
     {
-        for (std::size_t bandRow = 0; bandRow < 2; ++bandRow)
+        for (std::size_t bandRow = 0; bandRow < bandRows; ++bandRow)
         {
             UIBox& cell = boxes[col][rows + bandRow];
             cell.kind = UIBox::Kind::TrackerCell;
@@ -1487,7 +1689,7 @@ void TrackerMainUI::appendScopeBand(std::vector<std::vector<UIBox>>& boxes,
         scope.colStart = 0.0f;
         scope.colEnd = static_cast<float>(cols);
         scope.rowTop = static_cast<float>(rows);
-        scope.rowBottom = static_cast<float>(rows + 2);
+        scope.rowBottom = static_cast<float>(rows + bandRows);
         scope.samples = std::move(scopeSamples);
         scope.color = juce::Colour(0xFF29E0FF);
         scope.z = 1.15f;
@@ -1500,19 +1702,21 @@ void TrackerMainUI::appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
                                        std::size_t rows,
                                        const std::vector<float>& envelopeSamples,
                                        const std::string& traceCacheId,
-                                       std::uint64_t traceCacheRevision)
+                                       std::uint64_t traceCacheRevision,
+                                       std::size_t bandRows)
 {
     const std::size_t cols = boxes.size();
     if (cols == 0)
         return;
+    bandRows = juce::jmax<std::size_t>(1, bandRows);
     for (auto& column : boxes)
-        column.resize(rows + 2);
+        column.resize(rows + bandRows);
 
     // The preview band uses the same dark, non-interactive style as the scope
     // band; only the trace itself carries the envelope shape.
     for (std::size_t col = 0; col < cols; ++col)
     {
-        for (std::size_t bandRow = 0; bandRow < 2; ++bandRow)
+        for (std::size_t bandRow = 0; bandRow < bandRows; ++bandRow)
         {
             UIBox& cell = boxes[col][rows + bandRow];
             cell.kind = UIBox::Kind::TrackerCell;
@@ -1529,7 +1733,7 @@ void TrackerMainUI::appendEnvelopeBand(std::vector<std::vector<UIBox>>& boxes,
         envelope.colStart = 0.0f;
         envelope.colEnd = static_cast<float>(cols);
         envelope.rowTop = static_cast<float>(rows);
-        envelope.rowBottom = static_cast<float>(rows + 2);
+        envelope.rowBottom = static_cast<float>(rows + bandRows);
         envelope.samples = envelopeSamples;
         envelope.color = juce::Colour(0xFFFFD21E);
         envelope.z = 1.15f;

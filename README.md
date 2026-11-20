@@ -50,6 +50,25 @@ cmake -B build .
 cmake --build build --target myk-tracker-plug_Standalone
 ```
 
+### FM UI visual prototype
+
+`fm-synth-ui-prototype` is a separate OpenGL/JUCE design study for the FM
+editor. It uses the production cube renderer and the `EVOLVE` patch values but
+does not start audio, alter tracker state, or expose controls to MCP. Build it
+with:
+
+```bash
+cmake --build build --target fm-synth-ui-prototype
+```
+
+It opens on `LANES`; press `1`, `2`, or `3` (or `Tab`) for `LANES`, `ROUTE`,
+and `DEPTH`. Arrow keys choose an operator and its focused value; `Enter` or
+Space simulates a held note; `+` and `-` adjust the shown index offset. Yellow
+identifies the selected operator and cyan identifies the keyboard-editable
+cell. Mouse drag pans and the wheel zooms only; neither edits data. For
+repeatable screenshots, set `MYK_FM_UI_PROTOTYPE_CONCEPT` to `LANES`, `ROUTE`,
+or `DEPTH` before launch.
+
 ### Performance benchmark
 
 The opt-in offline benchmark measures callback and per-stage CPU time. Its
@@ -127,6 +146,26 @@ or `FDBK` routing while retaining the operator settings.
 modulators follow staggered multi-stage index envelopes over roughly 27
 seconds, moving through bright, hollow, and rebuilt inharmonic phases while
 the carrier remains audible. Velocity changes the depth of that evolution.
+
+The production FM page is a compact four-lane editor: each `OP1`–`OP4` lane
+keeps its envelope visible while exposing one keyboard-selected control bank.
+Use Page Up/Page Down to cycle `CORE`, `ENV`, `SCALE`, `ROUTE`, and `GLOBAL`;
+arrow keys retain the normal grid navigation, `[`/`]` adjust the focused value,
+and direct numeric entry remains exact. The yellow header/envelope identifies
+the selected operator, while the cyan cursor identifies the editable cell.
+During playback, small amber cubes show older active voices and the newest
+voice uses a larger red/orange cube at its real envelope stage/level. These
+are explanatory runtime markers only: they do not alter sound or project
+state. Page/bank/cursor state is likewise transient.
+
+`CORE` contains operator enable, waveform, frequency mode, ratio/fixed pitch,
+detune and output; `ENV` contains four rate/level pairs; `SCALE` contains
+velocity, breakpoint and keyboard/rate scaling; `ROUTE` presents each lane's
+four signed modulation indices (with `0.01` keyboard steps) and output; `GLOBAL` contains preset,
+algorithm, voices and global macros. The compact presentation deliberately
+does not change the complete logical control grid used by MCP: direct
+machine-control clients retain the existing FM control IDs and can continue to
+discover and operate every parameter offscreen.
 
 Each operator has a ratio (`RAT`) mode from `0.00–64.00`, a fixed-frequency
 (`FIX`) mode from `0.1 Hz–20 kHz`, fine detune, output level, and a four-rate /

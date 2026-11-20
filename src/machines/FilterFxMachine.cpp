@@ -310,6 +310,22 @@ void FilterFxMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
             }
         }
     }
+
+    if (uiEnvelopeMonitoring.load(std::memory_order_relaxed))
+    {
+        uiEnvelopeSamplesUntilPublish -= numSamples;
+        if (uiEnvelopeSamplesUntilPublish <= 0)
+        {
+            const auto state = envelope.getUiState();
+            uiEnvelopeStage.store(state.stage, std::memory_order_relaxed);
+            uiEnvelopeProgress.store(state.progress, std::memory_order_relaxed);
+            uiEnvelopeLevel.store(state.level, std::memory_order_relaxed);
+            uiEnvelopeActive.store(state.active ? 1 : 0, std::memory_order_relaxed);
+            uiEnvelopeSamplesUntilPublish = juce::jmax(1, static_cast<int>(snap.sampleRate * 0.005));
+        }
+    }
+    else
+        uiEnvelopeSamplesUntilPublish = 0;
 }
 
 void FilterFxMachine::scheduleBlockNotes(const std::vector<MachineScheduledNote>& notes)
@@ -391,6 +407,14 @@ void FilterFxMachine::getEnvelopeSettings(float& attack, float& decay, float& su
     maxRelease = kMaxReleaseSeconds;
 }
 
+void FilterFxMachine::getUiEnvelopeSnapshot(UiEnvelopeSnapshot& destination) const noexcept
+{
+    destination.active = uiEnvelopeActive.load(std::memory_order_relaxed) != 0;
+    destination.stage = uiEnvelopeStage.load(std::memory_order_relaxed);
+    destination.progress = uiEnvelopeProgress.load(std::memory_order_relaxed);
+    destination.level = uiEnvelopeLevel.load(std::memory_order_relaxed);
+}
+
 void FilterFxMachine::setCutoffHz(double hz)
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
@@ -456,4 +480,6 @@ void FilterFxMachine::clearTransientState()
     planEvents.clear();
     carryReleases.clear();
     activeNotes = 0;
+    uiEnvelopeSamplesUntilPublish = 0;
+    uiEnvelopeActive.store(0, std::memory_order_relaxed);
 }

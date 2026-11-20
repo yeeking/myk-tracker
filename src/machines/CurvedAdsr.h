@@ -15,6 +15,15 @@
 class CurvedAdsr
 {
 public:
+    struct UiState
+    {
+        bool active = false;
+        /** Attack=0, decay=1, sustain=2, release=3. */
+        int stage = 0;
+        float progress = 0.0f;
+        float level = 0.0f;
+    };
+
     struct Parameters
     {
         float attack = 0.0f;
@@ -161,6 +170,37 @@ public:
         return phase != Phase::None;
     }
 
+    /** Audio-thread snapshot used by lock-free envelope UI publishers. */
+    UiState getUiState() const noexcept
+    {
+        UiState state;
+        state.active = phase != Phase::None;
+        state.level = juce::jlimit(0.0f, 1.0f, currentLevel);
+        switch (phase)
+        {
+            case Phase::Attack:
+                state.stage = 0;
+                state.progress = attackSeconds > 0.0f ? phaseTime / attackSeconds : 1.0f;
+                break;
+            case Phase::Decay:
+                state.stage = 1;
+                state.progress = decaySeconds > 0.0f ? phaseTime / decaySeconds : 1.0f;
+                break;
+            case Phase::Sustain:
+                state.stage = 2;
+                state.progress = 1.0f;
+                break;
+            case Phase::Release:
+                state.stage = 3;
+                state.progress = releaseSeconds > 0.0f ? phaseTime / releaseSeconds : 1.0f;
+                break;
+            case Phase::None:
+                break;
+        }
+        state.progress = juce::jlimit(0.0f, 1.0f, state.progress);
+        return state;
+    }
+
     /** Maps a 0..1 stage progress through the selected bend curve. */
     static float shapeProgress(float progress, float bend)
     {
@@ -218,6 +258,25 @@ public:
             }
             samples[i] = value * 2.0f - 1.0f;
         }
+    }
+
+    /** Normalised starts/ends of the A/D/sustain/R regions used by the trace. */
+    static std::array<float, 5> traceStagePositions(float attack, float decay, float release,
+                                                    float maxAttack, float maxDecay, float maxRelease)
+    {
+        const float safeAttack = sanitizePositive(attack);
+        const float safeDecay = sanitizePositive(decay);
+        const float safeRelease = sanitizePositive(release);
+        const float attackSpan = sanitizePositive(maxAttack) > 0.0f ? safeAttack / sanitizePositive(maxAttack) : 0.0f;
+        const float decaySpan = sanitizePositive(maxDecay) > 0.0f ? safeDecay / sanitizePositive(maxDecay) : 0.0f;
+        const float releaseSpan = sanitizePositive(maxRelease) > 0.0f ? safeRelease / sanitizePositive(maxRelease) : 0.0f;
+        constexpr float sustainSpan = 0.35f;
+        const float total = juce::jmax(0.001f, attackSpan + decaySpan + sustainSpan + releaseSpan);
+        return { 0.0f,
+                 attackSpan / total,
+                 (attackSpan + decaySpan) / total,
+                 (attackSpan + decaySpan + sustainSpan) / total,
+                 1.0f };
     }
 
 private:

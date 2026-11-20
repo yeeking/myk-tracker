@@ -318,7 +318,7 @@ juce::var TrackerControlService::makeMachineControlsNow()
             if (machine == nullptr)
                 continue;
             MachineUiContext context;
-            const auto cells = machine->getUIBoxes(context);
+            const auto cells = machine->getControlBoxes(context);
             auto item = makeObject();
             auto* object = item.getDynamicObject();
             object->setProperty("stackId", static_cast<int>(stackIndex));
@@ -1075,7 +1075,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     if (machine == nullptr) return fail("unsupported", "The addressed stack slot has no direct machine controls");
 
                     MachineUiContext context;
-                    auto cells = machine->getUIBoxes(context);
+                    auto cells = machine->getControlBoxes(context);
                     UIBox* target = nullptr;
                     int targetColumn = -1;
                     int targetRow = -1;
@@ -1499,6 +1499,11 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     {
                         handled = editor.machineHandleTextInput(key);
                         contentChanged = handled;
+                    }
+                    else if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
+                    {
+                        handled = editor.cycleMachineUiPanel(keyCode == juce::KeyPress::pageDownKey ? 1 : -1);
+                        viewChanged = handled;
                     }
                     else if (keyCode == juce::KeyPress::spaceKey) { editor.togglePlayback(); handled = true; }
                     else if (keyCode == '5') { handled = editor.enterMachineDetailFromAnywhere(); viewChanged = handled; }

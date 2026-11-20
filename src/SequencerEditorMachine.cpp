@@ -321,6 +321,17 @@ void SequencerEditor::refreshMachineStateForCurrentSequence()
       if (auto* implementation = dynamic_cast<Sequencer*>(sequencer))
         context.disableLearning = implementation->isPlaying();
       machineCells = machine->getUIBoxes(context);
+      if (const auto preferredPosition = machine->consumePreferredCursorPosition();
+          preferredPosition.has_value() && !machineCells.empty())
+      {
+        const auto [row, column] = preferredPosition.value();
+        machineCursorCol = static_cast<std::size_t>(juce::jlimit(0,
+            static_cast<int>(machineCells.size()) - 1, column));
+        machineCursorRow = static_cast<std::size_t>(juce::jlimit(0,
+            static_cast<int>(machineCells[machineCursorCol].size()) - 1, row));
+        machineEditRow = machineCursorRow;
+        machineEditCol = machineCursorCol;
+      }
       const int preferredRow = machine->consumePreferredCursorRow(machineCells);
       if (preferredRow >= 0 && !machineCells.empty())
       {
@@ -661,6 +672,20 @@ bool SequencerEditor::cycleMachineDetailNext()
     return false;
   machineSelectedStackSlot = machineSelectedStackSlot == kModulationMatrixStackEntry ? 0 :
       (machineSelectedStackSlot + 1 >= stackTypes.size() ? kModulationMatrixStackEntry : machineSelectedStackSlot + 1);
+  refreshMachineStateForCurrentSequence();
+  return true;
+}
+
+bool SequencerEditor::cycleMachineUiPanel(int direction)
+{
+  if (!machineStackDetailMode || machineHost == nullptr || direction == 0)
+    return false;
+  const auto selectedType = getSelectedStackMachineType();
+  if (!selectedType.has_value())
+    return false;
+  auto* machine = getActiveMachine(*selectedType);
+  if (machine == nullptr || !machine->cycleUiPanel(direction))
+    return false;
   refreshMachineStateForCurrentSequence();
   return true;
 }

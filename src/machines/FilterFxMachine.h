@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -13,6 +14,13 @@
 class FilterFxMachine final : public AudioEffectMachine
 {
 public:
+    struct UiEnvelopeSnapshot
+    {
+        bool active = false;
+        int stage = 0;
+        float progress = 0.0f;
+        float level = 0.0f;
+    };
     /** Creates the filter with default low-pass, no resonance, half sweep. */
     FilterFxMachine() = default;
 
@@ -37,6 +45,8 @@ public:
     /** Current envelope settings and their display maxima, for UI preview. */
     void getEnvelopeSettings(float& attack, float& decay, float& sustain, float& release, float& bend,
                              float& maxAttack, float& maxDecay, float& maxRelease) const;
+    void setUiEnvelopeMonitoring(bool enabled) noexcept { uiEnvelopeMonitoring.store(enabled, std::memory_order_relaxed); }
+    void getUiEnvelopeSnapshot(UiEnvelopeSnapshot& destination) const noexcept;
     /** Sets the cutoff-sweep top, clamped to the filter's valid range. */
     void setCutoffHz(double hz);
 
@@ -119,6 +129,12 @@ private:
     double cachedSweepRatio = 1.0;
     /** Cutoff-sweep envelope, audio-thread only, retriggers on each note. */
     CurvedAdsr envelope;
+    std::atomic<bool> uiEnvelopeMonitoring { false };
+    std::atomic<int> uiEnvelopeActive { 0 };
+    std::atomic<int> uiEnvelopeStage { 0 };
+    std::atomic<float> uiEnvelopeProgress { 0.0f };
+    std::atomic<float> uiEnvelopeLevel { 0.0f };
+    int uiEnvelopeSamplesUntilPublish = 0;
     /** Pointer to the processor-owned per-stack note list for the current block. */
     const std::vector<MachineScheduledNote>* blockNotes = nullptr;
     /** Per-block attack/release plan, rebuilt each block (no RT allocation). */

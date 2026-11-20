@@ -2,6 +2,7 @@
 
 #include "machines/FmSynthMachine.h"
 
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -33,7 +34,7 @@ float peak(const juce::AudioBuffer<float>& buffer)
 
 void insertControl(FmSynthMachine& synth, int labelColumn, const char* label, double value)
 {
-    auto boxes = synth.getUIBoxes({});
+    auto boxes = synth.getControlBoxes({});
     for (std::size_t row = 0; row < boxes[static_cast<std::size_t>(labelColumn)].size(); ++row)
         if (boxes[static_cast<std::size_t>(labelColumn)][row].text == label)
         {
@@ -47,7 +48,7 @@ void insertControl(FmSynthMachine& synth, int labelColumn, const char* label, do
 
 void adjustControl(FmSynthMachine& synth, int labelColumn, const char* label, int amount)
 {
-    auto boxes = synth.getUIBoxes({});
+    auto boxes = synth.getControlBoxes({});
     for (std::size_t row = 0; row < boxes[static_cast<std::size_t>(labelColumn)].size(); ++row)
         if (boxes[static_cast<std::size_t>(labelColumn)][row].text == label)
         {
@@ -115,9 +116,55 @@ int main()
     {
         FmSynthMachine synth;
         auto boxes = synth.getUIBoxes({});
-        require(boxes.size() == 15 && boxes.front().size() == 22, "FM grid dimensions changed");
-        require(boxes[0][0].text == "PSET" && boxes[2][0].text == "OP1" && boxes[10][0].text == "FROM",
+        require(boxes.size() == 12 && boxes.front().size() == 11, "FM visual grid dimensions changed");
+        require(boxes[0][0].text == "OP1" && boxes[3][0].text == "OP2" && boxes[9][0].text == "OP4",
+                "FM operator lanes are missing");
+        auto logical = synth.getControlBoxes({});
+        require(logical.size() == 15 && logical.front().size() == 22, "FM logical grid dimensions changed");
+        require(logical[0][0].text == "PSET" && logical[2][0].text == "OP1" && logical[10][0].text == "FROM",
                 "FM global/operator/matrix sections are missing");
+
+        const std::array<FmSynthMachine::UiBank, 5> banks {
+            FmSynthMachine::UiBank::core, FmSynthMachine::UiBank::envelope,
+            FmSynthMachine::UiBank::scaling, FmSynthMachine::UiBank::route,
+            FmSynthMachine::UiBank::global
+        };
+        for (auto bank : banks)
+        {
+            require(synth.getUiBank() == bank, "FM UI bank order changed");
+            const auto cursor = synth.consumePreferredCursorPosition();
+            if (bank != FmSynthMachine::UiBank::core)
+                require(cursor.has_value(), "FM UI bank did not provide a preferred cursor");
+            require(synth.cycleUiPanel(1), "FM UI bank did not cycle");
+        }
+        require(synth.getUiBank() == FmSynthMachine::UiBank::core, "FM UI bank did not wrap");
+
+        synth.setUiEnvelopeMonitoring(true);
+        render(synth, 60, 100, 0.02);
+        FmSynthMachine::UiEnvelopeSnapshot snapshot;
+        synth.getUiEnvelopeSnapshot(snapshot);
+        bool foundLiveVoice = false;
+        for (const auto& voice : snapshot.voices)
+            if (voice.active)
+            {
+                foundLiveVoice = true;
+                require(voice.midiNote == 60, "FM UI snapshot MIDI note is incorrect");
+                for (int op = 0; op < 4; ++op)
+                {
+                    require(voice.stages[static_cast<std::size_t>(op)] >= 0
+                                && voice.stages[static_cast<std::size_t>(op)] < 4,
+                            "FM UI snapshot stage is invalid");
+                    require(voice.progress[static_cast<std::size_t>(op)] >= 0.0f
+                                && voice.progress[static_cast<std::size_t>(op)] <= 1.0f,
+                            "FM UI snapshot progress is invalid");
+                }
+            }
+        require(foundLiveVoice, "FM UI snapshot did not publish an active voice");
+        synth.allNotesOff();
+        synth.getUiEnvelopeSnapshot(snapshot);
+        for (const auto& voice : snapshot.voices)
+            require(!voice.active, "FM UI snapshot left a stale marker after all-notes-off");
+        synth.setUiEnvelopeMonitoring(false);
 
         auto initial = render(synth);
         require(peak(initial) > 0.001f, "INIT preset did not render audio");
@@ -132,8 +179,12 @@ int main()
         insertControl(synth, 4, "CRS", 1.0); // modulator ratio
         for (const char* label : { "L1", "L2", "L3" })
             insertControl(synth, 4, label, 100.0);
-        auto matrix = synth.getUIBoxes({});
+        auto matrix = synth.getControlBoxes({});
         require(static_cast<bool>(matrix[11][2].onInsert), "OP2 to OP1 matrix route is editable");
+        matrix[11][2].onInsert(1.0);
+        matrix[11][2].onAdjust(1);
+        require(synth.getControlBoxes({})[11][2].text == "1.01",
+                "FM matrix adjustment is not fine-grained to 0.01");
         for (const double index : { 0.5, 1.0, 2.0, 4.0 })
         {
             matrix[11][2].onInsert(index);
@@ -189,12 +240,12 @@ int main()
         synth.getStateInformation(evolvingState);
         FmSynthMachine evolvingRestored;
         evolvingRestored.setStateInformation(evolvingState.getData(), static_cast<int>(evolvingState.getSize()));
-        require(evolvingRestored.getUIBoxes({})[1][0].text == "EVOLVE",
+        require(evolvingRestored.getControlBoxes({})[1][0].text == "EVOLVE",
                 "EVOLVE preset identity did not survive state round trip");
 
         const char legacyCustom[] = "{\"version\":1,\"preset\":12}";
         evolvingRestored.setStateInformation(legacyCustom, static_cast<int>(sizeof(legacyCustom) - 1));
-        require(evolvingRestored.getUIBoxes({})[1][0].text == "CUST",
+        require(evolvingRestored.getControlBoxes({})[1][0].text == "CUST",
                 "version-1 custom FM preset identity did not migrate safely");
 
         insertControl(synth, 0, "VOI", 8.0);

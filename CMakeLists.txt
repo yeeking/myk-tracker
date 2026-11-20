@@ -37,6 +37,37 @@ juce_add_gui_app(tracker-hardware-emulator
 
 juce_generate_juce_header(tracker-hardware-emulator)
 
+# Keyboard-first visual exploration tool. It shares the production cube
+# renderer but contains no tracker or audio state.
+juce_add_gui_app(fm-synth-ui-prototype
+    COMPANY_NAME Yee-King
+    PRODUCT_NAME "MYK FM UI Prototype")
+
+juce_generate_juce_header(fm-synth-ui-prototype)
+
+target_sources(fm-synth-ui-prototype
+    PRIVATE
+    src/fm_ui_prototype/Main.cpp
+    src/fm_ui_prototype/FmUiPrototypeComponent.cpp
+    src/fm_ui_prototype/FmUiPrototypeComponent.h
+    src/TrackerUIComponent.cpp
+)
+target_include_directories(fm-synth-ui-prototype PRIVATE src)
+target_compile_definitions(fm-synth-ui-prototype
+    PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:fm-synth-ui-prototype,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:fm-synth-ui-prototype,JUCE_VERSION>")
+target_link_libraries(fm-synth-ui-prototype
+    PRIVATE
+        juce::juce_gui_extra
+        juce::juce_opengl
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
 target_sources(tracker-hardware-emulator
     PRIVATE
     src/hardware_emulator/Main.cpp

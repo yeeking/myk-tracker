@@ -162,6 +162,18 @@ void WavetableSynthMachine::processBlock(juce::AudioBuffer<float>& buffer, juce:
         for (int channel = 0; channel < numChannels; ++channel)
             buffer.addSample(channel, sample, outputSample);
     }
+
+    if (uiEnvelopeMonitoring.load(std::memory_order_relaxed))
+    {
+        uiEnvelopeSamplesUntilPublish -= numSamples;
+        if (uiEnvelopeSamplesUntilPublish <= 0)
+        {
+            publishUiEnvelopeSnapshot();
+            uiEnvelopeSamplesUntilPublish = juce::jmax(1, static_cast<int>(currentSampleRate * 0.005));
+        }
+    }
+    else
+        uiEnvelopeSamplesUntilPublish = 0;
 }
 
 std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineUiContext& context)
@@ -518,6 +530,35 @@ WavetableSynthMachine::UiPreviewState WavetableSynthMachine::getUiPreviewState()
     return state;
 }
 
+void WavetableSynthMachine::publishUiEnvelopeSnapshot() noexcept
+{
+    for (int index = 0; index < kMaxVoiceCount; ++index)
+    {
+        const auto& voice = voices[static_cast<std::size_t>(index)];
+        auto& target = uiEnvelopeVoices[static_cast<std::size_t>(index)];
+        const auto state = voice.envelope.getUiState();
+        target.age.store(voice.triggerOrder, std::memory_order_relaxed);
+        target.stage.store(state.stage, std::memory_order_relaxed);
+        target.progress.store(state.progress, std::memory_order_relaxed);
+        target.level.store(state.level, std::memory_order_relaxed);
+        target.active.store(voice.active && state.active ? 1 : 0, std::memory_order_relaxed);
+    }
+}
+
+void WavetableSynthMachine::getUiEnvelopeSnapshot(UiEnvelopeSnapshot& destination) const noexcept
+{
+    for (int index = 0; index < kMaxVoiceCount; ++index)
+    {
+        const auto& source = uiEnvelopeVoices[static_cast<std::size_t>(index)];
+        auto& target = destination.voices[static_cast<std::size_t>(index)];
+        target.active = source.active.load(std::memory_order_relaxed) != 0;
+        target.age = source.age.load(std::memory_order_relaxed);
+        target.stage = source.stage.load(std::memory_order_relaxed);
+        target.progress = source.progress.load(std::memory_order_relaxed);
+        target.level = source.level.load(std::memory_order_relaxed);
+    }
+}
+
 int WavetableSynthMachine::getVoiceCount() const
 {
     const std::lock_guard<std::mutex> lock(stateMutex);
@@ -574,6 +615,9 @@ void WavetableSynthMachine::allNotesOff()
     }
     nextVoiceIndex = 0;
     nextVoiceTriggerOrder = 0;
+    uiEnvelopeSamplesUntilPublish = 0;
+    for (auto& state : uiEnvelopeVoices)
+        state.active.store(0, std::memory_order_relaxed);
 }
 
 void WavetableSynthMachine::getStateInformation(juce::MemoryBlock& destData)

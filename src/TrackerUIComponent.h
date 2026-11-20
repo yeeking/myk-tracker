@@ -22,6 +22,9 @@ public:
         juce::Colour outlineColor { PaletteDefaults::cellOutline };
         float glow = 0.0f;
         float depthScale = 1.0f;
+        /** Optional world-space viewing-axis offset. Existing tracker pages
+            leave this at zero; prototype pages may stage an exploded layout. */
+        float zOffset = 0.0f;
         bool drawOutline = false;
         /** OpenGL line width used when drawing this cell's outline. */
     float outlineLineWidth = 3.0f;
@@ -60,6 +63,16 @@ public:
         the region's vertical centre line. */
     struct Trace
     {
+        struct Marker
+        {
+            /** Normalised horizontal location within this trace's region. */
+            float position = 0.0f;
+            /** Normalised vertical signal level in [-1, 1]. */
+            float sample = 0.0f;
+            juce::Colour color { juce::Colours::orange };
+            float size = 0.10f;
+        };
+
         float colStart = 0.0f;
         float colEnd = 1.0f;
         float rowTop = 0.0f;
@@ -70,6 +83,8 @@ public:
         // so traces overlay the grid instead of hiding behind cell faces.
         float z = 1.15f;
         float lineWidth = 2.0f;
+        /** Dynamic marker cubes ride a cached/static line without rebuilding it. */
+        std::vector<Marker> markers;
         /** Stable identity for traces whose vertices can remain in a GPU buffer. */
         std::string cacheId;
         /** Incremented when the cached samples or their grid placement change. */
@@ -95,6 +110,9 @@ public:
         float ambientStrength = TrackerPalette{}.ambientStrength;
         juce::Vector3D<float> lightDirection { TrackerPalette{}.lightDirection };
         bool glowPulseEnabled = true;
+        /** Normal tracker pages retain their empty grid cells. Sparse visual
+            studies can omit them to avoid a solid depth slab. */
+        bool drawEmptyCells = true;
     };
 
     explicit TrackerUIComponent(juce::OpenGLContext& context);
@@ -113,6 +131,8 @@ public:
     void setStyle(const Style& style);
     void setGlowPulseEnabled(bool enabled);
     void setCellSize(float width, float height);
+    /** Sets the cube extrusion depth used by the grid. */
+    void setCellDepth(float depth);
     void setTraces(const std::vector<Trace>& traces);
 
 private:
@@ -224,6 +244,10 @@ private:
     GLuint indexBuffer = 0;
     GLuint frontEdgeIndexBuffer = 0;
     GLuint traceVertexBuffer = 0;
+    // Markers are uploaded one point at a time. They must not share the
+    // dynamically-sized polyline VBO or their tiny upload would invalidate
+    // the capacity tracked for oscilloscopes and other uncached traces.
+    GLuint traceMarkerVertexBuffer = 0;
     std::size_t traceVertexCapacityBytes = 0;
 
     float cellWidth = 2.0f;
