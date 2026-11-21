@@ -125,10 +125,10 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
     UIBox machineCell;
     machineCell.kind = UIBox::Kind::TrackerCell;
     machineCell.text = getStackMachineLabel(stackTypes[slotIndex]);
-    machineCell.onAdjust = [this, stackIndex, slotIndex](int direction)
+    machineCell.onAdjust = [this, stackIndex, slotIndex](int direction, float)
     {
       if (machineHost != nullptr)
-        machineHost->cycleMachineTypeInStack(stackIndex, slotIndex, direction);
+        machineHost->cycleMachineTypeInStack(stackIndex, slotIndex, direction >= 0 ? 1 : -1);
     };
     boxes[0].push_back(std::move(machineCell));
 
@@ -149,10 +149,12 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
     sendCell.isDisabled = !hasSend;
     if (hasSend)
     {
-      sendCell.onAdjust = [this, stackIndex, slotIndex](int direction)
+      // Integer-dB display is the quantum floor: 1% of the -60..+12 range is
+      // below one step, so coarse and fine both move one dB.
+      sendCell.onAdjust = [this, stackIndex, slotIndex](int direction, float)
       {
         if (machineHost != nullptr)
-          machineHost->adjustMachineSendLevelDbInStack(stackIndex, slotIndex, direction);
+          machineHost->adjustMachineSendLevelDbInStack(stackIndex, slotIndex, direction >= 0 ? 1 : -1);
       };
       sendCell.hasValueScale = true;
       sendCell.valueNorm = normalizeStackLevelDb(machineHost->getMachineSendLevelDbInStack(stackIndex, slotIndex));
@@ -166,10 +168,12 @@ std::vector<std::vector<UIBox>> SequencerEditor::buildMachineStackCells(std::siz
     returnCell.isDisabled = !hasReturn;
     if (hasReturn)
     {
-      returnCell.onAdjust = [this, stackIndex, slotIndex](int direction)
+      // Integer-dB display is the quantum floor: 1% of the -60..+12 range is
+      // below one step, so coarse and fine both move one dB.
+      returnCell.onAdjust = [this, stackIndex, slotIndex](int direction, float)
       {
         if (machineHost != nullptr)
-          machineHost->adjustMachineReturnLevelDbInStack(stackIndex, slotIndex, direction);
+          machineHost->adjustMachineReturnLevelDbInStack(stackIndex, slotIndex, direction >= 0 ? 1 : -1);
       };
       returnCell.hasValueScale = true;
       returnCell.valueNorm = normalizeStackLevelDb(machineHost->getMachineReturnLevelDbInStack(stackIndex, slotIndex));
@@ -246,7 +250,7 @@ std::vector<std::vector<UIBox>> buildMidiOutDetailCells(MachineHost* machineHost
   boxes[1][0].kind = UIBox::Kind::TrackerCell;
   const int midiChannel = machineHost != nullptr ? machineHost->getStackMidiOutputChannel(stackIndex) : 1;
   boxes[1][0].text = juce::String(midiChannel).paddedLeft('0', 2).toStdString();
-  boxes[1][0].onAdjust = [machineHost, stackIndex](int direction)
+  boxes[1][0].onAdjust = [machineHost, stackIndex](int direction, float)
   {
     if (machineHost != nullptr)
       machineHost->adjustStackMidiOutputChannel(stackIndex, direction);
@@ -547,7 +551,7 @@ bool SequencerEditor::dismissCurrentTransientUi()
   return false;
 }
 
-void SequencerEditor::machineAdjustCurrentCell(int direction)
+void SequencerEditor::machineAdjustCurrentCell(int direction, float rangeFraction)
 {
   if (!isMachineUiForCurrentSequence())
     return;
@@ -556,7 +560,7 @@ void SequencerEditor::machineAdjustCurrentCell(int direction)
     return;
   machineEditCol = machineCursorCol;
   machineEditRow = machineCursorRow;
-  cell->onAdjust(direction);
+  cell->onAdjust(direction, rangeFraction);
   requestMachineStateRefresh();
 }
 

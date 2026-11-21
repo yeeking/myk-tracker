@@ -4,6 +4,11 @@
 #include <functional>
 #include <string>
 
+/** Range fraction applied by a coarse `]`/`[` adjust (1% of the full range). */
+inline constexpr float kCoarseAdjustRangeFraction = 0.01f;
+/** Range fraction applied by a fine `}`/`{` adjust (0.1% of the full range). */
+inline constexpr float kFineAdjustRangeFraction = 0.001f;
+
 // Shared UI cell model with state and action callbacks.
 struct UIBox
 {
@@ -80,8 +85,13 @@ struct UIBox
 
     /** Callback fired when the user activates the cell. */
     std::function<void()> onActivate;
-    /** Callback fired when the user adjusts the cell incrementally. */
-    std::function<void(int)> onAdjust;
+    /** Callback fired when the user adjusts the cell incrementally.
+        `direction` is +/-1; `fraction` is the range fraction the cell should
+        move (0.01 coarse `]`/`[`, 0.001 fine `}`/`{`). Ranged cells move by
+        (max - min) * fraction, clamped to their display quantum. Discrete
+        cells (cycles, toggles) use only the sign of `direction` and ignore
+        `fraction`. */
+    std::function<void(int, float)> onAdjust;
     /** Callback fired when the user inserts a numeric/note value. */
     std::function<void(double)> onInsert;
     /** Callback fired when the user previews the cell content. */

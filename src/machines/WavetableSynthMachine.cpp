@@ -193,10 +193,13 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     auto makeValueCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
         return makeFloatCell(*target, minValue, maxValue, decimals,
-            [this, target, step, minValue, maxValue](int direction)
+            [this, target, step, minValue, maxValue](int direction, float fraction)
             {
                 const std::lock_guard<std::mutex> guard(stateMutex);
-                *target = juce::jlimit(minValue, maxValue, *target + (step * static_cast<float>(direction)));
+                // Range-percent adjust snapped to the step grid; the display
+                // step is the quantum floor.
+                const float delta = juce::jmax(step, std::lround((maxValue - minValue) * fraction / step) * step);
+                *target = juce::jlimit(minValue, maxValue, *target + (delta * static_cast<float>(direction)));
                 updateVoiceEnvelopeParameters();
             });
     };
@@ -209,10 +212,11 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[0][1].text = "STEPS";
     boxes[1][1].kind = UIBox::Kind::TrackerCell;
     boxes[1][1].text = std::to_string(waveStepCount);
-    boxes[1][1].onAdjust = [this](int direction)
+    boxes[1][1].onAdjust = [this](int direction, float fraction)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
-        waveStepCount = juce::jlimit(1, kMaxWaveSteps, waveStepCount + direction);
+        const int delta = juce::jmax(1, static_cast<int>(std::lround((kMaxWaveSteps - 1) * fraction)));
+        waveStepCount = juce::jlimit(1, kMaxWaveSteps, waveStepCount + direction * delta);
     };
     boxes[1][1].hasValueScale = true;
     boxes[1][1].valueNorm = juce::jlimit(0.0f, 1.0f,
@@ -237,10 +241,10 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[1][3].kind = UIBox::Kind::TrackerCell;
     boxes[1][3].text = (mainOctaveOffset > 0) ? ("+" + std::to_string(mainOctaveOffset))
                                               : std::to_string(mainOctaveOffset);
-    boxes[1][3].onAdjust = [this](int direction)
+    boxes[1][3].onAdjust = [this](int direction, float)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
-        int next = mainOctaveOffset + direction;
+        int next = mainOctaveOffset + static_cast<int>(std::copysign(1.0, static_cast<double>(direction)));
         if (next > 3)
             next = -3;
         if (next < -3)
@@ -256,11 +260,13 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[1][4].kind = UIBox::Kind::TrackerCell;
     const int mainDetuneCentsDisplay = static_cast<int>(std::lround(mainDetuneCents));
     boxes[1][4].text = std::string(mainDetuneCentsDisplay > 0 ? "+" : "") + std::to_string(mainDetuneCentsDisplay);
-    boxes[1][4].onAdjust = [this](int direction)
+    boxes[1][4].onAdjust = [this](int direction, float fraction)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
+        // Cent display is the quantum floor.
+        const float delta = juce::jmax(1.0f, (kMaxDetuneCents - kMinDetuneCents) * fraction);
         mainDetuneCents = juce::jlimit(kMinDetuneCents, kMaxDetuneCents,
-            mainDetuneCents + (1.0f * static_cast<float>(direction)));
+            mainDetuneCents + (delta * static_cast<float>(direction)));
         updateMainDetuneMultiplier();
     };
     boxes[1][4].hasValueScale = true;
@@ -278,7 +284,7 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
         boxes[1][row].isDisabled = false;
         boxes[1][row].kind = UIBox::Kind::TrackerCell;
         boxes[1][row].text = getWaveformName(waveSteps[static_cast<std::size_t>(stepIndex)]);
-        boxes[1][row].onAdjust = [this, stepIndex](int direction)
+        boxes[1][row].onAdjust = [this, stepIndex](int direction, float)
         {
             const std::lock_guard<std::mutex> guard(stateMutex);
             int next = static_cast<int>(waveSteps[static_cast<std::size_t>(stepIndex)]) + direction;
@@ -301,9 +307,8 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[1][modeRow].isDisabled = false;
     boxes[1][modeRow].kind = UIBox::Kind::TrackerCell;
     boxes[1][modeRow].text = (cyclerMode == CyclerMode::ad) ? "AD" : "CPS";
-    boxes[1][modeRow].onAdjust = [this](int direction)
+    boxes[1][modeRow].onAdjust = [this](int, float)
     {
-        juce::ignoreUnused(direction);
         const std::lock_guard<std::mutex> guard(stateMutex);
         cyclerMode = (cyclerMode == CyclerMode::ad) ? CyclerMode::cps : CyclerMode::ad;
     };
@@ -347,10 +352,11 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[5][6].isDisabled = false;
     boxes[5][6].kind = UIBox::Kind::TrackerCell;
     boxes[5][6].text = std::to_string(voiceCount);
-    boxes[5][6].onAdjust = [this](int direction)
+    boxes[5][6].onAdjust = [this](int direction, float fraction)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
-        setVoiceCountLocked(voiceCount + direction);
+        const int delta = juce::jmax(1, static_cast<int>(std::lround((kMaxVoiceCount - 1) * fraction)));
+        setVoiceCountLocked(voiceCount + direction * delta);
     };
     boxes[5][6].onInsert = [this](double value)
     {
@@ -376,10 +382,11 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[3][1].isDisabled = false;
     boxes[3][1].kind = UIBox::Kind::TrackerCell;
     boxes[3][1].text = std::to_string(subWaveStepCount);
-    boxes[3][1].onAdjust = [this](int direction)
+    boxes[3][1].onAdjust = [this](int direction, float fraction)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
-        subWaveStepCount = juce::jlimit(1, kMaxWaveSteps, subWaveStepCount + direction);
+        const int delta = juce::jmax(1, static_cast<int>(std::lround((kMaxWaveSteps - 1) * fraction)));
+        subWaveStepCount = juce::jlimit(1, kMaxWaveSteps, subWaveStepCount + direction * delta);
     };
     boxes[3][1].hasValueScale = true;
     boxes[3][1].valueNorm = juce::jlimit(0.0f, 1.0f,
@@ -395,10 +402,10 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[3][3].kind = UIBox::Kind::TrackerCell;
     boxes[3][3].text = (subOctaveOffset > 0) ? ("+" + std::to_string(subOctaveOffset))
                                               : std::to_string(subOctaveOffset);
-    boxes[3][3].onAdjust = [this](int direction)
+    boxes[3][3].onAdjust = [this](int direction, float)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
-        int next = subOctaveOffset + direction;
+        int next = subOctaveOffset + static_cast<int>(std::copysign(1.0, static_cast<double>(direction)));
         if (next > 3)
             next = -3;
         if (next < -3)
@@ -414,11 +421,13 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
     boxes[3][4].kind = UIBox::Kind::TrackerCell;
     const int detuneCents = static_cast<int>(std::lround(subDetuneCents));
     boxes[3][4].text = std::string(detuneCents > 0 ? "+" : "") + std::to_string(detuneCents);
-    boxes[3][4].onAdjust = [this](int direction)
+    boxes[3][4].onAdjust = [this](int direction, float fraction)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
+        // Cent display is the quantum floor.
+        const float delta = juce::jmax(1.0f, (kMaxDetuneCents - kMinDetuneCents) * fraction);
         subDetuneCents = juce::jlimit(kMinDetuneCents, kMaxDetuneCents,
-            subDetuneCents + (1.0f * static_cast<float>(direction)));
+            subDetuneCents + (delta * static_cast<float>(direction)));
         updateSubDetuneMultiplier();
     };
     boxes[3][4].hasValueScale = true;
@@ -434,7 +443,7 @@ std::vector<std::vector<UIBox>> WavetableSynthMachine::getUIBoxes(const MachineU
         boxes[3][row].isDisabled = false;
         boxes[3][row].kind = UIBox::Kind::TrackerCell;
         boxes[3][row].text = getWaveformName(subWaveSteps[static_cast<std::size_t>(stepIndex)]);
-        boxes[3][row].onAdjust = [this, stepIndex](int direction)
+        boxes[3][row].onAdjust = [this, stepIndex](int direction, float)
         {
             const std::lock_guard<std::mutex> guard(stateMutex);
             int next = static_cast<int>(subWaveSteps[static_cast<std::size_t>(stepIndex)]) + direction;

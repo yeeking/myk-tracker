@@ -31,10 +31,13 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
     auto buildFloatCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
         return makeFloatCell(*target, minValue, maxValue, decimals,
-            [this, target, step, minValue, maxValue](int direction)
+            [this, target, step, minValue, maxValue](int direction, float fraction)
             {
                 const std::lock_guard<std::mutex> guard(stateMutex);
-                *target = juce::jlimit(minValue, maxValue, *target + step * static_cast<float>(direction));
+                // Range-percent adjust snapped to the step grid; the display
+                // step is the quantum floor.
+                const float delta = juce::jmax(step, std::lround((maxValue - minValue) * fraction / step) * step);
+                *target = juce::jlimit(minValue, maxValue, *target + delta * static_cast<float>(direction));
             });
     };
 
@@ -42,10 +45,11 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
     boxes[0][0].text = "MODE";
     boxes[1][0].kind = UIBox::Kind::TrackerCell;
     boxes[1][0].text = getModeName(mode);
-    boxes[1][0].onAdjust = [this](int direction)
+    boxes[1][0].onAdjust = [this](int direction, float)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
-        int next = static_cast<int>(mode) + direction;
+        const int sign = direction >= 0 ? 1 : -1;
+        int next = static_cast<int>(mode) + sign;
         if (next < 0)
             next = static_cast<int>(DelayMode::milliseconds);
         if (next > static_cast<int>(DelayMode::milliseconds))
@@ -58,10 +62,11 @@ std::vector<std::vector<UIBox>> DelayFxMachine::getUIBoxes(const MachineUiContex
     boxes[1][1].kind = UIBox::Kind::TrackerCell;
     boxes[1][1].text = std::to_string(syncTicks);
     boxes[1][1].isDisabled = mode != DelayMode::sync;
-    boxes[1][1].onAdjust = [this](int direction)
+    boxes[1][1].onAdjust = [this](int direction, float fraction)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
-        syncTicks = juce::jlimit(1, 64, syncTicks + direction);
+        const int delta = juce::jmax(1, static_cast<int>(std::lround(63.0f * fraction)));
+        syncTicks = juce::jlimit(1, 64, syncTicks + direction * delta);
     };
     boxes[1][1].hasValueScale = true;
     boxes[1][1].valueNorm = juce::jlimit(0.0f, 1.0f, (syncTicks - 1) / 63.0f);

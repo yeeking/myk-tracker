@@ -54,7 +54,7 @@ void adjustControl(FmSynthMachine& synth, int labelColumn, const char* label, in
         {
             auto& cell = boxes[static_cast<std::size_t>(labelColumn + 1)][row];
             require(static_cast<bool>(cell.onAdjust), "FM control does not support adjustment");
-            cell.onAdjust(amount);
+            cell.onAdjust(amount, kCoarseAdjustRangeFraction);
             return;
         }
     throw std::runtime_error(std::string("missing FM control: ") + label);
@@ -182,9 +182,14 @@ int main()
         auto matrix = synth.getControlBoxes({});
         require(static_cast<bool>(matrix[11][2].onInsert), "OP2 to OP1 matrix route is editable");
         matrix[11][2].onInsert(1.0);
-        matrix[11][2].onAdjust(1);
-        require(synth.getControlBoxes({})[11][2].text == "1.01",
-                "FM matrix adjustment is not fine-grained to 0.01");
+        matrix[11][2].onAdjust(1, kCoarseAdjustRangeFraction);
+        require(synth.getControlBoxes({})[11][2].text == "1.32",
+                "FM matrix coarse adjust moves 1% of the route range (quantum 0.01)");
+        matrix = synth.getControlBoxes({});
+        matrix[11][2].onInsert(1.0);
+        matrix[11][2].onAdjust(1, kFineAdjustRangeFraction);
+        require(synth.getControlBoxes({})[11][2].text == "1.03",
+                "FM matrix fine adjust moves 0.1% of the route range (quantum 0.01)");
         for (const double index : { 0.5, 1.0, 2.0, 4.0 })
         {
             matrix[11][2].onInsert(index);

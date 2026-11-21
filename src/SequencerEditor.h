@@ -267,9 +267,9 @@ public:
   /**remove a row: might remove a new step to current track or remove a new row to a step's data */
   void removeRow();
   /** increase the value at the current cursor position, e.g. increasing note number */
-  void incrementAtCursor();
+  void incrementAtCursor(bool fine = false);
   /** decrease the value at the current cursor position, e.g. increasing note number */
-  void decrementAtCursor();
+  void decrementAtCursor(bool fine = false);
   /** Apply the current Step-page bracket adjustment to every row in the step. */
   void adjustAllStepRowsAtCursor(int direction);
   void gotoSongPage();
@@ -347,7 +347,9 @@ public:
   void machineAddEntry();
   void machineRemoveEntry();
   void machineActivateCurrentCell();
-  void machineAdjustCurrentCell(int direction);
+  /** Adjust the machine cell under the cursor by a range fraction (0.01
+      coarse, 0.001 fine). */
+  void machineAdjustCurrentCell(int direction, float rangeFraction);
   bool machineInsertCurrentCell(double value);
   bool machinePreviewCurrentCell();
   bool machineResetCurrentCell();
@@ -516,11 +518,11 @@ private:
   void incrementOnSongPage();
   void incrementOnStepPage();
   void incrementOnSequenceConfigPage();
-  void incrementOnMachinePage();
+  void incrementOnMachinePage(bool fine);
   void decrementOnSongPage();
   void decrementOnStepPage();
   void decrementOnSequenceConfigPage();
-  void decrementOnMachinePage();
+  void decrementOnMachinePage(bool fine);
   bool isMachineUiForCurrentSequence() const;
   MachineInterface* getActiveMachine(CommandType type) const;
   void dismissMachineTransientUiIfNeeded();

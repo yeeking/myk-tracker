@@ -51,16 +51,18 @@ float characterExponential(float base, float negative, float positive, float cha
     return base * std::pow(std::max(0.001f, target) / std::max(0.001f, base), amount);
 }
 
-int exponentialStep(int current, int minimum, int maximum, int direction) noexcept
+// Perceptual (log2) step: moves `octaves` along the value's log scale.
+int exponentialStep(int current, int minimum, int maximum, float octaves) noexcept
 {
-    if (direction == 0)
+    if (octaves == 0.0f)
         return current;
-    constexpr float kRootTwo = 1.41421356237f;
-    const float scaled = direction > 0 ? static_cast<float>(current) * kRootTwo
-                                       : static_cast<float>(current) / kRootTwo;
+    // Zero is not representable on a log scale; treat it as "at the floor".
+    if (current <= 0)
+        return minimum;
+    const float scaled = static_cast<float>(current) * std::pow(2.0f, octaves);
     int next = static_cast<int>(std::lround(scaled));
     if (next == current)
-        next += direction > 0 ? 1 : -1;
+        next += octaves > 0.0f ? 1 : -1;
     return juce::jlimit(minimum, maximum, next);
 }
 
@@ -1135,7 +1137,7 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)].isDisabled = true;
         auto& value = boxes[static_cast<std::size_t>(column + 1)][static_cast<std::size_t>(row)];
         value = makeFloatCell(static_cast<float>(target.load()), static_cast<float>(minimum), static_cast<float>(maximum), 0,
-            [&target, minimum, maximum, step, onChanged](int direction) { target.store(juce::jlimit(minimum, maximum, target.load() + direction * step)); if (onChanged) onChanged(); });
+            [&target, minimum, maximum, step, onChanged](int direction, float fraction) { const int delta = juce::jmax(step, static_cast<int>(std::lround((maximum - minimum) * fraction))); target.store(juce::jlimit(minimum, maximum, target.load() + direction * delta)); if (onChanged) onChanged(); });
         value.onInsert = [&target, minimum, maximum, onChanged](double inserted) { target.store(juce::jlimit(minimum, maximum, static_cast<int>(std::lround(inserted)))); if (onChanged) onChanged(); };
     };
     auto exponential = [&boxes](int column, int row, const char* label, std::atomic<int>& target, int minimum, int maximum, std::function<void()> onChanged = {})
@@ -1144,9 +1146,11 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)].isDisabled = true;
         auto& value = boxes[static_cast<std::size_t>(column + 1)][static_cast<std::size_t>(row)];
         value = makeFloatCell(static_cast<float>(target.load()), static_cast<float>(minimum), static_cast<float>(maximum), 0,
-            [&target, minimum, maximum, onChanged](int direction)
+            [&target, minimum, maximum, onChanged](int direction, float fraction)
             {
-                target.store(exponentialStep(target.load(), minimum, maximum, direction));
+                // Perceptual step: fraction of the full octave span.
+                const float octaves = std::log2(static_cast<float>(maximum) / static_cast<float>(minimum)) * fraction * (direction >= 0 ? 1.0f : -1.0f);
+                target.store(exponentialStep(target.load(), minimum, maximum, octaves));
                 if (onChanged) onChanged();
             });
         value.onInsert = [&target, minimum, maximum, onChanged](double inserted)
@@ -1161,7 +1165,7 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
         boxes[static_cast<std::size_t>(column)][static_cast<std::size_t>(row)].isDisabled = true;
         auto& value = boxes[static_cast<std::size_t>(column + 1)][static_cast<std::size_t>(row)];
         value = makeFloatCell(target.load(), minimum, maximum, decimals,
-            [&target, minimum, maximum, step, onChanged](int direction) { target.store(juce::jlimit(minimum, maximum, target.load() + direction * step)); if (onChanged) onChanged(); });
+            [&target, minimum, maximum, step, onChanged](int direction, float fraction) { const float delta = juce::jmax(step, std::lround((maximum - minimum) * fraction / step) * step); target.store(juce::jlimit(minimum, maximum, target.load() + delta * static_cast<float>(direction))); if (onChanged) onChanged(); });
         value.onInsert = [&target, minimum, maximum, onChanged](double inserted) { target.store(juce::jlimit(minimum, maximum, static_cast<float>(inserted))); if (onChanged) onChanged(); };
     };
     auto choice = [&boxes](int column, int row, const char* label, std::atomic<int>& target, const char* const* names, int count, std::function<void()> onChanged = {})
@@ -1172,7 +1176,7 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
         value.kind = UIBox::Kind::TrackerCell;
         value.isDisabled = false;
         value.text = names[juce::jlimit(0, count - 1, target.load())];
-        value.onAdjust = [&target, count, onChanged](int direction) { int next = target.load() + (direction < 0 ? -1 : 1); if (next < 0) next = count - 1; if (next >= count) next = 0; target.store(next); if (onChanged) onChanged(); };
+        value.onAdjust = [&target, count, onChanged](int direction, float) { int next = target.load() + (direction < 0 ? -1 : 1); if (next < 0) next = count - 1; if (next >= count) next = 0; target.store(next); if (onChanged) onChanged(); };
         value.onInsert = [&target, count, onChanged](double inserted) { target.store(juce::jlimit(0, count - 1, static_cast<int>(std::lround(inserted)))); if (onChanged) onChanged(); };
     };
     auto enabledToggle = [&boxes](int column, std::atomic<int>& target)
@@ -1181,7 +1185,7 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
         value.kind = UIBox::Kind::TrackerCell;
         value.isDisabled = false;
         value.text = kEnabledNames[juce::jlimit(0, 1, target.load(std::memory_order_relaxed))];
-        value.onAdjust = [&target](int) { target.store(target.load(std::memory_order_relaxed) == 0 ? 1 : 0, std::memory_order_relaxed); };
+        value.onAdjust = [&target](int, float) { target.store(target.load(std::memory_order_relaxed) == 0 ? 1 : 0, std::memory_order_relaxed); };
         value.onInsert = [&target](double inserted) { target.store(inserted >= 0.5 ? 1 : 0, std::memory_order_relaxed); };
     };
 
@@ -1214,7 +1218,7 @@ std::vector<std::vector<UIBox>> DrumSynthMachine::getUIBoxes(const MachineUiCont
     presetCell.kind = UIBox::Kind::TrackerCell;
     presetCell.isDisabled = false;
     presetCell.text = kPresetNames[juce::jlimit(0, 2, kitPreset.load(std::memory_order_relaxed))];
-    presetCell.onAdjust = [this](int direction)
+    presetCell.onAdjust = [this](int direction, float)
     {
         const auto current = getKitPreset();
         applyKitPreset(current == KitPreset::tr808 && direction >= 0 ? KitPreset::tr909 : KitPreset::tr808);

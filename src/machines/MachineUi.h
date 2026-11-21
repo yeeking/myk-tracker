@@ -57,9 +57,10 @@ inline UIBox makeLabelCell(const std::string& text)
 /** Builds a float parameter cell.
     The caller-supplied adjust callback owns the state update (locking and
     read-modify-write); this helper only handles presentation: text, fill
-    scale, and linear normalisation over [min, max]. */
+    scale, and linear normalisation over [min, max]. The callback receives a
+    +/-1 direction and a range fraction (coarse 0.01, fine 0.001). */
 inline UIBox makeFloatCell(float currentValue, float minValue, float maxValue, int decimals,
-                           const std::function<void(int)>& onAdjust)
+                           const std::function<void(int, float)>& onAdjust)
 {
     UIBox cell;
     cell.kind = UIBox::Kind::TrackerCell;
@@ -79,11 +80,16 @@ inline UIBox makeAtomicFloatCell(std::atomic<float>& target, float step,
                                  std::function<void()> onChanged = {})
 {
     return makeFloatCell(target.load(std::memory_order_relaxed), minValue, maxValue, decimals,
-        [&target, step, minValue, maxValue, onChanged = std::move(onChanged)](int direction)
+        [&target, step, minValue, maxValue, onChanged = std::move(onChanged)](int direction, float fraction)
         {
             const float currentValue = target.load(std::memory_order_relaxed);
+            // Range-percent adjustment snapped to the step grid; the step is
+            // the quantum floor, so small ranges where 1% < step keep their
+            // old fixed-step behavior.
+            const float delta = juce::jmax(step,
+                                           std::lround((maxValue - minValue) * fraction / step) * step);
             target.store(juce::jlimit(minValue, maxValue,
-                                      currentValue + step * static_cast<float>(direction)),
+                                      currentValue + delta * static_cast<float>(direction)),
                          std::memory_order_relaxed);
             if (onChanged)
                 onChanged();
@@ -91,9 +97,10 @@ inline UIBox makeAtomicFloatCell(std::atomic<float>& target, float step,
 }
 
 /** Builds an on/off toggle cell. As with makeFloatCell, the adjust callback
-    owns the state update; this helper only handles presentation. */
+    owns the state update; this helper only handles presentation. Toggles are
+    discrete, so the callback only uses the sign of the direction. */
 inline UIBox makeToggleCell(bool isOn, const std::string& offText, const std::string& onText,
-                            const std::function<void(int)>& onAdjust)
+                            const std::function<void(int, float)>& onAdjust)
 {
     UIBox cell;
     cell.kind = UIBox::Kind::TrackerCell;

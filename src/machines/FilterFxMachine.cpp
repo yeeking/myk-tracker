@@ -46,17 +46,20 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
     auto buildFloatCell = [this](float* target, float step, float minValue, float maxValue, int decimals)
     {
         return makeFloatCell(*target, minValue, maxValue, decimals,
-            [this, target, step, minValue, maxValue](int direction)
+            [this, target, step, minValue, maxValue](int direction, float fraction)
             {
                 const std::lock_guard<std::mutex> guard(stateMutex);
-                *target = juce::jlimit(minValue, maxValue, *target + step * static_cast<float>(direction));
+                // Range-percent adjust snapped to the step grid; the display
+                // step is the quantum floor.
+                const float delta = juce::jmax(step, std::lround((maxValue - minValue) * fraction / step) * step);
+                *target = juce::jlimit(minValue, maxValue, *target + delta * static_cast<float>(direction));
             });
     };
 
     auto buildToggleCell = [this](bool* target, const char* nameOff, const char* nameOn)
     {
         return makeToggleCell(*target, nameOff, nameOn,
-            [this, target](int direction)
+            [this, target](int direction, float)
             {
                 const std::lock_guard<std::mutex> guard(stateMutex);
                 if (direction != 0)
@@ -69,11 +72,11 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
     boxes[1][0].isDisabled = false;
     boxes[1][0].kind = UIBox::Kind::TrackerCell;
     boxes[1][0].text = filterModeName(filterMode);
-    boxes[1][0].onAdjust = [this](int direction)
+    boxes[1][0].onAdjust = [this](int direction, float)
     {
         const std::lock_guard<std::mutex> guard(stateMutex);
         const int modeCount = static_cast<int>(FilterMode::count);
-        int next = (static_cast<int>(filterMode) + direction) % modeCount;
+        int next = (static_cast<int>(filterMode) + (direction >= 0 ? 1 : -1)) % modeCount;
         if (next < 0)
             next += modeCount;
         filterMode = static_cast<FilterMode>(next);
@@ -84,7 +87,17 @@ std::vector<std::vector<UIBox>> FilterFxMachine::getUIBoxes(const MachineUiConte
 
     boxes[0][1].kind = UIBox::Kind::TrackerCell;
     boxes[0][1].text = "COFF";
-    boxes[1][1] = buildFloatCell(&cutoffHz, 50.0f, kMinCutoffHz, kMaxCutoffHz, 0);
+    // Cutoff is perceptually logarithmic: the range fraction is applied to
+    // the full log span, rounded to a whole hertz for the 0-dp display.
+    boxes[1][1] = makeFloatCell(cutoffHz, kMinCutoffHz, kMaxCutoffHz, 0,
+        [this](int direction, float fraction)
+        {
+            const std::lock_guard<std::mutex> guard(stateMutex);
+            const float value = cutoffHz;
+            const float logSpan = std::log(kMaxCutoffHz) - std::log(kMinCutoffHz);
+            const float next = std::exp(std::log(value) + logSpan * fraction * static_cast<float>(direction));
+            cutoffHz = juce::jlimit(kMinCutoffHz, kMaxCutoffHz, static_cast<float>(std::lround(next)));
+        });
 
     boxes[0][2].kind = UIBox::Kind::TrackerCell;
     boxes[0][2].text = "RES";

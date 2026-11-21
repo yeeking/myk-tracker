@@ -1096,7 +1096,10 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
 
                     const auto action = stringArg(args, "action", "activate");
                     if (action == "activate" && target->onActivate) target->onActivate();
-                    else if (action == "adjust" && target->onAdjust) target->onAdjust(intArg(args, "direction", 1));
+                    else if (action == "adjust" && target->onAdjust)
+                        // direction is a +/-1 sign; fine selects 0.1% of range.
+                        target->onAdjust(intArg(args, "direction", 1),
+                                         boolArg(args, "fine") ? kFineAdjustRangeFraction : kCoarseAdjustRangeFraction);
                     else if ((action == "insert" || action == "set") && target->onInsert) target->onInsert(numberArg(args, "value"));
                     else if (action == "preview" && target->onPreview) target->onPreview();
                     else if (action == "reset" && target->onReset) target->onReset();
@@ -1138,7 +1141,9 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 editor.setMachineCursor(static_cast<std::size_t>(juce::jmax(0, row)), static_cast<std::size_t>(juce::jmax(0, column)));
                 const auto action = stringArg(args, "action", "activate");
                 if (action == "activate") editor.machineActivateCurrentCell();
-                else if (action == "adjust") editor.machineAdjustCurrentCell(intArg(args, "direction", 1));
+                else if (action == "adjust")
+                    editor.machineAdjustCurrentCell(intArg(args, "direction", 1),
+                                                    boolArg(args, "fine") ? kFineAdjustRangeFraction : kCoarseAdjustRangeFraction);
                 else if (action == "insert") { if (!editor.machineInsertCurrentCell(numberArg(args, "value"))) return fail("unsupported", "Cell does not accept numeric input"); }
                 else if (action == "preview") { if (!editor.machinePreviewCurrentCell()) return fail("unsupported", "Cell cannot be previewed"); }
                 else if (action == "reset") { if (!editor.machineResetCurrentCell()) return fail("unsupported", "Cell cannot be reset"); }
@@ -1548,8 +1553,13 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     }
                     else if (key == '-') { editor.removeRow(); contentChanged = true; handled = true; }
                     else if (key == '=') { editor.addRow(); contentChanged = true; handled = true; }
-                    else if (key == '[') { editor.decrementAtCursor(); contentChanged = true; handled = true; }
-                    else if (key == ']') { editor.incrementAtCursor(); contentChanged = true; handled = true; }
+                    else if (key == '[') { editor.decrementAtCursor(false); contentChanged = true; handled = true; }
+                    else if (key == ']') { editor.incrementAtCursor(false); contentChanged = true; handled = true; }
+                    // Fine range-percent adjust. The step page consumes
+                    // Shift+{ / Shift+} earlier for its all-rows adjust, and
+                    // machine text entry swallows them while capturing input.
+                    else if (key == '{') { editor.decrementAtCursor(true); contentChanged = true; handled = true; }
+                    else if (key == '}') { editor.incrementAtCursor(true); contentChanged = true; handled = true; }
                     else if (key == ',') { editor.decrementOctave(); viewChanged = true; handled = true; }
                     else if (key == '.') { editor.incrementOctave(); viewChanged = true; handled = true; }
                     else if (key == '<' && editor.getCurrentPage() == SequencerEditorPage::sequence)
@@ -1569,8 +1579,8 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                 else if (action == "left") editor.moveCursorLeft();
                 else if (action == "right") editor.moveCursorRight();
                 else if (action == "activate") editor.click();
-                else if (action == "increment") editor.incrementAtCursor();
-                else if (action == "decrement") editor.decrementAtCursor();
+                else if (action == "increment") editor.incrementAtCursor(boolArg(args, "fine"));
+                else if (action == "decrement") editor.decrementAtCursor(boolArg(args, "fine"));
                 else if (action == "add_row") editor.addRow();
                 else if (action == "remove_row") editor.removeRow();
                 else if (action == "reset") editor.resetAtCursor();

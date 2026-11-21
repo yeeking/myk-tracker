@@ -523,10 +523,13 @@ int main()
 
     const int decayBeforeAdjustment = std::stoi(controlText(restored, 0, "DEC"));
     cells = restored.getUIBoxes({});
-    cells[1][5].onAdjust(1);
+    cells[1][5].onAdjust(1, kCoarseAdjustRangeFraction);
     cells = restored.getUIBoxes({});
-    require(decayBeforeAdjustment == 1200 && std::stoi(cells[1][5].text) > 1600,
-            "kick decay adjustment uses a rapid exponential step");
+    // 1% of the 20..8000 ms octave span is ~0.086 octaves (about x1.062):
+    // 1200 ms should land near 1274 ms.
+    require(decayBeforeAdjustment == 1200 && std::stoi(cells[1][5].text) > 1200
+            && std::stoi(cells[1][5].text) < 1300,
+            "kick decay coarse adjust moves 1% of the octave span");
 
     require(controlText(restored, 0, "WAVE") == "SIN", "kick waveform selector restores the persisted sine default");
     insertControl(restored, 0, "WAVE", 8.0);

@@ -40,7 +40,7 @@ void setCyclerRate(WavetableSynthMachine& synth, double rate)
                 // Fresh test synths start at 1.0 CPS; use the real bracket
                 // path to reach the requested zero-rate endpoint.
                 for (int step = 10; step > steps; --step)
-                    cells[col + 1][row].onAdjust(-1);
+                    cells[col + 1][row].onAdjust(-1, kCoarseAdjustRangeFraction);
                 return;
             }
     require(false, "WAVE UI contains the CYC control");
@@ -121,7 +121,7 @@ int main()
         hasFiniteAudio = hasFiniteAudio && std::isfinite(morphAudio.getSample(0, i));
     require(hasFiniteAudio,
             "zero-CPS WAVE accepts bipolar position modulation without invalid step access");
-    cells[5][6].onAdjust(-1);
+    cells[5][6].onAdjust(-1, kCoarseAdjustRangeFraction);
     require(synth.getVoiceCount() == 3, "bracket adjustment changes voice count by one");
     setVoiceCount(synth, -100.0);
     require(synth.getVoiceCount() == 1, "voice count clamps at one");

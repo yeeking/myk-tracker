@@ -382,9 +382,10 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                 case 2:
                     cell.kind = UIBox::Kind::SamplerValue;
                     cell.text = sanitizeLabel(juce::String(player.midiLow), 4);
-                    cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
+                    cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction, float fraction)
                     {
-                        const int nextLow = juce::jlimit(0, 127, low + direction);
+                        const int delta = juce::jmax(1, static_cast<int>(std::lround(127.0f * fraction)));
+                        const int nextLow = juce::jlimit(0, 127, low + direction * delta);
                         setSampleRangeFromWeb(playerId, nextLow, high);
                     };
                     cell.onInsert = [this, playerId, high = player.midiHigh](double value)
@@ -395,9 +396,10 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                 case 3:
                     cell.kind = UIBox::Kind::SamplerValue;
                     cell.text = sanitizeLabel(juce::String(player.midiHigh), 4);
-                    cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction)
+                    cell.onAdjust = [this, playerId, low = player.midiLow, high = player.midiHigh](int direction, float fraction)
                     {
-                        const int nextHigh = juce::jlimit(0, 127, high + direction);
+                        const int delta = juce::jmax(1, static_cast<int>(std::lround(127.0f * fraction)));
+                        const int nextHigh = juce::jlimit(0, 127, high + direction * delta);
                         setSampleRangeFromWeb(playerId, low, nextHigh);
                     };
                     cell.onInsert = [this, playerId, low = player.midiLow](double value)
@@ -408,18 +410,20 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                 case 4:
                     cell.kind = UIBox::Kind::SamplerValue;
                     cell.text = formatGain(player.gain);
-                    cell.onAdjust = [this, playerId, gain = player.gain](int direction)
+                    cell.onAdjust = [this, playerId, gain = player.gain](int direction, float fraction)
                     {
-                        const float nextGain = juce::jlimit(0.0f, 2.0f, gain + direction * 0.05f);
+                        const float delta = juce::jmax(0.05f, std::lround(2.0f * fraction / 0.05f) * 0.05f);
+                        const float nextGain = juce::jlimit(0.0f, 2.0f, gain + delta * static_cast<float>(direction));
                         setGainFromUI(playerId, nextGain);
                     };
                     break;
                 case 5:
                     cell.kind = UIBox::Kind::SamplerValue;
                     cell.text = formatSignedTune('C', player.coarseTuneSemitones);
-                    cell.onAdjust = [this, playerId, coarse = player.coarseTuneSemitones, fine = player.fineTuneCents](int direction)
+                    cell.onAdjust = [this, playerId, coarse = player.coarseTuneSemitones, fine = player.fineTuneCents](int direction, float fraction)
                     {
-                        setTuningFromUI(playerId, coarse + direction, fine);
+                        const int delta = juce::jmax(1, static_cast<int>(std::lround(72.0f * fraction)));
+                        setTuningFromUI(playerId, coarse + direction * delta, fine);
                     };
                     cell.onInsert = [this, playerId, fine = player.fineTuneCents](double value)
                     {
@@ -433,9 +437,10 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                 case 6:
                     cell.kind = UIBox::Kind::SamplerValue;
                     cell.text = formatSignedTune('F', player.fineTuneCents);
-                    cell.onAdjust = [this, playerId, coarse = player.coarseTuneSemitones, fine = player.fineTuneCents](int direction)
+                    cell.onAdjust = [this, playerId, coarse = player.coarseTuneSemitones, fine = player.fineTuneCents](int direction, float fraction)
                     {
-                        setTuningFromUI(playerId, coarse, fine + direction);
+                        const int delta = juce::jmax(1, static_cast<int>(std::lround(198.0f * fraction)));
+                        setTuningFromUI(playerId, coarse, fine + direction * delta);
                     };
                     cell.onInsert = [this, playerId, coarse = player.coarseTuneSemitones](double value)
                     {
@@ -449,13 +454,13 @@ std::vector<std::vector<UIBox>> SuperSamplerProcessor::getUIBoxes(const MachineU
                 case 7:
                     cell.kind = UIBox::Kind::SamplerValue;
                     cell.text = sanitizeLabel(juce::String(player.velocityLow), 4);
-                    cell.onAdjust = [this, playerId, low = player.velocityLow, high = player.velocityHigh](int direction) { setSampleVelocityRangeFromWeb(playerId, low + direction, high); };
+                    cell.onAdjust = [this, playerId, low = player.velocityLow, high = player.velocityHigh](int direction, float fraction) { const int delta = juce::jmax(1, static_cast<int>(std::lround(127.0f * fraction))); setSampleVelocityRangeFromWeb(playerId, low + direction * delta, high); };
                     cell.onInsert = [this, playerId, high = player.velocityHigh](double value) { setSampleVelocityRangeFromWeb(playerId, static_cast<int>(value), high); };
                     break;
                 case 8:
                     cell.kind = UIBox::Kind::SamplerValue;
                     cell.text = sanitizeLabel(juce::String(player.velocityHigh), 4);
-                    cell.onAdjust = [this, playerId, low = player.velocityLow, high = player.velocityHigh](int direction) { setSampleVelocityRangeFromWeb(playerId, low, high + direction); };
+                    cell.onAdjust = [this, playerId, low = player.velocityLow, high = player.velocityHigh](int direction, float fraction) { const int delta = juce::jmax(1, static_cast<int>(std::lround(127.0f * fraction))); setSampleVelocityRangeFromWeb(playerId, low, high + direction * delta); };
                     cell.onInsert = [this, playerId, low = player.velocityLow](double value) { setSampleVelocityRangeFromWeb(playerId, low, static_cast<int>(value)); };
                     break;
                 case 9:

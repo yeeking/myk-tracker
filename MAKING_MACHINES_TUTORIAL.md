@@ -676,8 +676,16 @@ explicit about the channel domain in tests.
 - Return `cells[column][row]`, not row-major data.
 - Keep labels short, uppercase, and legible at low resolution.
 - Give selectable cells at least one supported callback.
-- Support `[`/`]` through `onAdjust`; use `onInsert` for direct numeric entry
-  when the parameter should accept it.
+- Support `[`/`]` and `{`/`}` through `onAdjust(direction, rangeFraction)`;
+  use `onInsert` for direct numeric entry when the parameter should accept it.
+  `direction` is a +/-1 sign; `rangeFraction` is 0.01 for `[`/`]` (coarse)
+  and 0.001 for `{`/`}` (fine). Ranged cells move by `(max - min) *
+  rangeFraction` snapped to their display step quantum (e.g. 1 Hz, 1 dB,
+  0.01 FM route). Perceptual parameters — filter cutoff, FM fixed Hz, drum
+  exponential steps — apply the fraction in the log/semitone domain and
+  convert back to the stored domain. Discrete cells (toggles, mode/waveform
+  cycles, presets) use only the sign of `direction` and ignore
+  `rangeFraction`.
 - Clamp inside callbacks, not only in rendering.
 - Use `width` for long values instead of adding fake cells.
 - Avoid setting maximum glow merely because a page was opened. Dynamic glow

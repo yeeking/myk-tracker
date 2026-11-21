@@ -1267,7 +1267,7 @@ void SequencerEditor::removeRow()
 }
 
 /** increase the value at the current cursor position, e.g. increasing note number */
-void SequencerEditor::incrementAtCursor()
+void SequencerEditor::incrementAtCursor(bool fine)
 {
   switch (getCurrentPage())
   {
@@ -1284,7 +1284,7 @@ void SequencerEditor::incrementAtCursor()
     incrementOnSequenceConfigPage();
     break;
   case SequencerEditorPage::machine:
-    incrementOnMachinePage();
+    incrementOnMachinePage(fine);
     break;
   case SequencerEditorPage::mixer:
     if (machineHost != nullptr)
@@ -1306,7 +1306,8 @@ void SequencerEditor::incrementAtCursor()
   case SequencerEditorPage::audioConfig:
     rebuildAudioConfigCells();
     if (audioConfigCursorCol < audioConfigCells.size() && audioConfigCursorRow < audioConfigCells[audioConfigCursorCol].size())
-      if (auto& cell = audioConfigCells[audioConfigCursorCol][audioConfigCursorRow]; !cell.isDisabled && cell.onAdjust) cell.onAdjust(1);
+      // Device-config cells are discrete; the range fraction is ignored.
+      if (auto& cell = audioConfigCells[audioConfigCursorCol][audioConfigCursorRow]; !cell.isDisabled && cell.onAdjust) cell.onAdjust(1, 0.0f);
     break;
   case SequencerEditorPage::help:
     break;
@@ -1315,7 +1316,7 @@ void SequencerEditor::incrementAtCursor()
   }
 }
 /** decrease the value at the current cursor position, e.g. increasing note number */
-void SequencerEditor::decrementAtCursor()
+void SequencerEditor::decrementAtCursor(bool fine)
 {
   switch (getCurrentPage())
   {
@@ -1332,7 +1333,7 @@ void SequencerEditor::decrementAtCursor()
     decrementOnSequenceConfigPage();
     break;
   case SequencerEditorPage::machine:
-    decrementOnMachinePage();
+    decrementOnMachinePage(fine);
     break;
   case SequencerEditorPage::mixer:
     if (machineHost != nullptr)
@@ -1354,7 +1355,8 @@ void SequencerEditor::decrementAtCursor()
   case SequencerEditorPage::audioConfig:
     rebuildAudioConfigCells();
     if (audioConfigCursorCol < audioConfigCells.size() && audioConfigCursorRow < audioConfigCells[audioConfigCursorCol].size())
-      if (auto& cell = audioConfigCells[audioConfigCursorCol][audioConfigCursorRow]; !cell.isDisabled && cell.onAdjust) cell.onAdjust(-1);
+      // Device-config cells are discrete; the range fraction is ignored.
+      if (auto& cell = audioConfigCells[audioConfigCursorCol][audioConfigCursorRow]; !cell.isDisabled && cell.onAdjust) cell.onAdjust(-1, 0.0f);
     break;
   case SequencerEditorPage::help:
     break;
@@ -2173,10 +2175,10 @@ void SequencerEditor::incrementOnSequenceConfigPage()
   }
 }
 
-void SequencerEditor::incrementOnMachinePage()
+void SequencerEditor::incrementOnMachinePage(bool fine)
 {
   if (isMachineUiForCurrentSequence())
-    machineAdjustCurrentCell(1);
+    machineAdjustCurrentCell(1, fine ? kFineAdjustRangeFraction : kCoarseAdjustRangeFraction);
 }
 
 void SequencerEditor::decrementOnStepPage()
@@ -2229,10 +2231,10 @@ void SequencerEditor::decrementOnSequenceConfigPage()
   }
 }
 
-void SequencerEditor::decrementOnMachinePage()
+void SequencerEditor::decrementOnMachinePage(bool fine)
 {
   if (isMachineUiForCurrentSequence())
-    machineAdjustCurrentCell(-1);
+    machineAdjustCurrentCell(-1, fine ? kFineAdjustRangeFraction : kCoarseAdjustRangeFraction);
 }
 
 /** move the cursor to a specific sequence*/
@@ -2564,10 +2566,12 @@ void SequencerEditor::rebuildAudioConfigCells()
   for (auto* cell : { outputValue, inputValue, rateValue, bufferValue }) cell->isDisabled = !editable;
   if (audioConfigurationHost != nullptr)
   {
-    outputValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioOutput(d); rebuildAudioConfigCells(); };
-    inputValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioInput(d); rebuildAudioConfigCells(); };
-    rateValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioSampleRate(d); rebuildAudioConfigCells(); };
-    bufferValue->onAdjust = [this](int d) { audioConfigurationHost->adjustAudioBufferSize(d); rebuildAudioConfigCells(); };
+    // Device-config cells step through the host's option lists one entry at
+    // a time; the range fraction is not applicable.
+    outputValue->onAdjust = [this](int d, float) { audioConfigurationHost->adjustAudioOutput(d); rebuildAudioConfigCells(); };
+    inputValue->onAdjust = [this](int d, float) { audioConfigurationHost->adjustAudioInput(d); rebuildAudioConfigCells(); };
+    rateValue->onAdjust = [this](int d, float) { audioConfigurationHost->adjustAudioSampleRate(d); rebuildAudioConfigCells(); };
+    bufferValue->onAdjust = [this](int d, float) { audioConfigurationHost->adjustAudioBufferSize(d); rebuildAudioConfigCells(); };
   }
   auto* apply = set(0, 5, snapshot.applying ? "APPLYING" : "APPLY");
   auto* revert = set(1, 5, "REVERT");

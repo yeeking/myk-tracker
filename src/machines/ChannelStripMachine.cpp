@@ -351,10 +351,14 @@ UIBox ChannelStripMachine::makeFrequencyCell(std::atomic<float>& target, float s
     cell.kind = UIBox::Kind::TrackerCell;
     const float value = target.load(std::memory_order_relaxed);
     cell.text = formatHz(value);
-    cell.onAdjust = [this, targetPtr = &target, step, minValue, maxValue](int direction)
+    cell.onAdjust = [this, targetPtr = &target, minValue, maxValue](int direction, float fraction)
     {
+        const float value = targetPtr->load(std::memory_order_relaxed);
+        // Frequency is perceptually logarithmic: apply the range fraction to
+        // the full log span, rounded to a whole hertz for the 0-dp display.
+        const float logSpan = std::log(maxValue) - std::log(minValue);
         const auto next = juce::jlimit(minValue, maxValue,
-            targetPtr->load(std::memory_order_relaxed) + (step * static_cast<float>(direction)));
+            static_cast<float>(std::lround(std::exp(std::log(value) + logSpan * fraction * static_cast<float>(direction)))));
         targetPtr->store(next, std::memory_order_relaxed);
         dspDirty.store(true, std::memory_order_release);
     };

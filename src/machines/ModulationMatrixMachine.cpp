@@ -279,13 +279,13 @@ std::vector<std::vector<UIBox>> ModulationMatrixMachine::getUIBoxes(const Machin
         label.glow = preview.active ? 0.12f + 0.30f * (preview.lfoValues[static_cast<std::size_t>(row)] + 1.0f) * 0.5f : 0.0f;
         label.useCustomGlowColour = true; label.customGlowArgb = 0xffff3030u;
         auto& waveform = boxes[1][static_cast<std::size_t>(row + 1)];
-        waveform.onAdjust = [this, row](int amount) { waveforms[static_cast<std::size_t>(row)] = (waveforms[static_cast<std::size_t>(row)].load() + amount + 5) % 5; touch(); };
+        waveform.onAdjust = [this, row](int amount, float) { waveforms[static_cast<std::size_t>(row)] = (waveforms[static_cast<std::size_t>(row)].load() + amount + 5) % 5; touch(); };
         waveform.onInsert = [this, row](double value) { waveforms[static_cast<std::size_t>(row)] = juce::jlimit(0, 4, static_cast<int>(std::lround(value))); touch(); };
         boxes[2][static_cast<std::size_t>(row + 1)].text = std::to_string(coarse[static_cast<std::size_t>(row)].load());
-        boxes[2][static_cast<std::size_t>(row + 1)].onAdjust = [this, row](int amount) { coarse[static_cast<std::size_t>(row)] = juce::jlimit(0, 127, coarse[static_cast<std::size_t>(row)].load() + amount); touch(); };
+        boxes[2][static_cast<std::size_t>(row + 1)].onAdjust = [this, row](int direction, float fraction) { const int delta = juce::jmax(1, static_cast<int>(std::lround(127.0f * fraction))); coarse[static_cast<std::size_t>(row)] = juce::jlimit(0, 127, coarse[static_cast<std::size_t>(row)].load() + direction * delta); touch(); };
         boxes[2][static_cast<std::size_t>(row + 1)].onInsert = [this, row](double value) { coarse[static_cast<std::size_t>(row)] = juce::jlimit(0, 127, static_cast<int>(std::lround(value))); touch(); };
         boxes[3][static_cast<std::size_t>(row + 1)].text = juce::String(fine[static_cast<std::size_t>(row)].load()).toStdString();
-        boxes[3][static_cast<std::size_t>(row + 1)].onAdjust = [this, row](int amount) { fine[static_cast<std::size_t>(row)] = juce::jlimit(-99, 99, fine[static_cast<std::size_t>(row)].load() + amount); touch(); };
+        boxes[3][static_cast<std::size_t>(row + 1)].onAdjust = [this, row](int direction, float fraction) { const int delta = juce::jmax(1, static_cast<int>(std::lround(198.0f * fraction))); fine[static_cast<std::size_t>(row)] = juce::jlimit(-99, 99, fine[static_cast<std::size_t>(row)].load() + direction * delta); touch(); };
         boxes[3][static_cast<std::size_t>(row + 1)].onInsert = [this, row](double value) { fine[static_cast<std::size_t>(row)] = juce::jlimit(-99, 99, static_cast<int>(std::lround(value))); touch(); };
     }
     boxes[0][5].text = "NOTE"; boxes[0][5].isDisabled = true;
@@ -296,7 +296,7 @@ std::vector<std::vector<UIBox>> ModulationMatrixMachine::getUIBoxes(const Machin
         boxes[0][static_cast<std::size_t>(displayRow)].text = "CLK" + std::to_string(row + 1); boxes[0][static_cast<std::size_t>(displayRow)].isDisabled = true;
         boxes[1][static_cast<std::size_t>(displayRow)].text = "DIV"; boxes[1][static_cast<std::size_t>(displayRow)].isDisabled = true;
         boxes[2][static_cast<std::size_t>(displayRow)].text = std::to_string(dividers[static_cast<std::size_t>(row)].load());
-        boxes[2][static_cast<std::size_t>(displayRow)].onAdjust = [this, row](int amount) { dividers[static_cast<std::size_t>(row)] = juce::jlimit(1, 16, dividers[static_cast<std::size_t>(row)].load() + amount); touch(); };
+        boxes[2][static_cast<std::size_t>(displayRow)].onAdjust = [this, row](int direction, float fraction) { const int delta = juce::jmax(1, static_cast<int>(std::lround(15.0f * fraction))); dividers[static_cast<std::size_t>(row)] = juce::jlimit(1, 16, dividers[static_cast<std::size_t>(row)].load() + direction * delta); touch(); };
         boxes[2][static_cast<std::size_t>(displayRow)].onInsert = [this, row](double value) { dividers[static_cast<std::size_t>(row)] = juce::jlimit(1, 16, static_cast<int>(std::lround(value))); touch(); };
         boxes[3][static_cast<std::size_t>(displayRow)].isDisabled = true;
     }
@@ -317,8 +317,8 @@ std::vector<std::vector<UIBox>> ModulationMatrixMachine::getUIBoxes(const Machin
             auto& cell = boxes[static_cast<std::size_t>(column + 4)][static_cast<std::size_t>(row + 1)];
             const int current = depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)].load();
             cell.text = binary ? (current == 0 ? "0" : "1") : juce::String(current).toStdString();
-            cell.onAdjust = [this, source, destination, binary](int amount)
-            { auto& value = depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)]; value = binary ? (amount > 0 ? 1 : 0) : juce::jlimit(-100, 100, value.load() + amount); touch(); };
+            cell.onAdjust = [this, source, destination, binary](int direction, float fraction)
+            { auto& value = depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)]; value = binary ? (direction > 0 ? 1 : 0) : juce::jlimit(-100, 100, value.load() + direction * juce::jmax(1, static_cast<int>(std::lround(200.0f * fraction)))); touch(); };
             cell.onInsert = [this, source, destination, binary](double amount)
             { depths[static_cast<std::size_t>(source)][static_cast<std::size_t>(destination)] = binary ? (std::abs(amount) <= std::numeric_limits<double>::epsilon() ? 0 : 1) : juce::jlimit(-100, 100, static_cast<int>(std::lround(amount))); touch(); };
         }

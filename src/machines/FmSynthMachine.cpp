@@ -1136,7 +1136,14 @@ std::vector<std::vector<UIBox>> FmSynthMachine::getControlBoxes(const MachineUiC
                              const std::function<void()>& changed)
     {
         UIBox cell = makeLabelCell(std::to_string(target.load())); cell.isDisabled = false;
-        cell.onAdjust = [&target, step, low, high, changed] (int amount) { target.store(juce::jlimit(low, high, target.load() + amount * step)); changed(); };
+        // Range-percent adjust; the display step is the quantum floor, so
+        // coarse integer ranges may make fine identical to coarse.
+        cell.onAdjust = [&target, step, low, high, changed] (int direction, float fraction)
+        {
+            const int delta = juce::jmax(step, static_cast<int>(std::lround((high - low) * fraction)));
+            target.store(juce::jlimit(low, high, target.load() + direction * delta));
+            changed();
+        };
         cell.onInsert = [&target, low, high, changed] (double value) { if (std::isfinite(value)) { target.store(juce::jlimit(low, high, static_cast<int>(std::lround(value)))); changed(); } };
         cell.hasValueScale = true; cell.valueNorm = static_cast<float>(target.load() - low) / static_cast<float>(high - low);
         return cell;
@@ -1145,7 +1152,15 @@ std::vector<std::vector<UIBox>> FmSynthMachine::getControlBoxes(const MachineUiC
                                const std::function<void()>& changed)
     {
         UIBox cell = makeLabelCell(formatFloat(target.load(), decimals)); cell.isDisabled = false;
-        cell.onAdjust = [&target, step, low, high, changed] (int amount) { target.store(juce::jlimit(low, high, target.load() + static_cast<float>(amount) * step)); changed(); };
+        // Range-percent adjust snapped to the step grid; the display step is
+        // the quantum floor, so small ranges where 1% < step keep their old
+        // fixed-step behavior.
+        cell.onAdjust = [&target, step, low, high, changed] (int direction, float fraction)
+        {
+            const float delta = juce::jmax(step, std::lround((high - low) * fraction / step) * step);
+            target.store(juce::jlimit(low, high, target.load() + delta * static_cast<float>(direction)));
+            changed();
+        };
         cell.onInsert = [&target, low, high, changed] (double value) { if (std::isfinite(value)) { target.store(juce::jlimit(low, high, static_cast<float>(value))); changed(); } };
         cell.hasValueScale = true; cell.valueNorm = (target.load() - low) / (high - low);
         return cell;
@@ -1155,16 +1170,32 @@ std::vector<std::vector<UIBox>> FmSynthMachine::getControlBoxes(const MachineUiC
     const auto changed = [this] { markCustom(); };
 
     UIBox presetCell = makeLabelCell(presetName(static_cast<Preset>(selectedPreset.load()))); presetCell.isDisabled = false;
-    presetCell.onAdjust = [this] (int amount) { const int current = selectedPreset.load() == static_cast<int>(Preset::custom) ? 0 : selectedPreset.load(); applyPreset(static_cast<Preset>(wrapChoice(current, amount, static_cast<int>(Preset::custom)))); };
+    presetCell.onAdjust = [this] (int amount, float) { const int current = selectedPreset.load() == static_cast<int>(Preset::custom) ? 0 : selectedPreset.load(); applyPreset(static_cast<Preset>(wrapChoice(current, amount, static_cast<int>(Preset::custom)))); };
     setPair(0, 0, "PSET", std::move(presetCell));
     UIBox algorithmCell = makeLabelCell(algorithmName(static_cast<Algorithm>(selectedAlgorithm.load()))); algorithmCell.isDisabled = false;
-    algorithmCell.onAdjust = [this] (int amount) { const int current = selectedAlgorithm.load() == static_cast<int>(Algorithm::custom) ? 0 : selectedAlgorithm.load(); applyAlgorithm(static_cast<Algorithm>(wrapChoice(current, amount, static_cast<int>(Algorithm::custom)))); };
+    algorithmCell.onAdjust = [this] (int amount, float) { const int current = selectedAlgorithm.load() == static_cast<int>(Algorithm::custom) ? 0 : selectedAlgorithm.load(); applyAlgorithm(static_cast<Algorithm>(wrapChoice(current, amount, static_cast<int>(Algorithm::custom)))); };
     setPair(0, 1, "ALG", std::move(algorithmCell));
     setPair(0, 2, "VOI", intCell(voiceCount, 1, 1, 8, changed));
     setPair(0, 3, "LEV", floatCell(masterLevel, 0.05f, 0.0f, 1.0f, 2, changed));
     setPair(0, 4, "OCT", intCell(octave, 1, -4, 4, changed));
     UIBox glideCell = makeLabelCell(formatFloat(glideMs.load(), 1)); glideCell.isDisabled = false;
-    glideCell.onAdjust = [this] (int amount) { const float value = glideMs.load(); glideMs.store(juce::jlimit(0.0f, 2000.0f, amount > 0 ? (value <= 0.0f ? 1.0f : value * 1.41421356f) : value / 1.41421356f)); markCustom(); };
+    // 0 ms is the off state; downward moves from off are no-ops, and values
+    // that decay below half a millisecond snap back to off.
+    glideCell.onAdjust = [this] (int direction, float fraction)
+    {
+        const float value = glideMs.load();
+        if (value <= 0.0f && direction < 0)
+        {
+            markCustom();
+            return;
+        }
+        // Perceptual (log) steps over the 1..2000 ms span so coarse and fine
+        // feel even at every magnitude.
+        const float octaves = std::log2(2000.0f) * fraction;
+        const float next = (value <= 0.0f ? 1.0f : value) * std::pow(2.0f, octaves * static_cast<float>(direction));
+        glideMs.store(next < 0.5f ? 0.0f : juce::jlimit(1.0f, 2000.0f, next));
+        markCustom();
+    };
     glideCell.onInsert = [this] (double value) { if (std::isfinite(value)) { glideMs.store(juce::jlimit(0.0f, 2000.0f, static_cast<float>(value))); markCustom(); } };
     setPair(0, 5, "GLIDE", std::move(glideCell));
     setPair(0, 6, "INDEX", floatCell(indexPercent, 5.0f, 0.0f, 200.0f, 0, changed));
@@ -1177,18 +1208,26 @@ std::vector<std::vector<UIBox>> FmSynthMachine::getControlBoxes(const MachineUiC
         const std::size_t labelColumn = static_cast<std::size_t>(2 + opIndex * 2);
         auto& op = operatorParameters[static_cast<std::size_t>(opIndex)];
         boxes[labelColumn][0] = makeLabelCell("OP" + std::to_string(opIndex + 1)); boxes[labelColumn][0].isDisabled = true;
-        UIBox onCell = makeToggleCell(op.enabled.load() != 0, "OFF", "ON", [this, &op] (int) { op.enabled.store(op.enabled.load() == 0 ? 1 : 0); markCustom(); }); onCell.isDisabled = false;
+        UIBox onCell = makeToggleCell(op.enabled.load() != 0, "OFF", "ON", [this, &op] (int, float) { op.enabled.store(op.enabled.load() == 0 ? 1 : 0); markCustom(); }); onCell.isDisabled = false;
         setPair(labelColumn, 1, "ON", std::move(onCell));
         UIBox waveCell = makeLabelCell(waveformName(static_cast<Waveform>(op.waveform.load()))); waveCell.isDisabled = false;
-        waveCell.onAdjust = [this, &op] (int amount) { op.waveform.store(wrapChoice(op.waveform.load(), amount, static_cast<int>(Waveform::count))); markCustom(); };
+        waveCell.onAdjust = [this, &op] (int amount, float) { op.waveform.store(wrapChoice(op.waveform.load(), amount, static_cast<int>(Waveform::count))); markCustom(); };
         setPair(labelColumn, 2, "WAVE", std::move(waveCell));
         UIBox modeCell = makeLabelCell(op.frequencyMode.load() == 0 ? "RAT" : "FIX"); modeCell.isDisabled = false;
-        modeCell.onAdjust = [this, &op] (int) { op.frequencyMode.store(op.frequencyMode.load() == 0 ? 1 : 0); markCustom(); };
+        modeCell.onAdjust = [this, &op] (int, float) { op.frequencyMode.store(op.frequencyMode.load() == 0 ? 1 : 0); markCustom(); };
         setPair(labelColumn, 3, "MODE", std::move(modeCell));
         setPair(labelColumn, 4, "CRS", intCell(op.coarse, 1, 0, 64, changed));
         setPair(labelColumn, 5, "FINE", intCell(op.fine, 1, 0, 99, changed));
         UIBox fixedCell = makeLabelCell(formatHz(op.fixedHz.load())); fixedCell.isDisabled = false;
-        fixedCell.onAdjust = [this, &op] (int amount) { op.fixedHz.store(juce::jlimit(kMinimumFixedHz, kMaximumFixedHz, amount > 0 ? op.fixedHz.load() * 1.0594631f : op.fixedHz.load() / 1.0594631f)); markCustom(); };
+        // Perceptual (log) steps: fraction of the full semitone span between
+        // the fixed-frequency limits, rounded to a whole hertz for display.
+        fixedCell.onAdjust = [this, &op] (int direction, float fraction)
+        {
+            const float semitones = 12.0f * std::log2(kMaximumFixedHz / kMinimumFixedHz) * fraction;
+            const float next = op.fixedHz.load() * std::pow(2.0f, semitones * static_cast<float>(direction));
+            op.fixedHz.store(juce::jlimit(kMinimumFixedHz, kMaximumFixedHz, static_cast<float>(std::lround(next))));
+            markCustom();
+        };
         fixedCell.onInsert = [this, &op] (double value) { if (std::isfinite(value)) { op.fixedHz.store(juce::jlimit(kMinimumFixedHz, kMaximumFixedHz, static_cast<float>(value))); markCustom(); } };
         setPair(labelColumn, 6, "FIX", std::move(fixedCell));
         setPair(labelColumn, 7, "DET", floatCell(op.detuneCents, 1.0f, -100.0f, 100.0f, 1, changed));
@@ -1201,7 +1240,13 @@ std::vector<std::vector<UIBox>> FmSynthMachine::getControlBoxes(const MachineUiC
         }
         setPair(labelColumn, 17, "VEL", intCell(op.velocitySensitivity, 10, -100, 100, changed));
         UIBox breakpointCell = makeLabelCell(noteName(op.breakpoint.load())); breakpointCell.isDisabled = false;
-        breakpointCell.onAdjust = [this, &op] (int amount) { op.breakpoint.store(juce::jlimit(0, 127, op.breakpoint.load() + amount)); markCustom(); };
+        breakpointCell.onAdjust = [this, &op] (int direction, float fraction)
+        {
+            // One note is the quantum floor; 1% of 0..127 rounds to one note.
+            const int delta = juce::jmax(1, static_cast<int>(std::lround(127.0f * fraction)));
+            op.breakpoint.store(juce::jlimit(0, 127, op.breakpoint.load() + direction * delta));
+            markCustom();
+        };
         breakpointCell.onInsert = [this, &op] (double value) { if (std::isfinite(value)) { op.breakpoint.store(juce::jlimit(0, 127, static_cast<int>(std::lround(value)))); markCustom(); } };
         setPair(labelColumn, 18, "BP", std::move(breakpointCell));
         setPair(labelColumn, 19, "LSL", intCell(op.leftSlope, 1, -12, 12, changed));

@@ -128,8 +128,8 @@ machines (older projects leave it disabled to preserve silent formerly-unmapped
 notes). `RING` now changes snare noise-tail duration only, leaving its tonal
 shell unchanged. Adventure controls span `-10` to `+10`, preserve the selected
 patch at zero, and alter several existing synthesis dimensions only when a
-voice is triggered. Decay adjustments use geometric steps for fast traversal;
-direct number entry remains exact. The compact grid regenerates DRUM MCP
+voice is triggered. Decay adjustments use geometric steps — 1% or 0.1% of the
+octave range per press — for fast traversal; direct number entry remains exact. The compact grid regenerates DRUM MCP
 control IDs, so direct-control clients must rediscover them. Active drum voices
 briefly flash their name/enable header pair in the editor.
 
@@ -150,8 +150,9 @@ the carrier remains audible. Velocity changes the depth of that evolution.
 The production FM page is a compact four-lane editor: each `OP1`–`OP4` lane
 keeps its envelope visible while exposing one keyboard-selected control bank.
 Use Page Up/Page Down to cycle `CORE`, `ENV`, `SCALE`, `ROUTE`, and `GLOBAL`;
-arrow keys retain the normal grid navigation, `[`/`]` adjust the focused value,
-and direct numeric entry remains exact. The yellow header/envelope identifies
+arrow keys retain the normal grid navigation, `[`/`]` move the focused value by
+1% of its range and `{`/`}` (Shift) by 0.1%, and direct numeric entry remains
+exact. The yellow header/envelope identifies
 the selected operator, while the cyan cursor identifies the editable cell.
 During playback, small amber cubes show older active voices and the newest
 voice uses a larger red/orange cube at its real envelope stage/level. These
@@ -161,7 +162,8 @@ state. Page/bank/cursor state is likewise transient.
 `CORE` contains operator enable, waveform, frequency mode, ratio/fixed pitch,
 detune and output; `ENV` contains four rate/level pairs; `SCALE` contains
 velocity, breakpoint and keyboard/rate scaling; `ROUTE` presents each lane's
-four signed modulation indices (with `0.01` keyboard steps) and output; `GLOBAL` contains preset,
+four signed modulation indices (bracket steps are 1% / 0.1% of the ±16 range,
+quantized to `0.01`) and output; `GLOBAL` contains preset,
 algorithm, voices and global macros. The compact presentation deliberately
 does not change the complete logical control grid used by MCP: direct
 machine-control clients retain the existing FM control IDs and can continue to
@@ -296,10 +298,12 @@ persisted `slotId`, and either the control suffix or full address. For example,
 an envelope attack adjustment can be made without moving the visible cursor:
 
 ```json
-{"stackId":0,"slotId":"slot-1","controlId":"a-5-1","action":"adjust","direction":20}
+{"stackId":0,"slotId":"slot-1","controlId":"a-5-1","action":"adjust","direction":1,"fine":false}
 ```
 
-The full equivalent control ID is
+`direction` is a +/-1 sign: ranged controls move 1% of their range per call,
+or 0.1% with `"fine":true`; discrete controls (toggles, cycles) use the sign
+only. The full equivalent control ID is
 `stack/0/slot/slot-1/control/a-5-1`. Direct machine calls do not change the
 current GUI page or cursor, so they are safe while a person is navigating the
 tracker. The older `row`/`column` form remains only for compatibility and is

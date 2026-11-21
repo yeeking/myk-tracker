@@ -32,7 +32,7 @@ int main()
     require(cells[4][1].kind == UIBox::Kind::TrackerCell && !cells[4][1].isDisabled && cells[4][1].onAdjust && cells[4][1].onInsert,
             "route cell is cursor-landable and supports bracket and numeric editing");
 
-    cells[2][1].onAdjust(1);
+    cells[2][1].onAdjust(1, kCoarseAdjustRangeFraction);
     cells = matrix.getUIBoxes({});
     require(cells[2][1].text == "1", "bracket adjustment changes LFO coarse rate");
     cells[4][1].onInsert(75.0);
@@ -165,13 +165,18 @@ int main()
 
     DelayFxMachine delayUi;
     auto delayCells = delayUi.getUIBoxes({});
-    delayCells[1][0].onAdjust(1);
+    delayCells[1][0].onAdjust(1, kCoarseAdjustRangeFraction);
     delayCells = delayUi.getUIBoxes({});
     require(delayCells[1][0].text == "MS" && delayCells[1][2].text == "250",
             "delay can enter free-millisecond mode");
-    delayCells[1][2].onAdjust(1);
+    delayCells[1][2].onAdjust(1, kCoarseAdjustRangeFraction);
     delayCells = delayUi.getUIBoxes({});
-    require(delayCells[1][2].text == "251", "delay milliseconds adjust in one-ms steps");
+    // 1% of the 1..4000 ms range is 40 ms.
+    require(delayCells[1][2].text == "290", "delay milliseconds move 1% of range per coarse press");
+    delayCells[1][2].onAdjust(1, kFineAdjustRangeFraction);
+    delayCells = delayUi.getUIBoxes({});
+    // 0.1% of the range is 4 ms.
+    require(delayCells[1][2].text == "294", "delay milliseconds move 0.1% of range per fine press");
 
     const auto configureDelay = [](DelayFxMachine& delay, int mode)
     {
