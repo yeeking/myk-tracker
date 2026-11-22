@@ -123,6 +123,12 @@ void TrackerControlService::changed(bool content, bool view)
 
 void TrackerControlService::synchroniseAsyncCompletions()
 {
+    // Song transitions are made audible in the audio callback. Rebind the
+    // editor here, on the message/control boundary, so UI/MCP sees the same
+    // set without making the callback touch editor or display-cache state.
+    if (processor.consumePendingSongPlaybackEditorFollow())
+        changed(false, true);
+
     const auto completed = asyncState->completedSinceRevision.exchange(0);
     contentRevision += completed;
     // Old step banks are owned by the audio callback until a block-boundary
@@ -255,6 +261,24 @@ juce::var TrackerControlService::serialiseMachineCells(std::size_t stackIndex, c
             object->setProperty("canAdjust", cell.onAdjust != nullptr);
             object->setProperty("canReset", cell.onReset != nullptr);
             object->setProperty("canPreview", cell.onPreview != nullptr);
+            object->setProperty("focusable", !cell.isDisabled && (cell.onAdjust != nullptr || cell.onInsert != nullptr || cell.onActivate != nullptr));
+            const auto focusKey = cell.focusKey.empty()
+                ? "grid-" + std::to_string(col) + "-" + std::to_string(row) : cell.focusKey;
+            int focusSlot = -1;
+            bool modulatable = false;
+            for (const auto& focused : processor.getFocusedParameters())
+                if (focused.occupied && focused.stackIndex == stackIndex && focused.machineSlotId == slotId.toStdString()
+                    && focused.focusKey == focusKey)
+                {
+                    focusSlot = static_cast<int>(focused.slot);
+                    modulatable = focused.modulatable;
+                    break;
+                }
+            object->setProperty("focused", focusSlot >= 0);
+            object->setProperty("focusSlot", focusSlot >= 0 ? focusSlot + 1 : 0);
+            object->setProperty("modulatable", modulatable);
+            object->setProperty("modulationDomain", modulatable ? "machine" : "none");
+            object->setProperty("modulationCadence", modulatable ? "block" : "none");
             juce::Array<juce::var> actions;
             if (cell.onActivate) actions.add("activate");
             if (cell.onAdjust) actions.add("adjust");
@@ -1095,7 +1119,18 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     if (target->isDisabled) return fail("unsupported", "Machine control is currently disabled");
 
                     const auto action = stringArg(args, "action", "activate");
-                    if (action == "activate" && target->onActivate) target->onActivate();
+                    if (action == "focus" || action == "toggle_focus" || action == "unfocus")
+                    {
+                        const bool remove = action == "unfocus";
+                        const bool add = action == "focus";
+                        const auto focusKey = target->focusKey.empty()
+                            ? "grid-" + std::to_string(targetColumn) + "-" + std::to_string(targetRow)
+                            : target->focusKey;
+                        if (!processor.toggleFocusedMachineParameterByAddress(static_cast<std::size_t>(requestedStack), requestedSlot,
+                                                                              focusKey, add, remove))
+                            return fail("unsupported", "Machine control cannot be focused");
+                    }
+                    else if (action == "activate" && target->onActivate) target->onActivate();
                     else if (action == "adjust" && target->onAdjust)
                         // direction is a +/-1 sign; fine selects 0.1% of range.
                         target->onAdjust(intArg(args, "direction", 1),
@@ -1490,6 +1525,21 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                         else
                             return fail("sequence_limit", "Cannot delete the last sequence");
                     }
+                    else if (!ctrl && shift && key == 'f')
+                    {
+                        if (editor.getCurrentPage() == SequencerEditorPage::machine)
+                        {
+                            handled = editor.toggleFocusedMachineParameter();
+                            contentChanged = handled;
+                            viewChanged = handled;
+                        }
+                        else if (editor.getCurrentPage() == SequencerEditorPage::focus)
+                        {
+                            handled = processor.removeFocusedParameter(editor.getFocusedParameterCursorRow());
+                            contentChanged = handled;
+                            viewChanged = handled;
+                        }
+                    }
                     else if (ctrl && (keyCode == 'r' || keyCode == 'R')) { editor.requestTrackerReset(); viewChanged = true; handled = true; }
                     else if (ctrl && (keyCode == 'q' || keyCode == 'Q')) { editor.requestApplicationQuit(); viewChanged = true; handled = true; }
                     // File browsers and text-entry machine pages get first use of
@@ -1513,7 +1563,7 @@ TrackerControlService::Result TrackerControlService::executeNow(const Command& c
                     else if (keyCode == juce::KeyPress::spaceKey) { editor.togglePlayback(); handled = true; }
                     else if (keyCode == '5') { handled = editor.enterMachineDetailFromAnywhere(); viewChanged = handled; }
                     else if (keyCode == '0') { handled = editor.selectPageShortcut(0); viewChanged = handled; }
-                    else if (keyCode >= '1' && keyCode <= '7') { handled = editor.selectPageShortcut(keyCode - '0'); viewChanged = handled; }
+                    else if (keyCode >= '1' && keyCode <= '8') { handled = editor.selectPageShortcut(keyCode - '0'); viewChanged = handled; }
                     else if (editor.handleChordKey(key, alt) || editor.handleControlKey(key) || editor.handleNoteKey(key))
                     {
                         contentChanged = editor.didLastMusicalKeyChangeContent();

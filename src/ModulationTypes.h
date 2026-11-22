@@ -27,8 +27,17 @@ enum class ModulationDestination : std::size_t
     delayTime,
     /** Four-operator FM synth: ratio-operator pitch, modulation index, feedback and waveform colour. */
     fmPitch, fmIndex, fmFeedback, fmColor,
+    /** Song-level focused performance controls. They remain stack-local. */
+    focus1, focus2, focus3, focus4, focus5, focus6, focus7, focus8,
+    focus9, focus10, focus11, focus12, focus13, focus14, focus15, focus16,
     count
 };
+
+constexpr std::size_t kFocusedModulationDestinationCount = 16;
+constexpr ModulationDestination focusDestinationForSlot(std::size_t slot) noexcept
+{
+    return static_cast<ModulationDestination>(static_cast<std::size_t>(ModulationDestination::focus1) + slot);
+}
 
 constexpr std::size_t kModulationSourceCount = static_cast<std::size_t>(ModulationSource::count);
 constexpr std::size_t kModulationDestinationCount = static_cast<std::size_t>(ModulationDestination::count);

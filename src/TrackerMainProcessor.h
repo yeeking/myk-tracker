@@ -13,10 +13,12 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <utility>
 #include <deque>
 #include <optional>
 #include <thread>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -56,6 +58,18 @@ class TrackerMainProcessor  :    public MachineUtilsAbs,
                             #endif
 {
 public:
+    static constexpr std::size_t kFocusedParameterCapacity = 16;
+    struct FocusedParameter
+    {
+        bool occupied = false;
+        std::size_t slot = 0;
+        std::size_t stackIndex = 0;
+        std::string machineSlotId;
+        std::string focusKey;
+        std::string machineLabel;
+        std::string parameterLabel;
+        bool modulatable = false;
+    };
     //==============================================================================
     TrackerMainProcessor();
     ~TrackerMainProcessor() override;
@@ -179,6 +193,17 @@ public:
     void silenceStack(std::size_t stackIndex) override;
     int getStackMidiOutputChannel(std::size_t stackIndex) const override;
     void adjustStackMidiOutputChannel(std::size_t stackIndex, int direction) override;
+    bool toggleFocusedMachineParameter(std::size_t stackIndex, std::optional<std::size_t> slotIndex,
+                                       const std::string& key, int row, int col) override;
+    bool toggleFocusedStackEnable(std::size_t stackIndex, std::size_t slotIndex) override;
+    bool toggleFocusedMachineParameterByAddress(std::size_t stackIndex, const juce::String& slotId,
+                                                const juce::String& controlId, bool forceAdd, bool forceRemove);
+    std::array<FocusedParameter, kFocusedParameterCapacity> getFocusedParameters() const;
+    bool getFocusedParameterCell(std::size_t focusSlot, UIBox& out) const;
+    bool adjustFocusedParameter(std::size_t focusSlot, int direction, bool fine) override;
+    bool insertFocusedParameter(std::size_t focusSlot, double value) override;
+    bool resetFocusedParameter(std::size_t focusSlot) override;
+    bool removeFocusedParameter(std::size_t focusSlot) override;
     std::size_t getSequenceSetCount() const override;
     std::size_t getViewedSequenceSetIndex() const override;
     void setViewedSequenceSetIndex(std::size_t index) override;
@@ -309,6 +334,7 @@ private:
     std::vector<double> sequenceSetBpms;
     std::vector<SequenceSetMachineEnableState> sequenceSetMachineEnableStates;
     std::vector<SongRow> songRows;
+    std::array<FocusedParameter, kFocusedParameterCapacity> focusedParameters {};
     SongPlayMode songPlayMode = SongPlayMode::sequence;
     std::size_t viewedSequenceSetIndex = 0;
     std::size_t activePlaybackSequenceSetIndex = 0;
@@ -557,6 +583,16 @@ private:
     void applyMachineEnableStateForSequenceSet(std::size_t setIndex);
     std::size_t getMachineEnableStateEditingSetIndex() const;
     bool isSongPlaybackRunning() const;
+    /** Publishes the active Song set to the message-thread editor without
+        doing editor or cache work from the audio callback. */
+    void publishSongPlaybackEditorFollow(std::size_t setIndex) noexcept;
+    /** Message-thread boundary used by the UI/control service. Returns true
+        when the visible editor was rebound to the latest active Song set. */
+    bool consumePendingSongPlaybackEditorFollow();
+    void clearPendingSongPlaybackEditorFollow() noexcept;
+    void bindViewedSequenceSetToEditorUnlocked(Sequencer*& cacheRefreshTarget);
+    static constexpr std::size_t kNoPendingSongEditorFollow = std::numeric_limits<std::size_t>::max();
+    std::atomic<std::size_t> pendingSongPlaybackEditorFollow { kNoPendingSongEditorFollow };
     static constexpr std::size_t kMachineStackCount = 8;
     MachineStack* getMachineStack(std::size_t stackIndex);
     const MachineStack* getMachineStack(std::size_t stackIndex) const;

@@ -45,10 +45,22 @@ std::vector<std::vector<UIBox>> WaveshaperDistortionMachine::getUIBoxes(const Ma
 
 void WaveshaperDistortionMachine::processAudioBuffer(juce::AudioBuffer<float>& buffer)
 {
-    const float driveValue = drive.load(std::memory_order_relaxed);
-    const float toneValue = tone.load(std::memory_order_relaxed);
-    const float mixValue = mix.load(std::memory_order_relaxed);
-    const float outputValue = output.load(std::memory_order_relaxed);
+    auto focusValue = [this](int target)
+    {
+        const int slot = focusedSlots[static_cast<std::size_t>(target)].load(std::memory_order_relaxed);
+        return slot >= 0 && modulationBlock != nullptr
+            ? modulationBlock->get(focusDestinationForSlot(static_cast<std::size_t>(slot)), 0) : 0.0f;
+    };
+    // Distortion coefficients are intentionally block-rate. It avoids an
+    // extra per-sample exponential while still making F slots responsive.
+    const float driveValue = juce::jlimit(kMinDrive, kMaxDrive,
+        drive.load(std::memory_order_relaxed) * std::exp2(focusValue(0) * 2.0f));
+    const float toneValue = juce::jlimit(0.0f, 1.0f,
+        tone.load(std::memory_order_relaxed) + focusValue(1) * 0.5f);
+    const float mixValue = juce::jlimit(0.0f, 1.0f,
+        mix.load(std::memory_order_relaxed) + focusValue(2) * 0.5f);
+    const float outputValue = juce::jlimit(0.0f, 2.0f,
+        output.load(std::memory_order_relaxed) * std::exp2(focusValue(3)));
     const float sampleRateValue = static_cast<float>(currentSampleRate.load(std::memory_order_relaxed));
 
     const float toneHz = juce::jmap(toneValue, 500.0f, 12000.0f);
@@ -73,6 +85,24 @@ void WaveshaperDistortionMachine::processAudioBuffer(juce::AudioBuffer<float>& b
         }
         toneState[static_cast<std::size_t>(juce::jlimit(0, 1, channel))] = lowpassState;
     }
+}
+
+void WaveshaperDistortionMachine::setFocusedParameterBinding(std::size_t slot, const std::string& key)
+{
+    if (slot >= kFocusedModulationDestinationCount) return;
+    // Keys are generated from the unbanked logical grid: values are col 1.
+    for (auto& bound : focusedSlots)
+        if (bound.load(std::memory_order_relaxed) == static_cast<int>(slot))
+            bound.store(-1, std::memory_order_relaxed);
+    if (key == "grid-1-0") focusedSlots[0].store(static_cast<int>(slot), std::memory_order_relaxed);
+    else if (key == "grid-1-1") focusedSlots[1].store(static_cast<int>(slot), std::memory_order_relaxed);
+    else if (key == "grid-1-2") focusedSlots[2].store(static_cast<int>(slot), std::memory_order_relaxed);
+    else if (key == "grid-1-3") focusedSlots[3].store(static_cast<int>(slot), std::memory_order_relaxed);
+}
+
+bool WaveshaperDistortionMachine::supportsFocusedModulation(const std::string& key) const
+{
+    return key == "grid-1-0" || key == "grid-1-1" || key == "grid-1-2" || key == "grid-1-3";
 }
 
 void WaveshaperDistortionMachine::getStateInformation(juce::MemoryBlock& destData)

@@ -89,6 +89,7 @@ private:
     void prepareStepView();
     void prepareSeqConfigView();
     void prepareMachineConfigView();
+    void prepareFocusedParametersView();
     float updateScopeCalibration(std::size_t stackIndex,
                                  const std::vector<float>& samples);
     void appendScopeBand(std::vector<std::vector<UIBox>>& boxes,

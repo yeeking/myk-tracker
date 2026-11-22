@@ -1166,7 +1166,11 @@ std::vector<std::vector<UIBox>> FmSynthMachine::getControlBoxes(const MachineUiC
         return cell;
     };
     const auto setPair = [&boxes] (std::size_t labelColumn, std::size_t row, const char* label, UIBox value)
-    { boxes[labelColumn][row] = makeLabelCell(label); boxes[labelColumn][row].isDisabled = true; boxes[labelColumn + 1][row] = std::move(value); };
+    {
+        boxes[labelColumn][row] = makeLabelCell(label); boxes[labelColumn][row].isDisabled = true;
+        value.focusKey = "grid-" + std::to_string(labelColumn + 1) + "-" + std::to_string(row);
+        boxes[labelColumn + 1][row] = std::move(value);
+    };
     const auto changed = [this] { markCustom(); };
 
     UIBox presetCell = makeLabelCell(presetName(static_cast<Preset>(selectedPreset.load()))); presetCell.isDisabled = false;

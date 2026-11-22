@@ -210,6 +210,9 @@ juce::String TrackerMainProcessor::getUiModeString() const
         case SequencerEditorMode::machineConfig:
             modeStr = "machine";
             break;
+        case SequencerEditorMode::focusedParameters:
+            modeStr = "focus";
+            break;
         case SequencerEditorMode::mixer:
             modeStr = "mixer";
             break;
@@ -259,6 +262,21 @@ void TrackerMainProcessor::fillCommonUiState(juce::DynamicObject::Ptr state)
     state->setProperty("masterMeterLeft", masterMeterLevels[0]);
     state->setProperty("masterMeterRight", masterMeterLevels[1]);
     state->setProperty("selectedHead", static_cast<int>(seqEditor.getCurrentConfigHead()));
+
+    juce::Array<juce::var> focusEntries;
+    for (const auto& item : focusedParameters)
+    {
+        if (!item.occupied) continue;
+        auto* entry = new juce::DynamicObject();
+        entry->setProperty("slot", static_cast<int>(item.slot));
+        entry->setProperty("stack", static_cast<int>(item.stackIndex));
+        entry->setProperty("machineSlotId", juce::String(item.machineSlotId));
+        entry->setProperty("machine", juce::String(item.machineLabel));
+        entry->setProperty("parameter", juce::String(item.parameterLabel));
+        entry->setProperty("modulatable", item.modulatable);
+        focusEntries.add(entry);
+    }
+    state->setProperty("focusedParameters", focusEntries);
 
     juce::Array<juce::var> playHeads;
     juce::Array<juce::var> sequenceSoloStates;
@@ -377,6 +395,7 @@ juce::var TrackerMainProcessor::getUiStateForCurrentPage()
             break;
         case SequencerEditorMode::arrangingSong:
         case SequencerEditorMode::machineConfig:
+        case SequencerEditorMode::focusedParameters:
         case SequencerEditorMode::mixer:
             break;
         case SequencerEditorMode::audioConfig:
@@ -634,6 +653,8 @@ juce::var TrackerMainProcessor::serializeSequencerState()
     root->setProperty("currentStepCol", static_cast<int>(seqEditor.getCurrentStepCol()));
     root->setProperty("currentSongRowCursor", static_cast<int>(seqEditor.getCurrentSongRow()));
     root->setProperty("currentSongColCursor", static_cast<int>(seqEditor.getCurrentSongCol()));
+    root->setProperty("focusedParameterRow", static_cast<int>(seqEditor.getFocusedParameterCursorRow()));
+    root->setProperty("focusedParameterCol", static_cast<int>(seqEditor.getFocusedParameterCursorCol()));
 
     root->setProperty("mode", getUiModeString());
 
@@ -646,6 +667,22 @@ juce::var TrackerMainProcessor::serializeSequencerState()
         songRowsVar.add(rowObj.get());
     }
     root->setProperty("songRows", songRowsVar);
+
+    juce::Array<juce::var> focusVar;
+    for (const auto& item : focusedParameters)
+    {
+        if (!item.occupied) continue;
+        auto* object = new juce::DynamicObject();
+        object->setProperty("slot", static_cast<int>(item.slot));
+        object->setProperty("stack", static_cast<int>(item.stackIndex));
+        object->setProperty("machineSlotId", juce::String(item.machineSlotId));
+        object->setProperty("key", juce::String(item.focusKey));
+        object->setProperty("machine", juce::String(item.machineLabel));
+        object->setProperty("parameter", juce::String(item.parameterLabel));
+        object->setProperty("modulatable", item.modulatable);
+        focusVar.add(object);
+    }
+    root->setProperty("focusedParameters", focusVar);
 
     juce::Array<juce::var> stackStates;
     for (auto& stack : machineStacks)
@@ -716,6 +753,7 @@ std::size_t TrackerMainProcessor::getStepCountForSequenceSet(std::size_t setInde
 
 void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
 {
+    clearPendingSongPlaybackEditorFollow();
     if (!stateVar.isObject())
         return;
 
@@ -845,6 +883,28 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     if (songRows.empty())
         songRows.push_back({ 0, 16 });
 
+    for (auto& item : focusedParameters) item = {};
+    if (const auto focusVar = stateVar.getProperty("focusedParameters", juce::var()); focusVar.isArray())
+    {
+        for (const auto& value : *focusVar.getArray())
+        {
+            if (!value.isObject()) continue;
+            const int slot = static_cast<int>(value.getProperty("slot", -1));
+            const int stack = static_cast<int>(value.getProperty("stack", -1));
+            const auto machineSlotId = value.getProperty("machineSlotId", {}).toString();
+            const auto key = value.getProperty("key", {}).toString();
+            if (slot < 0 || static_cast<std::size_t>(slot) >= focusedParameters.size() || stack < 0
+                || static_cast<std::size_t>(stack) >= machineStacks.size() || machineSlotId.isEmpty() || key.isEmpty())
+                continue;
+            auto& item = focusedParameters[static_cast<std::size_t>(slot)];
+            item.occupied = true; item.slot = static_cast<std::size_t>(slot); item.stackIndex = static_cast<std::size_t>(stack);
+            item.machineSlotId = machineSlotId.toStdString(); item.focusKey = key.toStdString();
+            item.machineLabel = value.getProperty("machine", {}).toString().toStdString();
+            item.parameterLabel = value.getProperty("parameter", {}).toString().toStdString();
+            item.modulatable = static_cast<bool>(value.getProperty("modulatable", false));
+        }
+    }
+
     viewedSequenceSetIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("viewedSequenceSetIndex", 0))));
     activePlaybackSequenceSetIndex = static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("activePlaybackSequenceSetIndex", static_cast<int>(viewedSequenceSetIndex)))));
     if (!sequenceSets.empty())
@@ -892,6 +952,11 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
     seqEditor.setSelectedSongCursor(
         static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("currentSongRowCursor", static_cast<int>(selectedSongRow))))),
         static_cast<std::size_t>(juce::jmax(0, static_cast<int>(stateVar.getProperty("currentSongColCursor", 0)))));
+    seqEditor.setFocusedParameterCursor(
+        static_cast<std::size_t>(juce::jlimit(0, static_cast<int>(kFocusedParameterCapacity - 1),
+            static_cast<int>(stateVar.getProperty("focusedParameterRow", 0)))),
+        static_cast<std::size_t>(juce::jlimit(4, 6,
+            static_cast<int>(stateVar.getProperty("focusedParameterCol", 4)))));
 
     juce::String mode = stateVar.getProperty("mode", "sequence").toString().toLowerCase();
     if (mode == "song")
@@ -902,6 +967,8 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
         seqEditor.setEditMode(SequencerEditorMode::configuringSequence);
     else if (mode == "machine")
         seqEditor.setEditMode(SequencerEditorMode::machineConfig);
+    else if (mode == "focus")
+        seqEditor.setEditMode(SequencerEditorMode::focusedParameters);
     else if (mode == "audio")
         seqEditor.setEditMode(SequencerEditorMode::audioConfig);
     else
@@ -961,6 +1028,25 @@ void TrackerMainProcessor::restoreSequencerState(const juce::var& stateVar)
             refreshStackProcessingState(stack);
         }
     }
+
+    // The song-level focus list is restored before stack slots.  Keep only
+    // references that survived the slot restore, then republish the fixed
+    // modulation-destination masks.
+    for (std::size_t slot = 0; slot < focusedParameters.size(); ++slot)
+    {
+        auto& item = focusedParameters[slot];
+        item.slot = slot;
+        if (!item.occupied || item.stackIndex >= machineStacks.size())
+        {
+            item.occupied = false;
+            continue;
+        }
+        const auto& slots = machineStacks[item.stackIndex].slots;
+        if (std::none_of(slots.begin(), slots.end(), [&] (const auto& machineSlot) { return machineSlot.id == item.machineSlotId; }))
+            item = {};
+        item.slot = slot;
+    }
+    refreshAllStackProcessingStates();
 
     if (const auto sharedAuxVar = stateVar.getProperty("sharedAuxBuses", juce::var()); sharedAuxVar.isObject())
     {

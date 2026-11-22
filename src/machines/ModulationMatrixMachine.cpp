@@ -238,7 +238,15 @@ float ModulationMatrixMachine::sampleWaveformForUi(int waveform, float phase) co
     return sampleWave(static_cast<Waveform>(juce::jlimit(0, 3, waveform)), phase, 0.0f);
 }
 const char* ModulationMatrixMachine::destinationLabel(ModulationDestination destination)
-{ static constexpr const char* labels[] = { "W F1", "W SUB", "W POS", "S POS", "F CUT", "F RES", "F ATK", "L1 F", "L2 F", "L3 F", "L4 F", "S POS", "PAN", "D TIME", "FM PIT", "FM IDX", "FM FB", "FM COL" }; return labels[static_cast<std::size_t>(destination)]; }
+{
+    static constexpr const char* labels[] = { "W F1", "W SUB", "W POS", "S POS", "F CUT", "F RES", "F ATK", "L1 F", "L2 F", "L3 F", "L4 F", "S POS", "PAN", "D TIME", "FM PIT", "FM IDX", "FM FB", "FM COL" };
+    static constexpr const char* focusLabels[] = { "F01", "F02", "F03", "F04", "F05", "F06", "F07", "F08", "F09", "F10", "F11", "F12", "F13", "F14", "F15", "F16" };
+    const auto index = static_cast<std::size_t>(destination);
+    if (index >= static_cast<std::size_t>(ModulationDestination::focus1)
+        && index < static_cast<std::size_t>(ModulationDestination::count))
+        return focusLabels[index - static_cast<std::size_t>(ModulationDestination::focus1)];
+    return labels[index];
+}
 std::vector<ModulationDestination> ModulationMatrixMachine::visibleDestinations() const
 {
     const auto mask = installedDestinationMask.load(std::memory_order_acquire); std::vector<ModulationDestination> result;
@@ -251,6 +259,10 @@ std::vector<ModulationDestination> ModulationMatrixMachine::visibleDestinations(
     if (mask & 8u)
         add(ModulationDestination::delayTime);
     if (mask & 16u) { add(ModulationDestination::fmPitch); add(ModulationDestination::fmIndex); add(ModulationDestination::fmFeedback); add(ModulationDestination::fmColor); }
+    const auto focusMask = focusedDestinationMask.load(std::memory_order_acquire);
+    for (std::size_t slot = 0; slot < kFocusedModulationDestinationCount; ++slot)
+        if ((focusMask & (1u << slot)) != 0)
+            add(focusDestinationForSlot(slot));
     add(ModulationDestination::stackPan);
     return result;
 }
@@ -348,7 +360,7 @@ bool ModulationMatrixMachine::clearCell(int row, int col)
 
 void ModulationMatrixMachine::getStateInformation(juce::MemoryBlock& out)
 {
-    auto* root = new juce::DynamicObject(); root->setProperty("version", 5);
+    auto* root = new juce::DynamicObject(); root->setProperty("version", 6);
     const auto setArray = [root](const char* name, const auto& values) { juce::Array<juce::var> array; for (const auto& value : values) array.add(value.load()); root->setProperty(name, array); };
     setArray("wave", waveforms); setArray("coarse", coarse); setArray("fine", fine); setArray("div", dividers);
     juce::Array<juce::var> routes; for (const auto& row : depths) for (const auto& value : row) routes.add(value.load()); root->setProperty("routes", routes);
@@ -369,12 +381,15 @@ void ModulationMatrixMachine::setStateInformation(const void* data, int size)
     if (const auto* array = parsed.getProperty("routes", {}).getArray())
     {
         constexpr std::size_t oldDestinationCount = 14;
+        constexpr std::size_t version5DestinationCount = 18;
         const int version = static_cast<int>(parsed.getProperty("version", 4));
         for (std::size_t source = 0; source < kModulationSourceCount; ++source) for (std::size_t destination = 0; destination < kModulationDestinationCount; ++destination)
         {
             if (version < 5 && destination >= oldDestinationCount)
                 continue;
-            const auto stride = version < 5 ? oldDestinationCount : kModulationDestinationCount;
+            if (version == 5 && destination >= version5DestinationCount)
+                continue;
+            const auto stride = version < 5 ? oldDestinationCount : version == 5 ? version5DestinationCount : kModulationDestinationCount;
             const auto index = source * stride + destination;
             if (index < static_cast<std::size_t>(array->size())) depths[source][destination] = juce::jlimit(-100, 100, static_cast<int>(array->getReference(static_cast<int>(index))));
         }

@@ -77,6 +77,7 @@ std::string compactPageLabel(SequencerEditorMode mode)
         case SequencerEditorMode::editingStep: return "STEP";
         case SequencerEditorMode::configuringSequence: return "CONF";
         case SequencerEditorMode::machineConfig: return "MACH";
+        case SequencerEditorMode::focusedParameters: return "FOCUS";
         case SequencerEditorMode::mixer: return "MIX";
         case SequencerEditorMode::audioConfig: return "AUD";
         case SequencerEditorMode::help: return "HELP";
@@ -352,6 +353,9 @@ std::string TrackerMainUI::makeRightHudText(SequencerEditorMode mode)
         case SequencerEditorMode::machineConfig:
             break;
 
+        case SequencerEditorMode::focusedParameters:
+            return appendEntryStatus("FOCUS");
+
         case SequencerEditorMode::arrangingSong:
         case SequencerEditorMode::mixer:
         case SequencerEditorMode::audioConfig:
@@ -576,6 +580,7 @@ void TrackerMainUI::timerCallback ()
   else if (snapshotMode == "step") editMode = SequencerEditorMode::editingStep;
   else if (snapshotMode == "config") editMode = SequencerEditorMode::configuringSequence;
   else if (snapshotMode == "machine") editMode = SequencerEditorMode::machineConfig;
+  else if (snapshotMode == "focus") editMode = SequencerEditorMode::focusedParameters;
   else if (snapshotMode == "mixer") editMode = SequencerEditorMode::mixer;
   else if (snapshotMode == "audio") editMode = SequencerEditorMode::audioConfig;
   else if (snapshotMode == "help") editMode = SequencerEditorMode::help;
@@ -644,6 +649,11 @@ void TrackerMainUI::timerCallback ()
       case SequencerEditorMode::machineConfig:
       {
           prepareMachineConfigView();
+          break;
+      }
+      case SequencerEditorMode::focusedParameters:
+      {
+          prepareFocusedParametersView();
           break;
       }
       case SequencerEditorMode::mixer:
@@ -1081,6 +1091,7 @@ void TrackerMainUI::prepareMachineConfigView()
     int machineId = 0;
     std::optional<CommandType> detailType;
     std::string selectedStackAction;
+    std::string focusedMachineLabel;
     std::size_t scopeStackIndex = 0;
     bool needsScope = true;
     audioProcessor.withAudioThreadExclusive([&]()
@@ -1092,6 +1103,8 @@ void TrackerMainUI::prepareMachineConfigView()
             scopeStackIndex = static_cast<std::size_t>(juce::jmax(0, machineId));
         }
         detailType = seqEditor->getFocusedMachineDetailType();
+        if (detailType.has_value())
+            focusedMachineLabel = machineTraits(*detailType).shortLabel;
         needsScope = !detailType.has_value() || detailType.value() != CommandType::Sampler;
         const auto& machineCells = seqEditor->getMachineCells();
         for (const auto& column : machineCells)
@@ -1104,9 +1117,26 @@ void TrackerMainUI::prepareMachineConfigView()
     if (needsScope)
         audioProcessor.copyStackScope(scopeStackIndex, scopeSamples);
 
+    const auto markFocused = [&] (std::vector<std::vector<UIBox>>& boxes)
+    {
+        if (focusedMachineLabel.empty()) return;
+        const auto focused = audioProcessor.getFocusedParameters();
+        for (std::size_t col = 0; col < boxes.size(); ++col)
+            for (std::size_t row = 0; row < boxes[col].size(); ++row)
+            {
+                const auto key = boxes[col][row].focusKey.empty()
+                    ? "grid-" + std::to_string(col) + "-" + std::to_string(row) : boxes[col][row].focusKey;
+                for (const auto& item : focused)
+                    if (item.occupied && item.stackIndex == scopeStackIndex
+                        && item.machineLabel == focusedMachineLabel && item.focusKey == key)
+                        boxes[col][row].isFocusedParameter = true;
+            }
+    };
+
     if (detailType.has_value() && detailType.value() == CommandType::Sampler)
     {
-        const auto& machineBoxes = seqEditor->getMachineCells();
+        auto machineBoxes = seqEditor->getMachineCells();
+        markFocused(machineBoxes);
         samplerViewActive = true;
         customMachineColumnWidthsActive = true;
         bool browserActive = false;
@@ -1154,6 +1184,7 @@ void TrackerMainUI::prepareMachineConfigView()
     if (detailType.has_value() && detailType.value() == CommandType::WavetableSynth)
     {
         auto machineBoxes = seqEditor->getMachineCells();
+        markFocused(machineBoxes);
         customMachineColumnWidthsActive = true;
         samplerColumnWidths.assign(machineBoxes.size(), 1.0f);
         for (std::size_t col = 0; col < machineBoxes.size(); ++col)
@@ -1373,6 +1404,7 @@ void TrackerMainUI::prepareMachineConfigView()
     if (detailType.has_value() && isSimpleMachineDetail(detailType.value()))
     {
         auto machineBoxes = seqEditor->getMachineCells();
+        markFocused(machineBoxes);
         TrackerUIComponent::Style style;
         style.background = palette.background;
         style.lightColor = palette.lightColor;
@@ -1567,6 +1599,7 @@ void TrackerMainUI::prepareMachineConfigView()
     }
 
     auto machineBoxes = seqEditor->getMachineCells();
+    markFocused(machineBoxes);
     TrackerUIComponent::Style style;
     style.background = palette.background;
     style.lightColor = palette.lightColor;
@@ -1603,6 +1636,134 @@ void TrackerMainUI::prepareMachineConfigView()
     }
 
     overlayState.text = "Stack [" + std::to_string(machineId) + "] [" + selectedStackAction + "]";
+}
+
+void TrackerMainUI::prepareFocusedParametersView()
+{
+    samplerViewActive = false;
+    customMachineColumnWidthsActive = false;
+    samplerColumnWidths.clear();
+    TrackerUIComponent::Style style;
+    style.background = palette.background;
+    style.lightColor = palette.lightColor;
+    style.defaultGlowColor = palette.gridPlayhead;
+    style.ambientStrength = palette.ambientStrength;
+    style.lightDirection = palette.lightDirection;
+    uiComponent.setStyle(style);
+    uiComponent.setCellSize(cellWidth, cellHeight);
+
+    constexpr std::size_t columns = 12;
+    constexpr std::size_t visibleFocusRows = 8;
+    constexpr std::size_t rows = visibleFocusRows + 1; // sticky header + rows
+    std::vector<std::vector<UIBox>> boxes(columns, std::vector<UIBox>(rows));
+    const auto entries = audioProcessor.getFocusedParameters();
+    const auto cursorSlot = std::min<std::size_t>(seqEditor->getFocusedParameterCursorRow(), entries.size() - 1);
+    const auto firstSlot = cursorSlot < visibleFocusRows ? 0u : cursorSlot - visibleFocusRows + 1;
+
+    const std::array<const char*, columns> headings { "ID", "STK", "MACH", "PARAM", "VALUE", "MOD", "DEL", "OUT", "", "", "", "" };
+    for (std::size_t col = 0; col < columns; ++col)
+    {
+        auto& header = boxes[col][0];
+        header.kind = UIBox::Kind::TrackerCell;
+        header.text = headings[col];
+        header.isDisabled = true;
+        header.useCustomFillColour = true;
+        header.customFillArgb = 0xFF10242B;
+        header.useCustomTextColour = true;
+        header.customTextArgb = col == 4 ? 0xFFFFD64A : 0xFF6FECE2;
+    }
+    bool hasEntries = false;
+    for (std::size_t displayRow = 0; displayRow < visibleFocusRows; ++displayRow)
+    {
+        const auto slot = firstSlot + displayRow;
+        const auto row = displayRow + 1;
+        const auto& entry = entries[slot];
+        for (auto& column : boxes) { column[row].kind = UIBox::Kind::TrackerCell; column[row].isDisabled = true; }
+        if (!entry.occupied)
+        {
+            boxes[0][row].text = "F" + juce::String(static_cast<int>(slot + 1)).paddedLeft('0', 2).toStdString();
+            continue;
+        }
+        hasEntries = true;
+        boxes[0][row].text = "F" + juce::String(static_cast<int>(slot + 1)).paddedLeft('0', 2).toStdString();
+        boxes[1][row].text = "STK " + std::to_string(entry.stackIndex + 1);
+        boxes[2][row].text = entry.machineLabel;
+        boxes[3][row].text = entry.parameterLabel;
+        UIBox value;
+        if (audioProcessor.getFocusedParameterCell(slot, value))
+        {
+            value.kind = UIBox::Kind::TrackerCell;
+            value.isDisabled = false;
+            boxes[4][row] = std::move(value);
+        }
+        else boxes[4][row].text = "MISSING";
+        boxes[5][row].text = entry.modulatable ? "BLOCK" : "--";
+        boxes[6][row].text = "DEL";
+        boxes[6][row].isDisabled = false;
+        for (std::size_t col = 7; col < columns; ++col)
+        {
+            boxes[col][row].useCustomFillColour = true;
+            boxes[col][row].customFillArgb = 0xFF0A0F14;
+        }
+    }
+    if (!hasEntries)
+    {
+        boxes[3][1].text = "EMPTY";
+        boxes[4][1].text = "SHIFT+F";
+        boxes[5][1].text = "ADD CTRL";
+    }
+    const auto cursorCol = seqEditor->getFocusedParameterCursorCol() == 6 ? 6u : 4u;
+    // Keep the performance cursor visible on empty slots too. This is
+    // essential feedback when building a Focus set one control at a time.
+    auto& cursorBox = boxes[cursorCol][cursorSlot - firstSlot + 1];
+    cursorBox.isSelected = true;
+    if (!entries[cursorSlot].occupied)
+    {
+        cursorBox.text = cursorCol == 6 ? "DEL" : "--";
+        cursorBox.isDisabled = false;
+    }
+    std::vector<UIBox> stickyHeader(columns);
+    std::vector<std::vector<UIBox>> body(columns, std::vector<UIBox>(visibleFocusRows));
+    for (std::size_t col = 0; col < columns; ++col)
+    {
+        stickyHeader[col] = boxes[col][0];
+        for (std::size_t row = 0; row < visibleFocusRows; ++row)
+            body[col][row] = boxes[col][row + 1];
+    }
+    updateCellStates(body, rows, columns, &stickyHeader);
+
+    std::vector<int> stackIds;
+    for (std::size_t row = 0; row < entries.size(); ++row)
+        if (entries[row].occupied) stackIds.push_back(static_cast<int>(entries[row].stackIndex));
+    const auto uniqueStacks = sequence_scope::collectUniqueStackIndices(stackIds, audioProcessor.getMachineStackCount());
+    if (!uniqueStacks.empty())
+    {
+        audioProcessor.copyStackScopes(uniqueStacks, sequenceScopeRawBuffers);
+        sequenceScopePreviewBuffers.resize(uniqueStacks.size());
+        for (std::size_t index = 0; index < uniqueStacks.size(); ++index)
+        {
+            auto& preview = sequenceScopePreviewBuffers[index];
+            sequence_scope::reducePeakPreserving(sequenceScopeRawBuffers[index], preview);
+            const float scale = updateScopeCalibration(uniqueStacks[index], sequenceScopeRawBuffers[index]);
+            for (auto& sample : preview) sample *= scale;
+        }
+        for (std::size_t row = firstSlot; row < std::min(entries.size(), firstSlot + visibleFocusRows); ++row)
+        {
+            if (!entries[row].occupied) continue;
+            const auto found = std::find(uniqueStacks.begin(), uniqueStacks.end(), entries[row].stackIndex);
+            if (found == uniqueStacks.end()) continue;
+            TrackerUIComponent::Trace scope;
+            scope.colStart = 7.0f; scope.colEnd = 12.0f;
+            scope.rowTop = static_cast<float>(row - firstSlot + 1); scope.rowBottom = scope.rowTop + 1.0f;
+            scope.samples = sequenceScopePreviewBuffers[static_cast<std::size_t>(found - uniqueStacks.begin())];
+            scope.color = juce::Colour(0xFF29E0FF); scope.z = 1.15f; scope.lineWidth = 2.0f;
+            currentTraces.push_back(std::move(scope));
+        }
+    }
+    overlayState.text = hasEntries ? "FOCUS / VALUE [ ] / DEL ENTER" : "FOCUS EMPTY / SHIFT+F ON A MACHINE VALUE";
+    overlayState.color = palette.textPrimary;
+    overlayState.glowColor = palette.gridPlayhead;
+    overlayState.glowStrength = 0.25f;
 }
 
 float TrackerMainUI::updateScopeCalibration(std::size_t stackIndex,
@@ -2275,13 +2436,15 @@ void TrackerMainUI::updateCellStates(const std::vector<std::vector<UIBox>>& boxe
             const auto shortenColour = box.noteLengthMode == 1 ? juce::Colour(0xff36dd68) : juce::Colour(0xffb96cff);
             const bool outerPriority = box.isSoloChannel || box.isMutedChannel;
             cell.drawOutline = samplerViewActive ? box.isSelected
-                : (box.hasNote || outerPriority || shortened);
-            cell.outlineColor = box.isSoloChannel ? juce::Colours::yellow
+                : (box.hasNote || outerPriority || shortened || box.isFocusedParameter);
+            cell.outlineColor = box.isFocusedParameter ? juce::Colour(0xff36dd68)
+                : box.isSoloChannel ? juce::Colours::yellow
                 : box.isMutedChannel ? juce::Colours::red
                 : shortened ? shortenColour
                 : (box.isControlModeSequence && box.hasNote)
                     ? palette.sequenceControlModeOutline : palette.gridNote;
-            cell.outlineLineWidth = (box.isSoloChannel || box.isMutedChannel) ? 5.0f : 3.0f;
+            cell.outlineLineWidth = box.isFocusedParameter ? 4.0f
+                : (box.isSoloChannel || box.isMutedChannel) ? 5.0f : 3.0f;
             cell.drawInsetOutline = !samplerViewActive && shortened && outerPriority;
             cell.insetOutlineColor = shortenColour;
             cell.insetOutlineLineWidth = 2.0f;

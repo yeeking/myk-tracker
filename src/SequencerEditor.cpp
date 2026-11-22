@@ -468,6 +468,8 @@ SequencerEditorPage SequencerEditor::getCurrentPage() const
     return SequencerEditorPage::sequenceConfig;
   case SequencerEditorMode::machineConfig:
     return SequencerEditorPage::machine;
+  case SequencerEditorMode::focusedParameters:
+    return SequencerEditorPage::focus;
   case SequencerEditorMode::mixer:
     return SequencerEditorPage::mixer;
   case SequencerEditorMode::audioConfig:
@@ -516,6 +518,9 @@ void SequencerEditor::selectPage(SequencerEditorPage page)
   case SequencerEditorPage::machine:
     gotoMachineConfigPage();
     break;
+  case SequencerEditorPage::focus:
+    gotoFocusedParametersPage();
+    break;
   case SequencerEditorPage::mixer:
     gotoMixerPage();
     break;
@@ -555,6 +560,9 @@ bool SequencerEditor::selectPageShortcut(int shortcut)
   case 7:
     selectPage(SequencerEditorPage::mixer);
     return true;
+  case 8:
+    selectPage(SequencerEditorPage::focus);
+    return true;
   case 0:
     selectPage(SequencerEditorPage::audioConfig);
     return true;
@@ -582,6 +590,7 @@ void SequencerEditor::cycleEditMode()
     this->editSubMode = SequencerEditor::cycleSubModeRight(this->editSubMode);
     return;
   case SequencerEditorMode::machineConfig:
+  case SequencerEditorMode::focusedParameters:
   case SequencerEditorMode::mixer:
   case SequencerEditorMode::audioConfig:
   case SequencerEditorMode::help:
@@ -606,6 +615,10 @@ void SequencerEditor::cycleAtCursor()
   case SequencerEditorMode::machineConfig:
     if (isMachineUiForCurrentSequence())
       machineActivateCurrentCell();
+    break;
+  case SequencerEditorMode::focusedParameters:
+    if (machineHost != nullptr && focusedParameterCol == 6)
+      machineHost->removeFocusedParameter(focusedParameterRow);
     break;
   case SequencerEditorMode::mixer:
     if (machineHost != nullptr)
@@ -660,6 +673,10 @@ void SequencerEditor::click()
   case SequencerEditorPage::machine:
     clickOnMachinePage();
     break;
+  case SequencerEditorPage::focus:
+    if (machineHost != nullptr && focusedParameterCol == 6)
+      machineHost->removeFocusedParameter(focusedParameterRow);
+    break;
   case SequencerEditorPage::mixer:
     cycleAtCursor();
     break;
@@ -691,6 +708,8 @@ void SequencerEditor::resetAtCursor()
   case SequencerEditorPage::sequenceConfig:
     break;
   case SequencerEditorPage::machine:
+    break;
+  case SequencerEditorPage::focus:
     break;
   case SequencerEditorPage::mixer:
     break;
@@ -727,6 +746,9 @@ void SequencerEditor::enterAtCursor()
     break;
   case SequencerEditorPage::machine:
     machineEditMode = false;
+    gotoSequencePage();
+    break;
+  case SequencerEditorPage::focus:
     gotoSequencePage();
     break;
   case SequencerEditorPage::audioConfig:
@@ -860,6 +882,7 @@ void SequencerEditor::incrementOctave()
     break;
   }
   case SequencerEditorMode::machineConfig:
+  case SequencerEditorMode::focusedParameters:
   case SequencerEditorMode::mixer:
   case SequencerEditorMode::audioConfig:
   {
@@ -932,6 +955,7 @@ void SequencerEditor::decrementOctave()
     break;
   }
   case SequencerEditorMode::machineConfig:
+  case SequencerEditorMode::focusedParameters:
   case SequencerEditorMode::mixer:
   case SequencerEditorMode::audioConfig:
   {
@@ -984,6 +1008,13 @@ void SequencerEditor::transposeCurrentSequence(int semitones)
  */
 void SequencerEditor::enterDataAtCursor(double inValue)
 {
+  if (editMode == SequencerEditorMode::focusedParameters)
+  {
+    if (machineHost != nullptr && focusedParameterCol == 4)
+      machineHost->insertFocusedParameter(focusedParameterRow, inValue);
+    return;
+  }
+
   if (editMode == SequencerEditorMode::editingStep ||
       editMode == SequencerEditorMode::selectingSeqAndStep)
   {
@@ -1139,6 +1170,7 @@ void SequencerEditor::moveCursorLeft()
   case SequencerEditorPage::step: moveCursorLeftOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorLeftOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorLeftOnMachinePage(); break;
+  case SequencerEditorPage::focus: focusedParameterCol = 4; break;
   case SequencerEditorPage::mixer: if (mixerColumn > 0) --mixerColumn; break;
   case SequencerEditorPage::audioConfig: moveAudioConfigCursor(0, -1); break;
   case SequencerEditorPage::help: break;
@@ -1159,6 +1191,7 @@ void SequencerEditor::moveCursorRight()
   case SequencerEditorPage::step: moveCursorRightOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorRightOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorRightOnMachinePage(); break;
+  case SequencerEditorPage::focus: focusedParameterCol = 6; break;
   case SequencerEditorPage::mixer: if (machineHost != nullptr && mixerColumn < machineHost->getMachineStackCount() + 2) ++mixerColumn; break;
   case SequencerEditorPage::audioConfig: moveAudioConfigCursor(0, 1); break;
   case SequencerEditorPage::help: break;
@@ -1179,6 +1212,7 @@ void SequencerEditor::moveCursorUp()
   case SequencerEditorPage::step: moveCursorUpOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorUpOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorUpOnMachinePage(); break;
+  case SequencerEditorPage::focus: if (focusedParameterRow > 0) --focusedParameterRow; break;
   case SequencerEditorPage::mixer: if (mixerRow > 0) --mixerRow; break;
   case SequencerEditorPage::audioConfig: moveAudioConfigCursor(-1, 0); break;
   case SequencerEditorPage::help: break;
@@ -1199,6 +1233,7 @@ void SequencerEditor::moveCursorDown()
   case SequencerEditorPage::step: moveCursorDownOnStepPage(); break;
   case SequencerEditorPage::sequenceConfig: moveCursorDownOnSequenceConfigPage(); break;
   case SequencerEditorPage::machine: moveCursorDownOnMachinePage(); break;
+  case SequencerEditorPage::focus: focusedParameterRow = std::min<std::size_t>(15, focusedParameterRow + 1); break;
   case SequencerEditorPage::mixer: mixerRow = std::min<std::size_t>(11, mixerRow + 1); break;
   case SequencerEditorPage::audioConfig: moveAudioConfigCursor(1, 0); break;
   case SequencerEditorPage::help: break;
@@ -1227,6 +1262,8 @@ void SequencerEditor::addRow()
   case SequencerEditorPage::machine:
     addRowOnMachinePage();
     break;
+  case SequencerEditorPage::focus:
+    break;
   case SequencerEditorPage::mixer:
     break;
   case SequencerEditorPage::audioConfig:
@@ -1254,6 +1291,9 @@ void SequencerEditor::removeRow()
     break;
   case SequencerEditorPage::machine:
     machineRemoveEntry();
+    break;
+  case SequencerEditorPage::focus:
+    if (machineHost != nullptr) machineHost->removeFocusedParameter(focusedParameterRow);
     break;
   case SequencerEditorPage::mixer:
     break;
@@ -1285,6 +1325,9 @@ void SequencerEditor::incrementAtCursor(bool fine)
     break;
   case SequencerEditorPage::machine:
     incrementOnMachinePage(fine);
+    break;
+  case SequencerEditorPage::focus:
+    if (machineHost != nullptr && focusedParameterCol == 4) machineHost->adjustFocusedParameter(focusedParameterRow, 1, fine);
     break;
   case SequencerEditorPage::mixer:
     if (machineHost != nullptr)
@@ -1334,6 +1377,9 @@ void SequencerEditor::decrementAtCursor(bool fine)
     break;
   case SequencerEditorPage::machine:
     decrementOnMachinePage(fine);
+    break;
+  case SequencerEditorPage::focus:
+    if (machineHost != nullptr && focusedParameterCol == 4) machineHost->adjustFocusedParameter(focusedParameterRow, -1, fine);
     break;
   case SequencerEditorPage::mixer:
     if (machineHost != nullptr)
@@ -2497,6 +2543,38 @@ void SequencerEditor::gotoMachineConfigPage()
   machineEditMode = false;
   machineStackDetailMode = false;
   machineStateDirty = true;
+}
+
+void SequencerEditor::gotoFocusedParametersPage()
+{
+  dismissMachineTransientUiIfNeeded();
+  setEditMode(SequencerEditorMode::focusedParameters);
+  focusedParameterCol = focusedParameterCol == 6 ? 6 : 4;
+}
+
+bool SequencerEditor::toggleFocusedMachineParameter()
+{
+  if (getCurrentPage() != SequencerEditorPage::machine || machineHost == nullptr)
+    return false;
+  if (!machineStackDetailMode)
+  {
+    // Stack rows are ADD, MOD, then persistent machine slots. Only the ON/OFF
+    // column is performance-focusable; structural controls remain local.
+    if (machineCursorCol == 1 && machineCursorRow >= 2)
+      return machineHost->toggleFocusedStackEnable(getActiveMachineIndex(CommandType::Sampler), machineCursorRow - 2);
+    return false;
+  }
+  if (machineSelectedStackSlot == kModulationMatrixStackEntry)
+    return false;
+  const auto type = getSelectedStackMachineType();
+  if (!type || machineCursorCol >= machineCells.size() || machineCursorRow >= machineCells[machineCursorCol].size())
+    return false;
+  const auto& cell = machineCells[machineCursorCol][machineCursorRow];
+  if (cell.isDisabled || (cell.onAdjust == nullptr && cell.onInsert == nullptr && cell.onActivate == nullptr))
+    return false;
+  return machineHost->toggleFocusedMachineParameter(getActiveMachineIndex(*type), machineSelectedStackSlot,
+                                                      cell.focusKey, static_cast<int>(machineCursorRow),
+                                                      static_cast<int>(machineCursorCol));
 }
 
 void SequencerEditor::gotoMixerPage()

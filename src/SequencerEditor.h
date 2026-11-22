@@ -80,6 +80,15 @@ public:
   virtual void silenceStack(std::size_t stackIndex) = 0;
   virtual int getStackMidiOutputChannel(std::size_t stackIndex) const = 0;
   virtual void adjustStackMidiOutputChannel(std::size_t stackIndex, int direction) = 0;
+  /** Toggles a Song-level performance focus for a machine-detail value. */
+  virtual bool toggleFocusedMachineParameter(std::size_t, std::optional<std::size_t>,
+                                             const std::string&, int, int) { return false; }
+  /** Toggles focus for a stack slot's persistent enabled/on-off control. */
+  virtual bool toggleFocusedStackEnable(std::size_t, std::size_t) { return false; }
+  virtual bool adjustFocusedParameter(std::size_t, int, bool) { return false; }
+  virtual bool insertFocusedParameter(std::size_t, double) { return false; }
+  virtual bool resetFocusedParameter(std::size_t) { return false; }
+  virtual bool removeFocusedParameter(std::size_t) { return false; }
 };
 
 // Interface for song-mode sequence-set ownership and transport control.
@@ -156,6 +165,7 @@ enum class SequencerEditorMode
   configuringSequence,
   editingStep,
   machineConfig,
+  focusedParameters,
   mixer,
   audioConfig,
   help,
@@ -179,6 +189,7 @@ enum class SequencerEditorPage
   step,
   sequenceConfig,
   machine,
+  focus,
   mixer,
   audioConfig,
   help,
@@ -277,6 +288,12 @@ public:
   void gotoSequenceConfigPage();
   /** enter machine configuration page */
   void gotoMachineConfigPage();
+  void gotoFocusedParametersPage();
+  bool toggleFocusedMachineParameter();
+  std::size_t getFocusedParameterCursorRow() const { return focusedParameterRow; }
+  std::size_t getFocusedParameterCursorCol() const { return focusedParameterCol; }
+  void setFocusedParameterCursor(std::size_t row, std::size_t col)
+  { focusedParameterRow = row; focusedParameterCol = col; }
   void gotoMixerPage();
   void gotoAudioConfigPage();
   void gotoSequencePage();
@@ -557,6 +574,9 @@ private:
   std::size_t currentConfigHead = 0;
   std::size_t mixerColumn = 0;
   std::size_t mixerRow = 0;
+  /** Transient cursor in the Song-level focused-performance list. */
+  std::size_t focusedParameterRow = 0;
+  std::size_t focusedParameterCol = 4;
   /** which song row is selected on the song page */
   std::size_t currentSongRow;
   /** which song page column is selected */

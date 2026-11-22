@@ -80,6 +80,11 @@ struct UIBox
     bool hasValueScale = false;
     /** Normalised parameter value in [0,1] shown by the horizontal fill bar. */
     float valueNorm = 0.0f;
+    /** Stable, machine-owned focus identity. Empty means the logical grid
+        coordinate is used. This is deliberately separate from MCP IDs. */
+    std::string focusKey;
+    /** Persistent Song-level performance focus marker. */
+    bool isFocusedParameter = false;
     /** Cell kind used by the renderer. */
     Kind kind = Kind::None;
 

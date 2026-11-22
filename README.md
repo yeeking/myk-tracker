@@ -237,7 +237,30 @@ Song rows present `SET`, `BEAT`, `BPM`, `EDIT`, `INS`, and `DEL`. Move to a
 row's `INS` cell and press Enter to insert an independent copy directly below
 it. The copy retains the source pattern, BPM, machine-enable state, and beat
 count, while later Song rows move down. The existing `=` shortcut still
-appends a clone of the currently viewed set.
+appends a clone of the currently viewed set. While Song playback is running,
+the currently edited pattern follows the active Song row automatically; the
+Song-page cursor stays where you put it and transport stop leaves the last
+played pattern open. `EDIT` cannot browse away from the active pattern until
+Song playback stops.
+
+## Focus performance page
+
+Press `Shift+F` while a machine value is selected to add or remove that
+control from the Song-level Focus workspace, then press `8` to perform from
+it. Focus has sixteen stable slots (`F01`–`F16`): its rows identify the stack,
+machine, parameter and current value, and show that stack's final mono scope.
+Only `VALUE` and `DEL` accept the cursor. Brackets, numeric entry, reset and
+Enter use the original machine control's exact behaviour; Enter on `DEL` (or
+`Shift+F`) removes the row. A green outline marks focused controls back on
+their machine page. Focus entries persist with the song, rather than with an
+individual pattern.
+
+Focused parameters which declare a safe modulation binding appear as matching
+`F01`–`F16` destinations in that stack's `MOD` page. These routes are
+stack-local and temporary: modulation never changes the manually stored base
+value. The current block-rate bindings cover DIST `DRV`, `TONE`, `MIX`, and
+`OUT`; other focused controls remain direct performance controls and show
+`--` until they have an explicit safe modulation mapping.
 
 ## Network MCP and OSC control
 

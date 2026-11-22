@@ -2,6 +2,7 @@
 
 #include "DrumSynthMachine.h"
 #include "PortableTrackerState.h"
+#include "TrackerControlService.h"
 #include "TrackerMainProcessor.h"
 
 #include <algorithm>
@@ -220,6 +221,101 @@ void requireSongSwitchPreservesIncomingDownbeat()
     processor.releaseResources();
 }
 
+void requireSongPlaybackFollowsEditedSequenceSet()
+{
+    TrackerMainProcessor processor;
+    processor.prepareToPlay(48000.0, 256);
+
+    auto* editor = processor.getSequenceEditor();
+    require(editor != nullptr, "processor exposes an editor for Song follow testing");
+    if (editor == nullptr)
+        return;
+
+    // Give each Song row a recognisably different pattern, while retaining
+    // the normal cloned-set Song construction path.
+    for (int set = 0; set < 3; ++set)
+    {
+        processor.setViewedSequenceSetIndex(static_cast<std::size_t>(set));
+        auto* sequence = processor.getSequencer()->getSequence(0);
+        require(sequence != nullptr, "Song follow fixture sequence exists");
+        if (sequence != nullptr)
+            sequence->setStepData(0, {{ static_cast<double>(CommandType::MidiNote), 60.0 + set, 100.0, 1.0 }});
+        if (set < 2)
+            processor.addSongRowByCloningViewedSet();
+    }
+    for (std::size_t row = 0; row < processor.getSongRowCount(); ++row)
+        processor.adjustSongRowBeatCount(row, -15);
+
+    editor->gotoSongPage();
+    editor->setSelectedSongCursor(2, 1);
+    const auto songCursorRow = editor->getCurrentSongRow();
+    const auto songCursorCol = editor->getCurrentSongCol();
+
+    processor.setSongPlayMode(SongPlayMode::song);
+    processor.setInternalClockEnabled(true);
+    editor->togglePlayback();
+
+    std::array<bool, 3> visited {};
+    juce::AudioBuffer<float> audio(2, 256);
+    juce::MidiBuffer midi;
+    for (int block = 0; block < 2200 && !(visited[0] && visited[1] && visited[2]); ++block)
+    {
+        audio.clear();
+        processor.processBlock(audio, midi);
+        // This is the same message-thread snapshot boundary used by MCP and
+        // the UI timer; it must consume the pending editor-follow handoff.
+        const auto state = processor.getControlService().getState("state");
+        require(state.ok, "Song follow state snapshot succeeds during playback");
+
+        if (!processor.isPlaybackRunningSafely())
+            continue;
+
+        const auto activeRow = processor.getCurrentPlaybackSongRow();
+        require(activeRow < processor.getSongRowCount(), "Song follow playback row remains valid");
+        const auto activeSet = processor.getSongRowSequenceSetId(activeRow);
+        require(processor.getViewedSequenceSetIndex() == activeSet,
+                "Song playback binds the edited set to the audible Song row");
+        const auto activeData = processor.getSequencer()->getStepData(0, 0);
+        require(!activeData.empty() && activeData.front().size() > Step::noteInd
+                    && std::abs(activeData.front()[Step::noteInd] - (60.0 + static_cast<double>(activeSet))) < 0.001,
+                "Song playback exposes the active row's pattern data to the editor");
+        if (activeRow < visited.size())
+            visited[activeRow] = true;
+    }
+    require(visited[0] && visited[1] && visited[2], "Song follow visits and binds every Song row");
+    require(editor->getCurrentSongRow() == songCursorRow && editor->getCurrentSongCol() == songCursorCol,
+            "Song playback does not move the Song-page cursor");
+
+    const auto activeRow = processor.getCurrentPlaybackSongRow();
+    const auto activeSet = processor.getSongRowSequenceSetId(activeRow);
+    const auto otherRow = (activeRow + 1) % processor.getSongRowCount();
+    editor->gotoSongPage();
+    editor->setSelectedSongCursor(otherRow + 1, 3);
+    editor->click();
+    require(processor.getViewedSequenceSetIndex() == activeSet,
+            "Song-page EDIT cannot browse away from the active Song pattern while playing");
+
+    processor.setSelectedSongRow(2);
+    processor.rewindSongTransport();
+    bool rewound = false;
+    for (int block = 0; block < 700 && !rewound; ++block)
+    {
+        audio.clear();
+        processor.processBlock(audio, midi);
+        processor.getControlService().getState("state");
+        rewound = processor.getCurrentPlaybackSongRow() == 2
+            && processor.getViewedSequenceSetIndex() == processor.getSongRowSequenceSetId(2);
+    }
+    require(rewound, "playing rewind immediately rebinds the edited Song pattern");
+
+    const auto retainedSet = processor.getViewedSequenceSetIndex();
+    editor->togglePlayback();
+    processor.getControlService().getState("state");
+    require(processor.getViewedSequenceSetIndex() == retainedSet,
+            "stopping Song playback retains the last edited pattern");
+    processor.releaseResources();
+}
+
 void requireSongRowInsertionClonesIndependently()
 {
     TrackerMainProcessor processor;
@@ -303,6 +399,7 @@ int main()
     requirePermissiveProjectVersionLoading();
     requireSongRowInsertionClonesIndependently();
     requireSongSwitchPreservesIncomingDownbeat();
+    requireSongPlaybackFollowsEditedSequenceSet();
 
     TrackerMainProcessor processor;
     processor.prepareToPlay(48000.0, 256);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -123,6 +124,13 @@ public:
     }
     /** Gives an instrument the current stack modulation signals. Audio-thread only. */
     virtual void setModulationBlock(const ModulationBlockView* block) { (void)block; }
+    /** Binds a song-level focus slot to a machine-owned stable control key.
+        Called off the audio thread; machines retain only numeric bindings. */
+    virtual void setFocusedParameterBinding(std::size_t slot, const std::string& key)
+    { (void)slot; (void)key; }
+    /** Whether this stable control key has an audio-safe modulation binding. */
+    virtual bool supportsFocusedModulation(const std::string& key) const
+    { (void)key; return false; }
     /** Passes printable text input to the machine. */
     virtual bool handleTextInput(char character) { (void)character; return false; }
     /** Passes backspace text input to the machine. */

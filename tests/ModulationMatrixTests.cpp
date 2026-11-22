@@ -140,8 +140,8 @@ int main()
     juce::MemoryBlock migratedState;
     migrated.getStateInformation(migratedState);
     const auto migratedParsed = parseMachineStateJson(migratedState.getData(), static_cast<int>(migratedState.getSize()));
-    require(static_cast<int>(migratedParsed.getProperty("version", 0)) == 5,
-            "MOD state is saved as version 5");
+    require(static_cast<int>(migratedParsed.getProperty("version", 0)) == 6,
+            "MOD state is saved as version 6");
     const auto* migratedRoutes = migratedParsed.getProperty("routes", {}).getArray();
     require(migratedRoutes != nullptr
                 && static_cast<int>(migratedRoutes->getReference(

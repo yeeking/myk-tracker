@@ -21,6 +21,9 @@ public:
     std::vector<std::vector<UIBox>> getUIBoxes(const MachineUiContext& context) override;
     /** Processes the stack audio buffer through the waveshaper. */
     void processAudioBuffer(juce::AudioBuffer<float>& buffer) override;
+    void setModulationBlock(const ModulationBlockView* block) override { modulationBlock = block; }
+    void setFocusedParameterBinding(std::size_t slot, const std::string& key) override;
+    bool supportsFocusedModulation(const std::string& key) const override;
     /** Serialises the current distortion settings. */
     void getStateInformation(juce::MemoryBlock& destData) override;
     /** Restores the current distortion settings. */
@@ -48,6 +51,9 @@ private:
     std::atomic<float> output { 0.8f };
     /** Per-channel filter state for the tone stage. */
     std::array<float, 2> toneState {};
+    const ModulationBlockView* modulationBlock = nullptr;
+    /** Focus slots for DRV, TONE, MIX and OUT respectively; -1 means unbound. */
+    std::array<std::atomic<int>, 4> focusedSlots { { -1, -1, -1, -1 } };
 
     /** Resets the tone filter state for both channels. */
     void resetToneState();

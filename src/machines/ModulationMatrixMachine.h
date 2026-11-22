@@ -36,6 +36,7 @@ public:
     bool clearCell(int row, int col) override;
 
     void setInstalledDestinations(unsigned int mask) noexcept { installedDestinationMask.store(mask, std::memory_order_release); }
+    void setFocusedDestinationMask(unsigned int mask) noexcept { focusedDestinationMask.store(mask, std::memory_order_release); }
     void resetClockDividers() noexcept;
     void processModulationBlock(int samples, bool enabled, bool transportPlaying,
                                 const ModulationClockTick* ticks, std::size_t tickCount,
@@ -54,6 +55,7 @@ private:
     std::array<std::atomic<int>, 3> dividers;
     std::array<std::array<std::atomic<int>, kModulationDestinationCount>, kModulationSourceCount> depths;
     std::atomic<unsigned int> installedDestinationMask { 0 };
+    std::atomic<unsigned int> focusedDestinationMask { 0 };
     std::atomic<unsigned long long> revision { 1 };
     unsigned long long compiledRevision = 0;
     std::array<std::array<Route, kModulationSourceCount>, kModulationDestinationCount> compiledRoutes {};

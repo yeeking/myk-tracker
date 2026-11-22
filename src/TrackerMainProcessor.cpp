@@ -16,6 +16,47 @@
 
 namespace
 {
+constexpr const char* kFocusKeyPrefix = "grid-";
+
+bool parseFocusGridKey(const std::string& key, std::size_t& column, std::size_t& row)
+{
+    if (key.rfind(kFocusKeyPrefix, 0) != 0)
+        return false;
+    const auto separator = key.find('-', 5);
+    if (separator == std::string::npos)
+        return false;
+    try
+    {
+        column = static_cast<std::size_t>(std::stoul(key.substr(5, separator - 5)));
+        row = static_cast<std::size_t>(std::stoul(key.substr(separator + 1)));
+        return true;
+    }
+    catch (...) { return false; }
+}
+
+std::string focusGridKey(std::size_t column, std::size_t row)
+{
+    return std::string(kFocusKeyPrefix) + std::to_string(column) + "-" + std::to_string(row);
+}
+
+UIBox* findFocusedControl(std::vector<std::vector<UIBox>>& cells, const std::string& key)
+{
+    for (auto& column : cells)
+        for (auto& cell : column)
+            if (!cell.focusKey.empty() && cell.focusKey == key)
+                return &cell;
+    std::size_t column = 0, row = 0;
+    if (!parseFocusGridKey(key, column, row) || column >= cells.size() || row >= cells[column].size())
+        return nullptr;
+    return &cells[column][row];
+}
+
+std::string focusLabelFor(const std::vector<std::vector<UIBox>>& cells, std::size_t column, std::size_t row)
+{
+    if (column > 0 && row < cells[column - 1].size() && !cells[column - 1][row].text.empty())
+        return cells[column - 1][row].text;
+    return column < cells.size() && row < cells[column].size() ? cells[column][row].text : std::string{};
+}
 constexpr int oscListenPort = 9001;
 constexpr int kDefaultLcdDisplayPort = 9000;
 constexpr const char* kDefaultLcdDisplayHost = "127.0.0.1";
@@ -232,7 +273,29 @@ void TrackerMainProcessor::refreshStackProcessingState(MachineStack& stack)
         if (slot.type == CommandType::FmSynth) destinations |= 16u;
     }
     if (stack.modulationMatrix != nullptr)
+    {
         stack.modulationMatrix->setInstalledDestinations(destinations);
+        unsigned int focusMask = 0;
+        const auto stackIndex = static_cast<std::size_t>(&stack - machineStacks.data());
+        // Clear stale numeric bindings before republishing this stack's focus
+        // slots. Implementations use atomics, so audio never resolves keys.
+        stack.forEachMachine([] (MachineInterface& machine)
+        {
+            for (std::size_t slot = 0; slot < kFocusedModulationDestinationCount; ++slot)
+                machine.setFocusedParameterBinding(slot, {});
+        });
+        for (const auto& item : focusedParameters)
+            if (item.occupied && item.modulatable && item.stackIndex == stackIndex && item.slot < 32)
+            {
+                focusMask |= (1u << item.slot);
+                const auto machineSlot = std::find_if(stack.slots.begin(), stack.slots.end(), [&] (const auto& slot)
+                { return slot.id == item.machineSlotId; });
+                if (machineSlot != stack.slots.end())
+                    if (auto* machine = getMachineForStackType(stack, machineSlot->type))
+                        machine->setFocusedParameterBinding(item.slot, item.focusKey);
+            }
+        stack.modulationMatrix->setFocusedDestinationMask(focusMask);
+    }
 }
 
 void TrackerMainProcessor::refreshAllStackProcessingStates()
@@ -293,6 +356,7 @@ std::unique_ptr<Sequencer> TrackerMainProcessor::createDefaultSequenceSet(std::s
 
 void TrackerMainProcessor::resetSongState()
 {
+    clearPendingSongPlaybackEditorFollow();
     sequenceSets.clear();
     sequenceSets.push_back(createDefaultSequenceSet());
     sequenceSetBpms.assign(1, 120.0);
@@ -307,6 +371,11 @@ void TrackerMainProcessor::resetSongState()
     selectedSongRow = 0;
     currentSongRow = 0;
     currentSongRowBeatCounter = 0;
+    for (std::size_t i = 0; i < focusedParameters.size(); ++i)
+    {
+        focusedParameters[i] = {};
+        focusedParameters[i].slot = i;
+    }
     pendingTransportQuarterBeatReset = false;
     pendingTransportStartOnQuarterBeat = false;
     quarterBeatTicksAccumulator = 0;
@@ -458,6 +527,15 @@ const Sequencer* TrackerMainProcessor::getPlaybackSequencerInternal() const
 
 void TrackerMainProcessor::bindViewedSequenceSetToEditor()
 {
+    Sequencer* ignoredCacheRefreshTarget = nullptr;
+    bindViewedSequenceSetToEditorUnlocked(ignoredCacheRefreshTarget);
+    if (ignoredCacheRefreshTarget != nullptr)
+        ignoredCacheRefreshTarget->requestStrUpdate();
+}
+
+void TrackerMainProcessor::bindViewedSequenceSetToEditorUnlocked(Sequencer*& cacheRefreshTarget)
+{
+    cacheRefreshTarget = nullptr;
     if (auto* viewedSequencer = getViewedSequencerInternal())
     {
         seqEditor.setSequencer(viewedSequencer);
@@ -467,8 +545,54 @@ void TrackerMainProcessor::bindViewedSequenceSetToEditor()
         seqEditor.setCurrentSequence(juce::jlimit(0, maxSeq, static_cast<int>(seqEditor.getCurrentSequence())));
         const auto maxStep = juce::jmax<int>(0, static_cast<int>(viewedSequencer->howManySteps(seqEditor.getCurrentSequence())) - 1);
         seqEditor.setCurrentStep(juce::jlimit(0, maxStep, static_cast<int>(seqEditor.getCurrentStep())));
-        viewedSequencer->requestStrUpdate();
+        cacheRefreshTarget = viewedSequencer;
     }
+}
+
+void TrackerMainProcessor::publishSongPlaybackEditorFollow(std::size_t setIndex) noexcept
+{
+    pendingSongPlaybackEditorFollow.store(setIndex, std::memory_order_release);
+}
+
+void TrackerMainProcessor::clearPendingSongPlaybackEditorFollow() noexcept
+{
+    pendingSongPlaybackEditorFollow.store(kNoPendingSongEditorFollow, std::memory_order_release);
+}
+
+bool TrackerMainProcessor::consumePendingSongPlaybackEditorFollow()
+{
+    const auto pendingSet = pendingSongPlaybackEditorFollow.exchange(kNoPendingSongEditorFollow,
+                                                                      std::memory_order_acq_rel);
+    if (pendingSet == kNoPendingSongEditorFollow)
+        return false;
+
+    Sequencer* cacheRefreshTarget = nullptr;
+    bool rebound = false;
+    withAudioThreadExclusive([&]()
+    {
+        if (sequenceSets.empty())
+            return;
+
+        // The atomic is a wake-up/coalescing token. Read the authoritative
+        // active set while holding the processor boundary so a second Song
+        // transition arriving just before this bind cannot display its old row.
+        juce::ignoreUnused(pendingSet);
+        const auto safeSet = std::min(activePlaybackSequenceSetIndex, sequenceSets.size() - 1);
+        if (viewedSequenceSetIndex == safeSet)
+            return;
+
+        // The audio path already applied BPM and machine state for this Song
+        // row. This is editor-only state, deliberately kept out of processBlock.
+        viewedSequenceSetIndex = safeSet;
+        bindViewedSequenceSetToEditorUnlocked(cacheRefreshTarget);
+        rebound = true;
+    });
+
+    // Updating display strings may take Sequencer's own cache lock, so do it
+    // only after releasing the processor/audio lock.
+    if (cacheRefreshTarget != nullptr)
+        cacheRefreshTarget->requestStrUpdate();
+    return rebound;
 }
 
 void TrackerMainProcessor::schedulePlaybackSequenceSetSwitch(std::size_t index)
@@ -511,6 +635,8 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
         applyMachineEnableStateForSequenceSet(targetIndex);
         if (songPlayMode == SongPlayMode::sequence)
             setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
+        else
+            publishSongPlaybackEditorFollow(activePlaybackSequenceSetIndex);
 
         if (rewindNow && previousPlaybackSequencer != nullptr)
             previousPlaybackSequencer->resetForTransportStart();
@@ -524,6 +650,8 @@ void TrackerMainProcessor::switchPlaybackSequenceSetImmediately(std::size_t inde
         previousPlaybackSequencer->stop();
     if (songPlayMode == SongPlayMode::sequence)
         setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
+    else
+        publishSongPlaybackEditorFollow(activePlaybackSequenceSetIndex);
 
     if (auto* playbackSequencer = getPlaybackSequencerInternal())
     {
@@ -1271,6 +1399,14 @@ juce::String TrackerMainProcessor::getCurrentCellOscPayload(bool refreshMachineC
             }
             break;
         }
+        case SequencerEditorMode::focusedParameters:
+        {
+            const auto slot = seqEditor.getFocusedParameterCursorRow();
+            if (slot < focusedParameters.size() && focusedParameters[slot].occupied)
+                return "FOCUS F" + juce::String(static_cast<int>(slot + 1)) + " "
+                    + juce::String(focusedParameters[slot].parameterLabel);
+            return "FOCUS";
+        }
         case SequencerEditorMode::mixer:
         {
             const auto stack = seqEditor.getSelectedMixerStack();
@@ -1901,6 +2037,7 @@ void TrackerMainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 stack->fmSynth->setModulationBlock(modulation);
                 stack->filterFx->setModulationBlock(modulation);
                 stack->delayFx->setModulationBlock(modulation);
+                stack->distortionFx->setModulationBlock(modulation);
             }
 
             if (stack->samplerProcessingActive && stack->sampler != nullptr)
@@ -2209,7 +2346,11 @@ void TrackerMainProcessor::setViewedSequenceSetIndex(std::size_t index)
 {
     if (sequenceSets.empty())
         return;
-    viewedSequenceSetIndex = std::min(index, sequenceSets.size() - 1);
+    // Song mode has one edited pattern: the one currently audible. This also
+    // prevents Song-page EDIT from temporarily diverging from playback.
+    viewedSequenceSetIndex = isSongPlaybackRunning()
+        ? std::min(activePlaybackSequenceSetIndex, sequenceSets.size() - 1)
+        : std::min(index, sequenceSets.size() - 1);
     // While a song is running, its active sequence set owns the live stack
     // state until the next scheduled song boundary.  Browsing another set
     // must not change the sound early.
@@ -2299,6 +2440,7 @@ void TrackerMainProcessor::setSongPlayMode(SongPlayMode mode)
     songPlayMode = mode;
     if (mode == SongPlayMode::sequence)
     {
+        clearPendingSongPlaybackEditorFollow();
         setViewedSequenceSetIndex(activePlaybackSequenceSetIndex);
         setSelectedSongRow(selectedSongRow);
     }
@@ -2367,6 +2509,8 @@ void TrackerMainProcessor::removeSongRow(std::size_t row)
 {
     if (row >= songRows.size() || songRows.size() <= 1 || sequenceSets.empty())
         return;
+
+    clearPendingSongPlaybackEditorFollow();
 
     const std::size_t removedSetId = songRows[row].sequenceSetId;
     songRows.erase(songRows.begin() + static_cast<std::ptrdiff_t>(row));
@@ -2827,6 +2971,158 @@ void TrackerMainProcessor::adjustStackMidiOutputChannel(std::size_t stackIndex, 
         stack->midiOutputChannel = juce::jlimit(1, 16, stack->midiOutputChannel + (direction < 0 ? -1 : 1));
 }
 
+std::array<TrackerMainProcessor::FocusedParameter, TrackerMainProcessor::kFocusedParameterCapacity>
+TrackerMainProcessor::getFocusedParameters() const
+{
+    return focusedParameters;
+}
+
+bool TrackerMainProcessor::getFocusedParameterCell(std::size_t focusSlot, UIBox& out) const
+{
+    if (focusSlot >= focusedParameters.size() || !focusedParameters[focusSlot].occupied)
+        return false;
+    const auto& item = focusedParameters[focusSlot];
+    if (item.stackIndex >= machineStacks.size()) return false;
+    const auto& stack = machineStacks[item.stackIndex];
+    const auto it = std::find_if(stack.slots.begin(), stack.slots.end(), [&] (const auto& slot) { return slot.id == item.machineSlotId; });
+    if (it == stack.slots.end()) return false;
+    auto* machine = const_cast<TrackerMainProcessor*>(this)->getMachineForStackType(const_cast<MachineStack&>(stack), it->type);
+    if (machine == nullptr) return false;
+    auto controls = machine->getControlBoxes({});
+    if (auto* cell = findFocusedControl(controls, item.focusKey)) { out = *cell; return true; }
+    return false;
+}
+
+bool TrackerMainProcessor::toggleFocusedMachineParameter(std::size_t stackIndex, std::optional<std::size_t> slotIndex,
+                                                          const std::string& key, int row, int col)
+{
+    if (!slotIndex || stackIndex >= machineStacks.size())
+        return false;
+    auto& stack = machineStacks[stackIndex];
+    if (*slotIndex >= stack.slots.size())
+        return false;
+    const auto& slot = stack.slots[*slotIndex];
+    auto* machine = getMachineForStackType(stack, slot.type);
+    if (machine == nullptr)
+        return false;
+    auto controls = machine->getControlBoxes({});
+    const auto resolvedKey = key.empty() ? focusGridKey(static_cast<std::size_t>(juce::jmax(0, col)),
+                                                        static_cast<std::size_t>(juce::jmax(0, row))) : key;
+    auto* control = findFocusedControl(controls, resolvedKey);
+    if (control == nullptr || control->isDisabled
+        || (control->onAdjust == nullptr && control->onInsert == nullptr && control->onActivate == nullptr))
+        return false;
+    const auto existing = std::find_if(focusedParameters.begin(), focusedParameters.end(),
+        [&] (const FocusedParameter& item)
+        { return item.occupied && item.stackIndex == stackIndex && item.machineSlotId == slot.id && item.focusKey == resolvedKey; });
+    if (existing != focusedParameters.end())
+    {
+        *existing = {};
+        existing->slot = static_cast<std::size_t>(existing - focusedParameters.begin());
+        refreshAllStackProcessingStates();
+        return true;
+    }
+    const auto destination = std::find_if(focusedParameters.begin(), focusedParameters.end(),
+        [] (const FocusedParameter& item) { return !item.occupied; });
+    if (destination == focusedParameters.end())
+        return false;
+    const auto targetColumn = static_cast<std::size_t>(juce::jmax(0, col));
+    const auto targetRow = static_cast<std::size_t>(juce::jmax(0, row));
+    destination->occupied = true;
+    destination->slot = static_cast<std::size_t>(destination - focusedParameters.begin());
+    destination->stackIndex = stackIndex;
+    destination->machineSlotId = slot.id;
+    destination->focusKey = resolvedKey;
+    destination->machineLabel = machineTraits(slot.type).shortLabel;
+    destination->parameterLabel = focusLabelFor(controls, targetColumn, targetRow);
+    if (destination->parameterLabel.empty()) destination->parameterLabel = control->text;
+    // A UIBox with a numeric insertion or range fill is a safe first-version
+    // modulation target. Choice/toggle controls stay focusable but are marked
+    // non-modulatable until their machine supplies an explicit runtime binding.
+    destination->modulatable = control->onAdjust != nullptr && control->hasValueScale
+        && machine->supportsFocusedModulation(resolvedKey);
+    refreshAllStackProcessingStates();
+    return true;
+}
+
+bool TrackerMainProcessor::toggleFocusedMachineParameterByAddress(std::size_t stackIndex, const juce::String& slotId,
+                                                                   const juce::String& controlId, bool forceAdd, bool forceRemove)
+{
+    if (stackIndex >= machineStacks.size()) return false;
+    auto& slots = machineStacks[stackIndex].slots;
+    const auto found = std::find_if(slots.begin(), slots.end(), [&] (const auto& slot) { return slot.id == slotId.toStdString(); });
+    if (found == slots.end()) return false;
+    const auto slotIndex = static_cast<std::size_t>(found - slots.begin());
+    const auto key = controlId.toStdString();
+    const auto existing = std::find_if(focusedParameters.begin(), focusedParameters.end(), [&] (const auto& item)
+    { return item.occupied && item.stackIndex == stackIndex && item.machineSlotId == slotId.toStdString() && item.focusKey == key; });
+    if (forceRemove)
+    {
+        if (existing == focusedParameters.end()) return false;
+        const auto index = static_cast<std::size_t>(existing - focusedParameters.begin());
+        return removeFocusedParameter(index);
+    }
+    if (forceAdd && existing != focusedParameters.end()) return true;
+    return toggleFocusedMachineParameter(stackIndex, slotIndex, key, -1, -1);
+}
+
+bool TrackerMainProcessor::adjustFocusedParameter(std::size_t focusSlot, int direction, bool fine)
+{
+    if (focusSlot >= focusedParameters.size() || !focusedParameters[focusSlot].occupied) return false;
+    const auto& item = focusedParameters[focusSlot];
+    if (item.stackIndex >= machineStacks.size()) return false;
+    auto& stack = machineStacks[item.stackIndex];
+    const auto it = std::find_if(stack.slots.begin(), stack.slots.end(), [&] (const auto& slot) { return slot.id == item.machineSlotId; });
+    if (it == stack.slots.end()) return false;
+    auto* machine = getMachineForStackType(stack, it->type);
+    if (machine == nullptr) return false;
+    auto controls = machine->getControlBoxes({});
+    if (auto* control = findFocusedControl(controls, item.focusKey); control != nullptr && control->onAdjust)
+    { control->onAdjust(direction, fine ? kFineAdjustRangeFraction : kCoarseAdjustRangeFraction); return true; }
+    return false;
+}
+
+bool TrackerMainProcessor::insertFocusedParameter(std::size_t focusSlot, double value)
+{
+    if (focusSlot >= focusedParameters.size() || !focusedParameters[focusSlot].occupied) return false;
+    const auto& item = focusedParameters[focusSlot];
+    if (item.stackIndex >= machineStacks.size()) return false;
+    auto& stack = machineStacks[item.stackIndex];
+    const auto it = std::find_if(stack.slots.begin(), stack.slots.end(), [&] (const auto& slot) { return slot.id == item.machineSlotId; });
+    if (it == stack.slots.end()) return false;
+    auto* machine = getMachineForStackType(stack, it->type);
+    if (machine == nullptr) return false;
+    auto controls = machine->getControlBoxes({});
+    if (auto* control = findFocusedControl(controls, item.focusKey); control != nullptr && control->onInsert)
+    { control->onInsert(value); return true; }
+    return false;
+}
+
+bool TrackerMainProcessor::resetFocusedParameter(std::size_t focusSlot)
+{
+    if (focusSlot >= focusedParameters.size() || !focusedParameters[focusSlot].occupied) return false;
+    const auto& item = focusedParameters[focusSlot];
+    if (item.stackIndex >= machineStacks.size()) return false;
+    auto& stack = machineStacks[item.stackIndex];
+    const auto it = std::find_if(stack.slots.begin(), stack.slots.end(), [&] (const auto& slot) { return slot.id == item.machineSlotId; });
+    if (it == stack.slots.end()) return false;
+    auto* machine = getMachineForStackType(stack, it->type);
+    if (machine == nullptr) return false;
+    auto controls = machine->getControlBoxes({});
+    if (auto* control = findFocusedControl(controls, item.focusKey); control != nullptr && control->onReset)
+    { control->onReset(); return true; }
+    return false;
+}
+
+bool TrackerMainProcessor::removeFocusedParameter(std::size_t focusSlot)
+{
+    if (focusSlot >= focusedParameters.size() || !focusedParameters[focusSlot].occupied) return false;
+    focusedParameters[focusSlot] = {};
+    focusedParameters[focusSlot].slot = focusSlot;
+    refreshAllStackProcessingStates();
+    return true;
+}
+
 void TrackerMainProcessor::addMachineToStack(std::size_t stackIndex)
 {
     if (auto* stack = getMachineStack(stackIndex))
@@ -2853,6 +3149,11 @@ void TrackerMainProcessor::removeMachineFromStack(std::size_t stackIndex, std::s
     {
         if (slotIndex < stack->slots.size())
         {
+            const auto removedId = stack->slots[slotIndex].id;
+            for (std::size_t i = 0; i < focusedParameters.size(); ++i)
+                if (focusedParameters[i].occupied && focusedParameters[i].stackIndex == stackIndex
+                    && focusedParameters[i].machineSlotId == removedId)
+                    removeFocusedParameter(i);
             stack->slots.erase(stack->slots.begin() + static_cast<long>(slotIndex));
             refreshStackProcessingState(*stack);
             normaliseAllMachineEnableStates();
@@ -2884,6 +3185,10 @@ void TrackerMainProcessor::cycleMachineTypeInStack(std::size_t stackIndex, std::
                 });
             if (!duplicate || candidate == stack->slots[slotIndex].type || slotAllowsDuplicate(candidate))
             {
+                for (std::size_t i = 0; i < focusedParameters.size(); ++i)
+                    if (focusedParameters[i].occupied && focusedParameters[i].stackIndex == stackIndex
+                        && focusedParameters[i].machineSlotId == stack->slots[slotIndex].id)
+                        removeFocusedParameter(i);
                 const auto stableId = stack->slots[slotIndex].id;
                 stack->slots[slotIndex] = makeDefaultSlotState(candidate);
                 stack->slots[slotIndex].id = stableId;
