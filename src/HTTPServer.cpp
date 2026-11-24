@@ -4,7 +4,7 @@ namespace { constexpr auto kProtocolVersion = "2026-07-28"; }
 
 TrackerMcpServer::TrackerMcpServer(TrackerControlService& control, int portIn, juce::String bindAddressIn)
     : juce::Thread("MYK Tracker MCP server"), router(control), port(portIn),
-      bindAddress(bindAddressIn.trim().isNotEmpty() ? bindAddressIn.trim() : "0.0.0.0")
+      bindAddress(bindAddressIn.trim().isNotEmpty() ? bindAddressIn.trim() : "127.0.0.1")
 {
     initialiseRoutes();
 }

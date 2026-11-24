@@ -1119,8 +1119,20 @@ void TrackerMainUI::prepareMachineConfigView()
 
     const auto markFocused = [&] (std::vector<std::vector<UIBox>>& boxes)
     {
-        if (focusedMachineLabel.empty()) return;
         const auto focused = audioProcessor.getFocusedParameters();
+        if (focusedMachineLabel.empty())
+        {
+            // Stack overview: machine rows start after ADD and MOD. Their
+            // ON/OFF cells have a stable stack-enabled focus identity.
+            if (boxes.size() > 1)
+                for (std::size_t row = 2; row < boxes[1].size(); ++row)
+                    for (const auto& item : focused)
+                        if (item.occupied && item.stackIndex == scopeStackIndex
+                            && item.focusKey == "stack-enabled" && boxes.size() > 0
+                            && item.machineLabel == boxes[0][row].text)
+                            boxes[1][row].isFocusedParameter = true;
+            return;
+        }
         for (std::size_t col = 0; col < boxes.size(); ++col)
             for (std::size_t row = 0; row < boxes[col].size(); ++row)
             {
@@ -1700,7 +1712,7 @@ void TrackerMainUI::prepareFocusedParametersView()
         boxes[5][row].text = entry.modulatable ? "BLOCK" : "--";
         boxes[6][row].text = "DEL";
         boxes[6][row].isDisabled = false;
-        for (std::size_t col = 7; col < columns; ++col)
+        for (std::size_t col = 7; col < 9; ++col)
         {
             boxes[col][row].useCustomFillColour = true;
             boxes[col][row].customFillArgb = 0xFF0A0F14;
@@ -1753,7 +1765,7 @@ void TrackerMainUI::prepareFocusedParametersView()
             const auto found = std::find(uniqueStacks.begin(), uniqueStacks.end(), entries[row].stackIndex);
             if (found == uniqueStacks.end()) continue;
             TrackerUIComponent::Trace scope;
-            scope.colStart = 7.0f; scope.colEnd = 12.0f;
+            scope.colStart = 7.0f; scope.colEnd = 9.0f;
             scope.rowTop = static_cast<float>(row - firstSlot + 1); scope.rowBottom = scope.rowTop + 1.0f;
             scope.samples = sequenceScopePreviewBuffers[static_cast<std::size_t>(found - uniqueStacks.begin())];
             scope.color = juce::Colour(0xFF29E0FF); scope.z = 1.15f; scope.lineWidth = 2.0f;

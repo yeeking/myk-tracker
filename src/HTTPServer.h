@@ -15,7 +15,7 @@ class TrackerMcpServer final : public juce::Thread
 {
 public:
     explicit TrackerMcpServer(TrackerControlService& control, int port = 8080,
-                              juce::String bindAddress = "0.0.0.0");
+                              juce::String bindAddress = "127.0.0.1");
     ~TrackerMcpServer() override;
 
     void run() override;

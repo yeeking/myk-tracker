@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="520" viewBox="0 0 2400 520">
+  <rect width="2400" height="520" fill="#0b1118"/>
+  <rect x="34" y="34" width="2332" height="452" fill="none" stroke="#77f3f7" stroke-width="4"/>
+  <text x="82" y="112" fill="#9cf9b5" font-family="DejaVu Sans Mono" font-size="48" font-weight="bold">MYK TRACKER — FOCUS PERFORMANCE</text>
+  <text x="82" y="190" fill="#9cf9b5" font-family="DejaVu Sans Mono" font-size="36" font-weight="bold">8</text>
+  <text x="210" y="190" fill="#e0e9e9" font-family="DejaVu Sans Mono" font-size="32">Open Focus page (F01–F16; stable stack/slot/control addresses)</text>
+  <text x="82" y="264" fill="#9cf9b5" font-family="DejaVu Sans Mono" font-size="36" font-weight="bold">SHIFT+F</text>
+  <text x="310" y="264" fill="#e0e9e9" font-family="DejaVu Sans Mono" font-size="32">Add/remove the selected machine control from Focus</text>
+  <text x="82" y="338" fill="#9cf9b5" font-family="DejaVu Sans Mono" font-size="36" font-weight="bold">[ / ]</text>
+  <text x="310" y="338" fill="#e0e9e9" font-family="DejaVu Sans Mono" font-size="32">Focused value down/up — coarse 1% of range</text>
+  <text x="82" y="412" fill="#9cf9b5" font-family="DejaVu Sans Mono" font-size="36" font-weight="bold">{ / }</text>
+  <text x="310" y="412" fill="#e0e9e9" font-family="DejaVu Sans Mono" font-size="32">Focused value down/up — fine 0.1% of range; ENTER edits VALUE, DEL removes</text>
+</svg>

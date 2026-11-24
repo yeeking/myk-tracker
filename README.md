@@ -10,6 +10,9 @@ You can find most of the commands in the cheat sheet poster in the docs folder:
 
 https://github.com/yeeking/myk-tracker/blob/main/doc/MYK_Tracker_cheat_sheet.svg
 
+The Focus-page addendum is alongside it:
+[`MYK_Tracker_cheat_sheet_focus_addendum.svg`](doc/MYK_Tracker_cheat_sheet_focus_addendum.svg).
+
 ### Chord keys
 
 Play a computer-piano key first to select a chord root. Plain `Q–P` retain the
@@ -264,12 +267,11 @@ value. The current block-rate bindings cover DIST `DRV`, `TONE`, `MIX`, and
 
 ## Network MCP and OSC control
 
-The standalone application starts an MCP Streamable HTTP server on all IPv4
-interfaces at `http://<tracker-host>:8080/mcp`. Set `MYK_TRACKER_MCP_PORT`
-before launching the app to use another port, or set
-`MYK_TRACKER_MCP_BIND_ADDRESS=127.0.0.1` to restore loopback-only behaviour.
-The server implements MCP `2026-07-28` and provides neither TLS nor
-authentication: use it only on a trusted LAN, or firewall the selected port.
+The standalone application starts an MCP Streamable HTTP server on loopback at
+`http://127.0.0.1:8080/mcp`. Set `MYK_TRACKER_MCP_PORT` before launch to use
+another port. Remote access is opt-in: set `MYK_TRACKER_MCP_BIND_ADDRESS` to a
+specific LAN address or `0.0.0.0`. The server implements MCP `2026-07-28` and
+provides neither TLS nor authentication, so expose it only on a trusted LAN.
 
 Tracker receives OSC control on UDP port `9001` from local or remote hosts.
 It sends hardware/LCD cell updates to `127.0.0.1:9000` by default; set
@@ -331,6 +333,24 @@ only. The full equivalent control ID is
 current GUI page or cursor, so they are safe while a person is navigating the
 tracker. The older `row`/`column` form remains only for compatibility and is
 cursor-driven.
+
+Focus is an action on that same direct-control API; there is no separate Focus
+tool. After rediscovering `slotId` and `controlId` from
+`tracker_get_state` with `scope:"machine_controls"`, add or remove a control:
+
+```json
+{"stackId":0,"slotId":"slot-1","controlId":"a-5-1","action":"focus"}
+```
+
+```json
+{"stackId":0,"slotId":"slot-1","controlId":"a-5-1","action":"unfocus"}
+```
+
+Use `"toggle_focus"` when a client intentionally wants toggle semantics. The
+discovery metadata reports `focusable:false` for unavailable controls,
+including the fixed `mod-matrix` pseudo-slot. Focus addresses use persisted
+slot identities rather than visible grid coordinates, so they remain stable
+while somebody navigates the editor.
 
 `tracker_edit_machine_stack` supports idempotent `set_muted` and `set_solo`
 actions as well as `action: "set_send"`; provide the

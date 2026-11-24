@@ -2986,11 +2986,65 @@ bool TrackerMainProcessor::getFocusedParameterCell(std::size_t focusSlot, UIBox&
     const auto& stack = machineStacks[item.stackIndex];
     const auto it = std::find_if(stack.slots.begin(), stack.slots.end(), [&] (const auto& slot) { return slot.id == item.machineSlotId; });
     if (it == stack.slots.end()) return false;
+    if (item.focusKey == "stack-enabled")
+    {
+        const auto stackIndex = item.stackIndex;
+        const auto slotId = item.machineSlotId;
+        out.kind = UIBox::Kind::TrackerCell;
+        out.text = it->enabled ? "ON" : "OFF";
+        out.hasValueScale = true;
+        out.valueNorm = it->enabled ? 1.0f : 0.0f;
+        out.onActivate = [this, stackIndex, slotId]
+        {
+            if (stackIndex >= machineStacks.size()) return;
+            auto& slots = machineStacks[stackIndex].slots;
+            const auto found = std::find_if(slots.begin(), slots.end(), [&] (const auto& slot) { return slot.id == slotId; });
+            if (found != slots.end())
+                const_cast<TrackerMainProcessor*>(this)->toggleMachineEnabledInStack(
+                    stackIndex, static_cast<std::size_t>(found - slots.begin()));
+        };
+        out.onAdjust = [activate = out.onActivate](int direction, float) { if (direction != 0) activate(); };
+        return true;
+    }
     auto* machine = const_cast<TrackerMainProcessor*>(this)->getMachineForStackType(const_cast<MachineStack&>(stack), it->type);
     if (machine == nullptr) return false;
     auto controls = machine->getControlBoxes({});
     if (auto* cell = findFocusedControl(controls, item.focusKey)) { out = *cell; return true; }
     return false;
+}
+
+bool TrackerMainProcessor::toggleFocusedStackEnable(std::size_t stackIndex, std::size_t slotIndex)
+{
+    if (stackIndex >= machineStacks.size() || slotIndex >= machineStacks[stackIndex].slots.size())
+        return false;
+    const auto& stack = machineStacks[stackIndex];
+    const auto& slot = stack.slots[slotIndex];
+    const auto existing = std::find_if(focusedParameters.begin(), focusedParameters.end(), [&] (const auto& item)
+    {
+        return item.occupied && item.stackIndex == stackIndex && item.machineSlotId == slot.id
+            && item.focusKey == "stack-enabled";
+    });
+    if (existing != focusedParameters.end())
+    {
+        *existing = {};
+        existing->slot = static_cast<std::size_t>(existing - focusedParameters.begin());
+        refreshAllStackProcessingStates();
+        return true;
+    }
+    const auto destination = std::find_if(focusedParameters.begin(), focusedParameters.end(),
+        [] (const auto& item) { return !item.occupied; });
+    if (destination == focusedParameters.end())
+        return false;
+    destination->occupied = true;
+    destination->slot = static_cast<std::size_t>(destination - focusedParameters.begin());
+    destination->stackIndex = stackIndex;
+    destination->machineSlotId = slot.id;
+    destination->focusKey = "stack-enabled";
+    destination->machineLabel = machineTraits(slot.type).shortLabel;
+    destination->parameterLabel = "ON";
+    destination->modulatable = false;
+    refreshAllStackProcessingStates();
+    return true;
 }
 
 bool TrackerMainProcessor::toggleFocusedMachineParameter(std::size_t stackIndex, std::optional<std::size_t> slotIndex,
@@ -3074,6 +3128,12 @@ bool TrackerMainProcessor::adjustFocusedParameter(std::size_t focusSlot, int dir
     auto& stack = machineStacks[item.stackIndex];
     const auto it = std::find_if(stack.slots.begin(), stack.slots.end(), [&] (const auto& slot) { return slot.id == item.machineSlotId; });
     if (it == stack.slots.end()) return false;
+    if (item.focusKey == "stack-enabled")
+    {
+        if (direction != 0)
+            toggleMachineEnabledInStack(item.stackIndex, static_cast<std::size_t>(it - stack.slots.begin()));
+        return direction != 0;
+    }
     auto* machine = getMachineForStackType(stack, it->type);
     if (machine == nullptr) return false;
     auto controls = machine->getControlBoxes({});

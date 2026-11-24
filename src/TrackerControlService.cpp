@@ -261,7 +261,12 @@ juce::var TrackerControlService::serialiseMachineCells(std::size_t stackIndex, c
             object->setProperty("canAdjust", cell.onAdjust != nullptr);
             object->setProperty("canReset", cell.onReset != nullptr);
             object->setProperty("canPreview", cell.onPreview != nullptr);
-            object->setProperty("focusable", !cell.isDisabled && (cell.onAdjust != nullptr || cell.onInsert != nullptr || cell.onActivate != nullptr));
+            // MOD is a fixed pseudo-slot. Its controls are directly operable,
+            // but cannot be added to the Song-level Focus workspace because a
+            // Focus entry is bound to a persistent stack slot identity.
+            const bool supportsFocus = slotId != "mod-matrix" && !cell.isDisabled
+                && (cell.onAdjust != nullptr || cell.onInsert != nullptr || cell.onActivate != nullptr);
+            object->setProperty("focusable", supportsFocus);
             const auto focusKey = cell.focusKey.empty()
                 ? "grid-" + std::to_string(col) + "-" + std::to_string(row) : cell.focusKey;
             int focusSlot = -1;

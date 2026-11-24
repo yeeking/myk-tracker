@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 
 #include "DrumSynthMachine.h"
+#include "McpRouter.h"
 #include "PortableTrackerState.h"
 #include "TrackerControlService.h"
 #include "TrackerMainProcessor.h"
@@ -30,11 +31,214 @@ double energy(const juce::AudioBuffer<float>& buffer)
     return result;
 }
 
-std::size_t findSlot(const TrackerMainProcessor& processor, CommandType type)
+std::size_t findSlot(const TrackerMainProcessor& processor, CommandType type, std::size_t stackIndex = 0)
 {
-    const auto types = processor.getMachineStackTypes(0);
+    const auto types = processor.getMachineStackTypes(stackIndex);
     const auto found = std::find(types.begin(), types.end(), type);
     return found == types.end() ? types.size() : static_cast<std::size_t>(found - types.begin());
+}
+
+std::size_t focusedCount(const TrackerMainProcessor& processor)
+{
+    const auto focused = processor.getFocusedParameters();
+    return static_cast<std::size_t>(std::count_if(focused.begin(), focused.end(),
+                                                  [] (const auto& item) { return item.occupied; }));
+}
+
+std::size_t focusedSlot(const TrackerMainProcessor& processor, const std::string& key)
+{
+    const auto focused = processor.getFocusedParameters();
+    const auto found = std::find_if(focused.begin(), focused.end(), [&key] (const auto& item)
+    {
+        return item.occupied && item.focusKey == key;
+    });
+    return found == focused.end() ? focused.size() : static_cast<std::size_t>(found - focused.begin());
+}
+
+juce::var machineControlArgs(int stackId, const juce::String& slotId, const juce::String& controlId,
+                              const juce::String& action)
+{
+    auto value = juce::var(new juce::DynamicObject());
+    auto* object = value.getDynamicObject();
+    object->setProperty("stackId", stackId);
+    object->setProperty("slotId", slotId);
+    object->setProperty("controlId", controlId);
+    object->setProperty("action", action);
+    return value;
+}
+
+juce::String fmSlotIdFromMachineControls(const juce::var& state)
+{
+    const auto controls = state.getProperty("machineControls", juce::var());
+    if (!controls.isArray()) return {};
+    for (const auto& machine : *controls.getArray())
+    {
+        const auto grid = machine.getProperty("controls", juce::var());
+        if (static_cast<int>(machine.getProperty("stackId", -1)) != 0 || !grid.isArray() || grid.getArray()->size() != 15)
+            continue;
+        const auto& firstColumn = grid.getArray()->getReference(0);
+        if (firstColumn.isArray() && !firstColumn.getArray()->isEmpty()
+            && firstColumn.getArray()->getReference(0).getProperty("label", {}).toString() == "PSET")
+            return machine.getProperty("slotId", {}).toString();
+    }
+    return {};
+}
+
+void requireFocusedParameterCoverage()
+{
+    TrackerMainProcessor processor;
+    processor.prepareToPlay(48000.0, 128);
+
+    for (std::size_t stack = 0; stack < processor.getMachineStackCount(); ++stack)
+        while (findSlot(processor, CommandType::DistortionFx, stack) >= processor.getMachineStackTypes(stack).size())
+            processor.addMachineToStack(stack);
+
+    const auto firstDistortion = findSlot(processor, CommandType::DistortionFx, 0);
+    require(processor.toggleFocusedMachineParameter(0, firstDistortion, "grid-1-0", 0, 1),
+            "DIST drive can be focused");
+    require(focusedCount(processor) == 1, "first focus entry is added");
+    require(processor.toggleFocusedMachineParameter(0, firstDistortion, "grid-1-0", 0, 1),
+            "focusing the same address toggles it off");
+    require(focusedCount(processor) == 0, "duplicate focus does not consume another slot");
+    require(processor.toggleFocusedMachineParameter(0, firstDistortion, "grid-1-0", 0, 1),
+            "DIST drive can be restored to focus");
+    require(processor.toggleFocusedMachineParameter(0, firstDistortion, "grid-1-1", 1, 1),
+            "DIST tone can be focused");
+
+    require(processor.toggleFocusedStackEnable(0, firstDistortion), "stack-enable can be focused");
+    const auto enableFocus = focusedSlot(processor, "stack-enabled");
+    require(enableFocus < TrackerMainProcessor::kFocusedParameterCapacity,
+            "stack-enable focus entry is addressable");
+    const bool wasEnabled = processor.isMachineEnabledInStack(0, firstDistortion);
+    require(processor.adjustFocusedParameter(enableFocus, 1, false), "focused stack-enable adjusts");
+    require(processor.isMachineEnabledInStack(0, firstDistortion) != wasEnabled,
+            "focused stack-enable toggles the source slot");
+    require(!processor.getFocusedParameters()[enableFocus].modulatable,
+            "stack-enable is direct-only, not a modulation destination");
+    require(processor.removeFocusedParameter(enableFocus), "focused stack-enable can be removed");
+
+    for (std::size_t stack = 0; stack < processor.getMachineStackCount(); ++stack)
+    {
+        const auto distortion = findSlot(processor, CommandType::DistortionFx, stack);
+        for (const auto* key : { "grid-1-0", "grid-1-1" })
+        {
+            const auto existing = focusedSlot(processor, key);
+            const bool alreadyFocusedHere = existing < TrackerMainProcessor::kFocusedParameterCapacity
+                && processor.getFocusedParameters()[existing].stackIndex == stack;
+            if (!alreadyFocusedHere)
+                require(processor.toggleFocusedMachineParameter(stack, distortion, key, key[7] - '0', 1),
+                        "DIST control fills a Focus slot");
+        }
+    }
+    require(focusedCount(processor) == TrackerMainProcessor::kFocusedParameterCapacity,
+            "all sixteen Focus slots are available");
+    require(!processor.toggleFocusedMachineParameter(0, firstDistortion, "grid-1-2", 2, 1),
+            "Focus refuses a seventeenth entry");
+    for (const auto& item : processor.getFocusedParameters())
+        require(item.modulatable, "only declared DIST controls are marked modulatable");
+
+    const auto driveFocus = focusedSlot(processor, "grid-1-0");
+    UIBox before;
+    require(processor.getFocusedParameterCell(driveFocus, before), "focused control resolves its current cell");
+    require(processor.adjustFocusedParameter(driveFocus, 1, true), "focused adjustment invokes the machine callback");
+    UIBox after;
+    require(processor.getFocusedParameterCell(driveFocus, after) && after.valueNorm >= before.valueNorm,
+            "focused adjustment updates the direct performance control");
+
+    juce::MemoryBlock state;
+    processor.getStateInformation(state);
+    TrackerMainProcessor restored;
+    restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+    require(focusedCount(restored) == TrackerMainProcessor::kFocusedParameterCapacity,
+            "all Focus entries survive a tracker-state round trip");
+
+    juce::MemoryInputStream input(state, false);
+    auto xml = juce::parseXML(input.readEntireStreamAsString());
+    require(xml != nullptr, "Focus state serializes as XML");
+    auto tree = juce::ValueTree::fromXml(*xml);
+    auto json = juce::JSON::fromString(tree.getProperty("json").toString());
+    auto entries = json.getProperty("focusedParameters", juce::var());
+    require(entries.isArray() && !entries.getArray()->isEmpty(), "Focus state contains persistent entries");
+    entries.getArray()->getReference(0).getDynamicObject()->setProperty("machineSlotId", "stale-slot");
+    tree.setProperty("json", juce::JSON::toString(json), nullptr);
+    juce::MemoryBlock staleState;
+    juce::MemoryOutputStream staleOutput(staleState, false);
+    tree.createXml()->writeTo(staleOutput);
+    TrackerMainProcessor staleRestored;
+    staleRestored.setStateInformation(staleState.getData(), static_cast<int>(staleState.getSize()));
+    require(focusedCount(staleRestored) == TrackerMainProcessor::kFocusedParameterCapacity - 1,
+            "stale Focus slot identities are discarded during restore");
+
+    processor.removeMachineFromStack(0, firstDistortion);
+    require(focusedCount(processor) == TrackerMainProcessor::kFocusedParameterCapacity - 2,
+            "removing a machine removes its focused controls");
+    const auto nextDistortion = findSlot(processor, CommandType::DistortionFx, 1);
+    processor.cycleMachineTypeInStack(1, nextDistortion, 1);
+    require(focusedCount(processor) == TrackerMainProcessor::kFocusedParameterCapacity - 4,
+            "changing a slot type removes focused controls bound to its old type");
+    processor.releaseResources();
+}
+
+void requireMachineControlMcpCoverage()
+{
+    TrackerMainProcessor processor;
+    processor.prepareToPlay(48000.0, 128);
+    while (findSlot(processor, CommandType::FmSynth) >= processor.getMachineStackTypes(0).size())
+        processor.addMachineToStack(0);
+
+    auto& control = processor.getControlService();
+    const auto machineCommand = [] (juce::var arguments)
+    {
+        TrackerControlService::Command command;
+        command.kind = TrackerControlService::CommandKind::machineControl;
+        command.arguments = std::move(arguments);
+        return command;
+    };
+    const auto discovery = control.getState("machine_controls");
+    require(discovery.ok, "machine-control discovery succeeds");
+    const auto fmSlotId = fmSlotIdFromMachineControls(discovery.data);
+    require(fmSlotId.isNotEmpty(), "MCP exposes FM's full logical 15-column control grid");
+
+    auto focus = machineControlArgs(0, fmSlotId, "pset-1-0", "focus");
+    auto focused = control.execute(machineCommand(focus));
+    require(focused.ok, focused.message.toRawUTF8());
+    require(focusedCount(processor) == 1, "MCP focuses FM by stable stack/slot/control identity");
+    auto adjust = machineControlArgs(0, fmSlotId, "pset-1-0", "adjust");
+    adjust.getDynamicObject()->setProperty("direction", 1);
+    require(control.execute(machineCommand(adjust)).ok,
+            "MCP adjusts FM without cursor-grid addressing");
+    auto unfocus = machineControlArgs(0, fmSlotId, "pset-1-0", "unfocus");
+    require(control.execute(machineCommand(unfocus)).ok
+                && focusedCount(processor) == 0,
+            "MCP unfocuses FM by stable identity");
+
+    const auto controls = discovery.data.getProperty("machineControls", juce::var());
+    for (const auto& machine : *controls.getArray())
+        if (machine.getProperty("slotId", {}).toString() == "mod-matrix")
+            for (const auto& column : *machine.getProperty("controls", juce::var()).getArray())
+                for (const auto& cell : *column.getArray())
+                    require(!static_cast<bool>(cell.getProperty("focusable", true)),
+                            "MOD controls accurately advertise focusable: false");
+
+    McpRouter router(control);
+    const auto modernRequest = [] (const juce::String& method, const juce::String& name, const juce::String& params)
+    {
+        return McpRouter::Request { "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"" + method
+                + "\",\"params\":" + params + "}", "2026-07-28", method, name };
+    };
+    const auto modernTools = router.route(modernRequest("tools/list", "tools/list",
+        "{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\"}}"));
+    require(modernTools.status == 200 && modernTools.json.getProperty("result", juce::var()).isObject(),
+            "modern MCP handshake discovers tools");
+    const auto legacyInitialise = router.route({ "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\"}}", {}, {}, {} });
+    require(legacyInitialise.status == 200 && legacyInitialise.sessionId.isNotEmpty(),
+            "legacy MCP initialize handshake remains supported");
+    const auto legacyReady = router.route({ "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}", {}, {}, {} });
+    require(legacyReady.status == 202 && !legacyReady.hasBody, "legacy MCP initialized notification succeeds");
+    const auto legacyTools = router.route({ "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{} }", {}, {}, {} });
+    require(legacyTools.status == 200 && legacyTools.json.getProperty("result", juce::var()).isObject(),
+            "legacy MCP handshake discovers tools");
+    processor.releaseResources();
 }
 
 void requirePermissiveProjectVersionLoading()
@@ -397,6 +601,8 @@ int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     requirePermissiveProjectVersionLoading();
+    requireFocusedParameterCoverage();
+    requireMachineControlMcpCoverage();
     requireSongRowInsertionClonesIndependently();
     requireSongSwitchPreservesIncomingDownbeat();
     requireSongPlaybackFollowsEditedSequenceSet();

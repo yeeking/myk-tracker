@@ -27,6 +27,30 @@ juce::AudioBuffer<float> render(FmSynthMachine& synth, int note = 69, int veloci
     return result;
 }
 
+juce::AudioBuffer<float> renderBlockwise(FmSynthMachine& synth, int blockSize,
+                                         int note = 69, int velocity = 100,
+                                         double seconds = 0.5, double sampleRate = 48000.0)
+{
+    synth.prepareToPlay(sampleRate, blockSize);
+    const int totalSamples = static_cast<int>(seconds * sampleRate);
+    juce::AudioBuffer<float> result(1, totalSamples);
+    result.clear();
+    juce::MidiBuffer midi;
+    std::vector<MachineScheduledNote> onset { { 0, static_cast<unsigned short>(note),
+                                                static_cast<unsigned short>(velocity), 0.0, false } };
+    std::vector<MachineScheduledNote> noNotes;
+    for (int start = 0; start < totalSamples; start += blockSize)
+    {
+        const int count = std::min(blockSize, totalSamples - start);
+        juce::AudioBuffer<float> block(1, count);
+        block.clear();
+        synth.scheduleBlockNotes(start == 0 ? onset : noNotes);
+        synth.processBlock(block, midi);
+        result.copyFrom(0, start, block, 0, 0, count);
+    }
+    return result;
+}
+
 float peak(const juce::AudioBuffer<float>& buffer)
 {
     return buffer.getMagnitude(0, buffer.getNumSamples());
@@ -170,6 +194,23 @@ int main()
         require(peak(initial) > 0.001f, "INIT preset did not render audio");
         for (int sample = 0; sample < initial.getNumSamples(); ++sample)
             require(std::isfinite(initial.getSample(0, sample)), "INIT emitted non-finite audio");
+
+        // FM voice phase, feedback history, envelope state and parameter smoothing
+        // are all continuous state.  A held note must be sample-identical whether
+        // the host supplies it in one buffer or in arbitrary block sizes.
+        FmSynthMachine contiguousSynth;
+        FmSynthMachine sixtyFourSynth;
+        FmSynthMachine longBlockSynth;
+        const auto contiguous = render(contiguousSynth, 45, 110, 0.4, 44100.0);
+        const auto sixtyFour = renderBlockwise(sixtyFourSynth, 64, 45, 110, 0.4, 44100.0);
+        const auto longBlock = renderBlockwise(longBlockSynth, 4410, 45, 110, 0.4, 44100.0);
+        for (int sample = 0; sample < contiguous.getNumSamples(); ++sample)
+        {
+            require(std::abs(contiguous.getSample(0, sample) - sixtyFour.getSample(0, sample)) < 0.000001f,
+                    "FM held-note output changed at a 64-sample block boundary");
+            require(std::abs(contiguous.getSample(0, sample) - longBlock.getSample(0, sample)) < 0.000001f,
+                    "FM held-note output changed at a 100 ms block boundary");
+        }
 
         // A simple sine pair uses matrix values as the Chowning modulation
         // index in radians. With c:m=4:1 there are no low-order reflected

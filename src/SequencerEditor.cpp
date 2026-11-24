@@ -66,7 +66,7 @@ std::string formatDrumOctaveHud(int offset)
 {
   if (offset > 0)
     return "GM OCT +" + std::to_string(offset);
-    return "GM OCT " + std::to_string(offset);
+  return "GM OCT " + std::to_string(offset);
 }
 
 struct ChordShortcut
@@ -617,8 +617,13 @@ void SequencerEditor::cycleAtCursor()
       machineActivateCurrentCell();
     break;
   case SequencerEditorMode::focusedParameters:
-    if (machineHost != nullptr && focusedParameterCol == 6)
-      machineHost->removeFocusedParameter(focusedParameterRow);
+    if (machineHost != nullptr)
+    {
+      if (focusedParameterCol == 6)
+        machineHost->removeFocusedParameter(focusedParameterRow);
+      else
+        machineHost->adjustFocusedParameter(focusedParameterRow, 1, false);
+    }
     break;
   case SequencerEditorMode::mixer:
     if (machineHost != nullptr)

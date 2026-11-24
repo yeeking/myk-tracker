@@ -83,12 +83,21 @@ void configureScene(TrackerMainProcessor& processor, bool stress, bool effects, 
                 if (auto* fm = dynamic_cast<FmSynthMachine*>(processor.getMachine(CommandType::FmSynth, stack)))
                 {
                     fm->applyPreset(stress ? FmSynthMachine::Preset::noise : FmSynthMachine::Preset::cascade);
-                    auto cells = fm->getUIBoxes({});
-                    if (cells[1][2].onInsert) cells[1][2].onInsert(stress ? 8.0 : 4.0);
+                    // The production editor is deliberately a compact, banked
+                    // projection. Benchmark setup must use the complete
+                    // logical surface, just like MCP, so visual-layout changes
+                    // cannot alter coverage or make these indices unsafe.
+                    auto cells = fm->getControlBoxes({});
+                    const auto insert = [&cells] (std::size_t column, std::size_t row, double value)
+                    {
+                        if (column < cells.size() && row < cells[column].size() && cells[column][row].onInsert)
+                            cells[column][row].onInsert(value);
+                    };
+                    insert(1, 2, stress ? 8.0 : 4.0);
                     if (stress)
                         for (std::size_t column = 11; column < 15; ++column)
                             for (std::size_t row = 1; row < 5; ++row)
-                                if (cells[column][row].onInsert) cells[column][row].onInsert(2.0);
+                                insert(column, row, 2.0);
                 }
         }
         else
@@ -198,7 +207,7 @@ int main(int argc, char* argv[])
         for (const auto& scenario : scenarios)
             runs.push_back({ std::get<0>(scenario), rate, 256, std::get<1>(scenario), std::get<2>(scenario), std::get<3>(scenario), std::get<4>(scenario) });
     for (const auto rate : { 44100.0, 48000.0, 96000.0 })
-        for (const int blockSize : { 64, 128, 512 })
+        for (const int blockSize : { 64, 128, 256, 512 })
         {
             runs.push_back({ "fm_only", rate, blockSize, false, false, false, CommandType::FmSynth });
             runs.push_back({ "fm_stress_all_stacks", rate, blockSize, true, true, true, CommandType::FmSynth });
